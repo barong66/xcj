@@ -13,12 +13,13 @@ WORKDIR /app
 
 # Install Python dependencies first (cache layer)
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e ".[dev]" 2>/dev/null || pip install --no-cache-dir -e .
+RUN mkdir -p parser && touch parser/__init__.py && \
+    pip install --no-cache-dir -e .
 
 # Copy source code
 COPY . .
 
-# Install the package in editable mode
+# Reinstall with actual source
 RUN pip install --no-cache-dir -e .
 
 ENTRYPOINT ["python", "-m", "parser"]
