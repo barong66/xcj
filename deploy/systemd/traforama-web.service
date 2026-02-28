@@ -1,0 +1,49 @@
+[Unit]
+Description=Traforama Video Aggregator — Next.js Web Frontend
+Documentation=https://github.com/traforama/videosite
+After=network-online.target traforama-api.service
+Wants=network-online.target
+Requires=traforama-api.service
+
+[Service]
+Type=simple
+User=traforama
+Group=traforama
+WorkingDirectory=/opt/traforama/web
+ExecStart=/usr/bin/node /opt/traforama/web/node_modules/.bin/next start -p 3000
+EnvironmentFile=/etc/traforama/.env
+
+# Node.js needs HOME for caching
+Environment=HOME=/opt/traforama
+Environment=NODE_ENV=production
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=/var/log/traforama /opt/traforama/web/.next
+
+# Resource limits
+LimitNOFILE=65536
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=traforama-web
+
+[Install]
+WantedBy=multi-user.target

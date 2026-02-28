@@ -1,0 +1,32 @@
+# ============================================
+# Traforama Video Aggregator — Cron Jobs
+# Install: crontab -e (as traforama user)
+# ============================================
+
+# Environment
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+MAILTO=alerts@traforama.com
+
+# ── Counter Sync (ClickHouse -> PostgreSQL) ──────────────────────
+# Syncs aggregated view/click counts every 5 minutes
+*/5 * * * * /opt/traforama/venv/bin/python /opt/traforama/deploy/scripts/sync_counters.py >> /var/log/traforama/sync_counters.log 2>&1
+
+# ── Account Reparse ──────────────────────────────────────────────
+# Re-enqueue all active accounts for parsing every 6 hours
+# The parser worker picks them up from the queue automatically
+0 */6 * * * /opt/traforama/venv/bin/python -m parser reparse-all >> /var/log/traforama/reparse.log 2>&1
+
+# ── Categorize Uncategorized Videos ──────────────────────────────
+# Run AI categorization on new videos every 10 minutes
+*/10 * * * * /opt/traforama/venv/bin/python -m parser categorize >> /var/log/traforama/categorize.log 2>&1
+
+# ── Sitemap Cache Warm ───────────────────────────────────────────
+# Request the sitemap hourly to keep Cloudflare cache warm
+0 * * * * curl -sf -o /dev/null -w "sitemap: %%{http_code} %%{time_total}s\n" https://$(hostname -f)/sitemap.xml >> /var/log/traforama/sitemap_warm.log 2>&1
+
+# ── Log Rotation ─────────────────────────────────────────────────
+# Compress old log files daily at 3 AM
+0 3 * * * find /var/log/traforama/ -name "*.log" -size +50M -exec gzip {} \; 2>/dev/null
+# Delete compressed logs older than 30 days
+0 4 * * * find /var/log/traforama/ -name "*.log.gz" -mtime +30 -delete 2>/dev/null

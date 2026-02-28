@@ -1,0 +1,54 @@
+version: "3.9"
+
+# Dev config: only databases, API and Web run natively
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: traforama-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: traforama
+      POSTGRES_PASSWORD: traforama
+      POSTGRES_DB: traforama
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U traforama -d traforama"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: traforama-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: traforama-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: traforama
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: traforama
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - chdata:/var/lib/clickhouse
+
+volumes:
+  pgdata:
+  redisdata:
+  chdata:

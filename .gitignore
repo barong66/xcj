@@ -1,0 +1,44 @@
+# Environment
+.env
+.env.local
+.env.production
+
+# Go
+api/server
+api/videosite-api
+bin/
+
+# Node.js / Next.js
+node_modules/
+web/.next/
+web/tsconfig.tsbuildinfo
+
+# Python
+*.pyc
+__pycache__/
+*.egg-info/
+.venv/
+venv/
+parser/build/
+
+# Parsed media (local dev only)
+web/public/parsed/
+
+# Docker volumes (local)
+pgdata/
+redisdata/
+chdata/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

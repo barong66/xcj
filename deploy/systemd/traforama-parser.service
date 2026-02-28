@@ -1,0 +1,46 @@
+[Unit]
+Description=Traforama Video Aggregator — Python Parser Worker
+Documentation=https://github.com/traforama/videosite
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=traforama
+Group=traforama
+WorkingDirectory=/opt/traforama/parser
+ExecStart=/opt/traforama/venv/bin/python -m parser worker
+EnvironmentFile=/etc/traforama/.env
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=/var/log/traforama /tmp
+
+# Resource limits — parser downloads videos, needs more memory
+LimitNOFILE=65536
+MemoryMax=2G
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=traforama-parser
+
+[Install]
+WantedBy=multi-user.target

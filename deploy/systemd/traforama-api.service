@@ -1,0 +1,47 @@
+[Unit]
+Description=Traforama Video Aggregator — Go API
+Documentation=https://github.com/traforama/videosite
+After=network-online.target postgresql.service redis.service
+Wants=network-online.target
+Requires=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=traforama
+Group=traforama
+WorkingDirectory=/opt/traforama/api
+ExecStart=/opt/traforama/api/traforama-api
+EnvironmentFile=/etc/traforama/.env
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Graceful shutdown: send SIGTERM, wait 30s, then SIGKILL
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=/var/log/traforama
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=traforama-api
+
+[Install]
+WantedBy=multi-user.target

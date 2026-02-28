@@ -1,0 +1,46 @@
+[Unit]
+Description=Traforama Video Aggregator — AI Categorizer (Continuous)
+Documentation=https://github.com/traforama/videosite
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=traforama
+Group=traforama
+WorkingDirectory=/opt/traforama/parser
+ExecStart=/opt/traforama/venv/bin/python -m parser categorize
+EnvironmentFile=/etc/traforama/.env
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=/var/log/traforama
+
+# Resource limits — categorizer calls external APIs, moderate memory
+LimitNOFILE=65536
+MemoryMax=1G
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=traforama-categorizer
+
+[Install]
+WantedBy=multi-user.target

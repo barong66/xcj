@@ -1,0 +1,528 @@
+# xxxaccounter — Full Technical Specification
+
+> Last updated: 2026-02-17
+> Status: Production-ready (local dev environment)
+> Админка: **xcj** | Публичный сайт: **xxxaccounter**
+
+---
+
+## 1. Overview
+
+xxxaccounter — сайт для раскрутки аккаунтов социальных сетей. Собирает видео с Twitter/X и Instagram, категоризирует через AI (Claude), раздаёт через мульти-теннантную архитектуру с разными брендированными доменами. Продаёт листинги для тех, кто хочет раскрутить свои каналы.
+
+**Стек:**
+- **Backend:** Go 1.22, Chi router, PostgreSQL 16, Redis 7, ClickHouse
+- **Parser:** Python 3.9+, async/await, yt-dlp, Anthropic Claude AI
+- **Frontend:** Next.js 14, React 18, TypeScript, Tailwind CSS
+- **Инфраструктура:** Docker Compose, S3/R2
+
+---
+
+## 2. Архитектура проекта
+
+```
+xcj/
+├── api/                    # Go backend API
+│   ├── cmd/server/main.go  # Entry point
+│   └── internal/
+│       ├── config/         # Конфигурация из ENV
+│       ├── handler/        # HTTP handlers + роутер
+│       ├── store/          # Data access layer (PostgreSQL)
+│       ├── model/          # Структуры данных
+│       ├── middleware/     # HTTP middleware
+│       ├── cache/          # Redis кеш
+│       └── clickhouse/     # Аналитика (EventBuffer)
+├── parser/                 # Python парсер + AI категоризатор
+│   ├── __main__.py         # CLI entry
+│   ├── config/settings.py  # Настройки из .env
+│   ├── parsers/            # Twitter + Instagram парсеры
+│   ├── tasks/              # Фоновый воркер
+│   ├── categorizer/        # AI-категоризация через Claude
+│   └── storage/            # PostgreSQL + S3 клиенты
+├── web/                    # Next.js фронтенд
+│   ├── src/app/            # App Router (страницы)
+│   ├── src/components/     # React компоненты
+│   ├── src/lib/            # API клиенты
+│   └── src/types/          # TypeScript типы
+├── scripts/migrations/     # SQL-миграции
+├── docker-compose.dev.yml  # Локальный Docker
+└── bin/                    # Скомпилированные бинарники
+```
+
+---
+
+## 3. База данных PostgreSQL
+
+### 3.1 Таблицы
+
+#### `sites` — Мульти-теннант сайты
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | BIGSERIAL PK | |
+| slug | TEXT UNIQUE | URL-идентификатор |
+| domain | TEXT UNIQUE | Домен для определения сайта |
+| name | TEXT | Название сайта |
+| config | JSONB | Тема, настройки |
+| is_active | BOOLEAN | Активен ли сайт |
+| created_at | TIMESTAMPTZ | |
+| updated_at | TIMESTAMPTZ | Триггер auto-update |
+
+#### `accounts` — Источники видео (аккаунты Twitter/Instagram)
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | BIGSERIAL PK | |
+| platform | TEXT | "twitter" или "instagram" |
+| username | TEXT | @username (уникален внутри платформы) |
+| platform_id | TEXT | ID аккаунта на платформе |
+| display_name | TEXT NULL | Отображаемое имя |
+| avatar_url | TEXT NULL | URL аватарки |
+| follower_count | INTEGER NULL | Кол-во подписчиков |
+| is_active | BOOLEAN DEFAULT true | Активен / отключён |
+| is_paid | BOOLEAN DEFAULT false | Платный канал |
+| paid_until | TIMESTAMPTZ NULL | Срок оплаты |
+| parse_errors | INTEGER DEFAULT 0 | Счётчик ошибок парсинга |
+| last_parsed_at | TIMESTAMPTZ NULL | Последний парсинг |
+| max_parse_errors | INTEGER DEFAULT 5 | Порог отключения |
+| created_at | TIMESTAMPTZ | |
+| updated_at | TIMESTAMPTZ | |
+
+**UNIQUE INDEX:** (platform, username)
+
+#### `videos` — Видео
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | BIGSERIAL PK | |
+| account_id | BIGINT FK(accounts.id) | Источник |
+| platform | TEXT | "twitter" / "instagram" |
+| platform_id | TEXT | ID на платформе |
+| original_url | TEXT | Ссылка на оригинал |
+| title | TEXT NULL | Заголовок (AI или из поста) |
+| description | TEXT NULL | Текст поста |
+| duration_sec | INTEGER DEFAULT 0 | Длительность |
+| thumbnail_url | TEXT NULL | URL тумбы (S3) |
+| preview_url | TEXT NULL | URL превью-клипа (S3) |
+| width | INTEGER DEFAULT 0 | |
+| height | INTEGER DEFAULT 0 | |
+| country_id | BIGINT NULL FK | Страна контента |
+| ai_categories | JSONB | Кеш AI-категорий |
+| ai_processed_at | TIMESTAMPTZ NULL | Когда AI обработал |
+| view_count | BIGINT DEFAULT 0 | Кеш просмотров из ClickHouse |
+| click_count | BIGINT DEFAULT 0 | Кеш кликов из ClickHouse |
+| is_promoted | BOOLEAN DEFAULT false | Промо-видео |
+| promoted_until | TIMESTAMPTZ NULL | Срок промо |
+| promotion_weight | FLOAT DEFAULT 0 | Вес при сортировке |
+| is_active | BOOLEAN DEFAULT true | Soft-delete |
+| published_at | TIMESTAMPTZ NULL | Дата публикации на платформе |
+| created_at | TIMESTAMPTZ | Когда добавлено в систему |
+| updated_at | TIMESTAMPTZ | |
+
+**UNIQUE INDEX:** (platform, platform_id)
+
+#### `categories` — Категории видео
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | BIGSERIAL PK | |
+| slug | TEXT UNIQUE | URL-идентификатор |
+| name | TEXT | Название |
+| parent_id | BIGINT NULL FK(self) | Иерархия |
+| is_active | BOOLEAN DEFAULT true | |
+| sort_order | INTEGER DEFAULT 0 | Порядок отображения |
+
+#### `video_categories` — M2M: видео ↔ категории
+| Поле | Тип | Описание |
+|------|-----|----------|
+| video_id | BIGINT FK | |
+| category_id | BIGINT FK | |
+| confidence | FLOAT | Уверенность AI (0..1) |
+
+**PK:** (video_id, category_id)
+
+#### `site_categories` — M2M: сайты ↔ категории
+| Поле | Тип | Описание |
+|------|-----|----------|
+| site_id | BIGINT FK | |
+| category_id | BIGINT FK | |
+| sort_order | INTEGER DEFAULT 0 | Порядок на сайте |
+
+**PK:** (site_id, category_id)
+
+#### `site_videos` — M2M: сайты ↔ видео
+| Поле | Тип | Описание |
+|------|-----|----------|
+| site_id | BIGINT FK | |
+| video_id | BIGINT FK | |
+| is_featured | BOOLEAN DEFAULT false | На главной |
+| added_at | TIMESTAMPTZ | |
+
+**PK:** (site_id, video_id)
+
+#### `countries` — Страны
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | BIGSERIAL PK | |
+| code | TEXT UNIQUE | ISO 3166-1 alpha-2 ("US") |
+| name | TEXT | Название |
+
+#### `parse_queue` — Очередь парсинга
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | BIGSERIAL PK | |
+| account_id | BIGINT FK | |
+| status | TEXT | "pending" / "running" / "done" / "failed" |
+| started_at | TIMESTAMPTZ NULL | |
+| finished_at | TIMESTAMPTZ NULL | |
+| error | TEXT NULL | Текст ошибки |
+| videos_found | INTEGER DEFAULT 0 | Сколько видео найдено |
+| created_at | TIMESTAMPTZ | |
+
+### 3.2 Ключевые индексы
+- `idx_videos_active` — (is_active, published_at DESC) WHERE is_active
+- `idx_videos_popular` — (is_active, click_count DESC) WHERE is_active
+- `idx_videos_promoted` — (is_promoted, promotion_weight DESC) WHERE is_promoted
+- `idx_videos_platform_id` — (platform, platform_id)
+- `idx_accounts_platform` — (platform)
+- `idx_parse_queue_status` — (status, created_at)
+
+---
+
+## 4. ClickHouse — Аналитика
+
+### 4.1 Таблица events (актуальная)
+```sql
+CREATE TABLE events (
+    site_id     UInt64,
+    video_id    UInt64,
+    event_type  String,       -- 'impression', 'click', 'hover', 'view'
+    session_id  String,
+    user_agent  String,
+    ip          String,
+    referrer    String,
+    extra       String,
+    created_at  DateTime
+)
+ENGINE = MergeTree()
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (site_id, created_at, event_type, video_id)
+TTL created_at + INTERVAL 12 MONTH;
+```
+
+Данные пишутся через Go EventBuffer (batch INSERT каждые 1 сек или по 1000 событий).
+
+### 4.2 Запросы для админ-статистики
+
+Агрегация по видео:
+```sql
+SELECT video_id,
+    countIf(event_type = 'impression') AS impressions,
+    countIf(event_type = 'click') AS clicks,
+    if(impressions > 0, round(clicks * 100.0 / impressions, 2), 0) AS ctr
+FROM events
+WHERE event_type IN ('impression', 'click')
+GROUP BY video_id
+ORDER BY impressions DESC
+```
+
+Общие итоги сайта:
+```sql
+SELECT
+    countIf(event_type = 'impression') AS total_impressions,
+    countIf(event_type = 'click') AS total_clicks,
+    if(total_impressions > 0, round(total_clicks * 100.0 / total_impressions, 2), 0) AS total_ctr
+FROM events
+WHERE event_type IN ('impression', 'click')
+```
+
+---
+
+## 5. Go API — Эндпоинты
+
+### 5.1 Публичные (с определением сайта)
+
+Все требуют определения сайта через Host header или X-Site-Id.
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | /api/v1/videos | Список видео (sort, page, per_page, category_id, country_id) |
+| GET | /api/v1/videos/{id} | Детали видео |
+| GET | /api/v1/search?q= | Полнотекстовый поиск |
+| GET | /api/v1/categories | Категории сайта |
+| GET | /api/v1/categories/{slug} | Детали категории |
+| GET | /api/v1/accounts/{id} | Аккаунт с видео |
+| POST | /api/v1/events | Одно аналитическое событие |
+| POST | /api/v1/events/batch | Пакет событий (до 100) |
+
+**Сортировка видео:** recent (по дате), popular (по просмотрам), random, promoted (по весу промо)
+
+### 5.2 Админские (Bearer token auth)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | /admin/stats | Общая статистика системы |
+| GET | /admin/accounts | Список аккаунтов (фильтры: platform, status) |
+| POST | /admin/accounts | Создать аккаунт |
+| PUT | /admin/accounts/{id} | Обновить (is_active, is_paid) |
+| DELETE | /admin/accounts/{id} | Soft-delete аккаунта |
+| POST | /admin/accounts/{id}/reparse | Парсинг одного аккаунта |
+| POST | /admin/accounts/reparse-all | Парсинг всех аккаунтов |
+| GET | /admin/queue | Очередь парсинга |
+| POST | /admin/queue/retry-failed | Перезапуск упавших |
+| DELETE | /admin/queue/failed | Очистка упавших |
+| GET | /admin/videos | Список видео (category, uncategorized) |
+| GET | /admin/videos/stats | Статистика видео (sort, dir, page) |
+| DELETE | /admin/videos/{id} | Soft-delete видео |
+| POST | /admin/videos/recategorize | AI пере-категоризация |
+| GET | /admin/categories | Все категории |
+| GET | /admin/sites | Все сайты |
+
+### 5.3 Middleware
+
+1. **Request ID** — трекинг запросов
+2. **Real IP** — извлечение X-Forwarded-For
+3. **Structured Logging** — JSON через slog
+4. **Panic Recovery** — graceful ошибки
+5. **CORS** — разрешены все origins
+6. **Rate Limiter** — token bucket (100 RPS)
+7. **Site Detection** — определение сайта по Host/X-Site-Id
+8. **Admin Auth** — Bearer token проверка
+
+### 5.4 Кеширование (Redis)
+
+| Ключ | TTL | Содержание |
+|------|-----|-----------|
+| vl:{site}:{sort}:{cat}:{country}:{page} | 60s | Список видео |
+| vd:{video_id} | 300s | Детали видео |
+| cat:{site_id} | 60s | Категории сайта |
+| catd:{site}:{slug} | 300s | Детали категории |
+| acc:{account_id} | 300s | Аккаунт с видео |
+| src:{site}:{query}:{page} | 60s | Результаты поиска |
+
+Кеш обходится для random сортировки.
+
+---
+
+## 6. Python Parser
+
+### 6.1 CLI команды
+
+```bash
+python -m parser parse <username>          # Парсить один аккаунт
+python -m parser parse --platform instagram <username>
+python -m parser worker                    # Фоновый воркер
+python -m parser add <username>            # Добавить и поставить в очередь
+python -m parser categorize                # Запустить AI-категоризацию
+```
+
+### 6.2 Логика парсинга
+
+1. Воркер забирает pending задачи из parse_queue
+2. Вызывает парсер платформы (Twitter через yt-dlp, Instagram через httpx)
+3. Для каждого видео:
+   - Скачивает thumbnail, ресайзит до 480x270
+   - Генерирует 5-сек превью через ffmpeg (500k bitrate, 480p)
+   - Загружает в S3: `thumbnails/{platform}/{platform_id}.jpg` и `previews/{platform}/{platform_id}.mp4`
+   - Записывает в PostgreSQL
+4. Обновляет статус задачи (done/failed)
+5. При ошибках увеличивает parse_errors; после 5 ошибок — отключает аккаунт
+
+### 6.3 AI категоризация
+
+1. Забирает видео без ai_processed_at
+2. Батчами по 50 видео отправляет в Claude API
+3. Claude анализирует metadata + thumbnail (vision)
+4. Возвращает категории с confidence (0..1)
+5. Записывает в video_categories, ставит ai_processed_at
+
+### 6.4 Настройки парсера
+
+| Параметр | Default | Описание |
+|----------|---------|----------|
+| parse_interval_sec | 30 | Интервал опроса очереди |
+| max_parse_errors | 5 | Порог отключения аккаунта |
+| thumbnail_width | 480 | Ширина тумбы |
+| thumbnail_height | 270 | Высота тумбы |
+| preview_duration_sec | 5 | Длительность превью |
+| preview_video_bitrate | 500k | Битрейт превью |
+| ytdlp_max_videos | 50 | Макс. видео за парсинг |
+| instagram_rate_limit_sec | 5 | Задержка между запросами IG |
+
+---
+
+## 7. Next.js Frontend
+
+### 7.1 Публичные страницы
+
+| URL | Файл | Описание |
+|-----|------|----------|
+| / | app/page.tsx | Главная — сетка видео |
+| /search?q= | app/search/page.tsx | Поиск |
+| /video/[id] | app/video/[id]/page.tsx | Страница видео |
+| /category/[slug] | app/category/[slug]/page.tsx | Категория |
+
+### 7.2 Админ-панель
+
+| URL | Описание |
+|-----|----------|
+| /admin/login | Авторизация (токен в cookie) |
+| /admin | Dashboard — статистика |
+| /admin/accounts | Управление аккаунтами |
+| /admin/queue | Очередь парсинга |
+| /admin/videos | Управление видео |
+| /admin/stats | Статистика по видео (тумбы + views/clicks/CTR) |
+| /admin/categories | Категории |
+
+**Авторизация:** cookie `admin_token` → Bearer token к Go API. Cookie `admin_authed=1` для фронтенд-проверки.
+
+### 7.3 Ключевые компоненты
+
+- **VideoGrid** — адаптивная сетка видео-карточек
+- **VideoCard** — тумба + title + аккаунт + статистика
+- **ViewTracker** — IntersectionObserver для трекинга просмотров
+- **CategoryNav** — навигация по категориям (client component)
+- **SortControls** — переключатель сортировки
+- **SearchBar** — поиск
+- **AdminShell** — layout админки (sidebar + header)
+
+### 7.4 TypeScript типы
+
+```typescript
+interface Video {
+  id: string; title: string; thumbnail_url: string; preview_url: string;
+  original_url: string; platform: "twitter" | "instagram";
+  duration_sec: number; view_count: number; click_count: number;
+  account: Account; categories: Category[]; country: Country;
+}
+
+interface Account {
+  username: string; avatar_url: string; platform: "twitter" | "instagram";
+}
+
+interface Category { slug: string; name: string; video_count?: number; }
+
+interface VideosResponse {
+  videos: Video[]; total: number; page: number; per_page: number; pages: number;
+}
+```
+
+---
+
+## 8. Data Flow — Потоки данных
+
+### 8.1 Добавление видео
+```
+Admin → POST /admin/accounts (создаёт аккаунт в PG)
+     → POST /admin/accounts/{id}/reparse (ставит в очередь)
+     → Parser Worker забирает задачу из parse_queue
+     → Парсер скачивает видео с платформы
+     → Генерит тумбы + превью → S3
+     → INSERT в videos + site_videos
+     → AI Categorizer → Claude → video_categories
+```
+
+### 8.2 Отображение на фронте
+```
+User → GET localhost:3000
+     → Next.js SSR → GET /api/v1/videos (Host→site detection)
+     → Go API → Redis cache hit? → return cached
+     → Cache miss → PostgreSQL query (JOIN site_videos, categories, accounts)
+     → Cache result in Redis (60s) → JSON response
+     → Next.js renders VideoGrid → HTML to browser
+```
+
+### 8.3 Аналитика
+```
+Посетитель видит тумбу (50%+ в viewport) → sendBeacon → POST /api/v1/events (type=impression)
+Посетитель кликает → sendBeacon → POST /api/v1/events (type=click)
+Go API → EventBuffer (in-memory, max 1000 или 1s)
+       → Batch INSERT в ClickHouse events table
+Админ → /admin/stats → Go API → агрегация из ClickHouse + метаданные из PG
+```
+
+### 8.4 Мульти-сайт
+```
+Request Host: custom-domain.com
+→ SiteDetection middleware → SELECT FROM sites WHERE domain = 'custom-domain.com'
+→ Site injected в context
+→ VideoStore.List() → WHERE site_videos.site_id = {site.id}
+→ Каждый сайт видит только своё подмножество видео + категорий
+```
+
+---
+
+## 9. Environment Variables
+
+### Go API
+```env
+DATABASE_URL=postgres://traforama:traforama@localhost:5432/traforama?sslmode=disable
+REDIS_URL=redis://localhost:6379/0
+CLICKHOUSE_URL=clickhouse://default:traforama@localhost:9000/traforama
+PORT=8080
+ADMIN_TOKEN=xcj-admin-2024
+CACHE_LIST_TTL=60s
+CACHE_DETAIL_TTL=300s
+EVENT_BUFFER_SIZE=1000
+EVENT_FLUSH_INTERVAL=1s
+RATE_LIMIT_RPS=100
+```
+
+### Python Parser
+```env
+DATABASE_URL=postgresql://traforama:traforama@localhost:5432/traforama
+S3_ENDPOINT=https://...
+S3_BUCKET=xcj-media
+S3_ACCESS_KEY=...
+S3_SECRET_KEY=...
+S3_REGION=auto
+S3_PUBLIC_URL=https://cdn.example.com
+ANTHROPIC_API_KEY=...
+PARSE_INTERVAL_SEC=30
+MAX_PARSE_ERRORS=5
+```
+
+### Next.js
+```env
+API_URL=http://localhost:8080
+NEXT_PUBLIC_API_URL=http://localhost:8080
+```
+
+---
+
+## 10. Запуск
+
+```bash
+# 1. Docker — БД
+docker-compose -f docker-compose.dev.yml up -d
+
+# 2. Go API
+cd api && go build -o ../bin/api ./cmd/server/ && \
+  DATABASE_URL="..." REDIS_URL="..." CLICKHOUSE_URL="..." PORT=8080 ../bin/api
+
+# 3. Python parser worker
+cd parser && python -m parser worker
+
+# 4. Next.js
+cd web && npm run dev
+
+# Результат:
+# PostgreSQL :5432, Redis :6379, ClickHouse :8123/:9000
+# Go API :8080
+# Next.js :3000
+```
+
+### Пароли
+- Admin UI (web): `xcj2024` → сохраняется в cookie `admin_token`
+- Admin API (bearer): `xcj-admin-2024` → в заголовке Authorization
+- PostgreSQL: user `traforama`, password `traforama`, db `traforama`
+- ClickHouse: user `default`, password `traforama`, db `traforama`
+- Redis: без пароля
+
+---
+
+## 11. Известные ограничения
+
+1. Нет retry при сбое batch insert в ClickHouse — события теряются
+2. Admin token без ротации/expire
+3. Парсеры требуют ручной настройки cookies (yt-dlp для Twitter, session_id для Instagram)
+4. Нет Swagger/OpenAPI документации
+5. view_count/click_count в PostgreSQL — кеш платформы (Twitter), НЕ наша статистика. Наша аналитика — в ClickHouse
+6. sendBeacon не ставит Content-Type: application/json, но Go json.NewDecoder работает с любым Content-Type
+7. Impression tracking: порог 50% видимости тумбы (IntersectionObserver threshold=0.5)

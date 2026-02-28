@@ -1,0 +1,157 @@
+version: "3.9"
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: traforama-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-traforama}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-traforama}
+      POSTGRES_DB: ${POSTGRES_DB:-traforama}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../../scripts/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-traforama} -d ${POSTGRES_DB:-traforama}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - traforama
+
+  # ── Redis ───────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: traforama-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - traforama
+
+  # ── ClickHouse ──────────────────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: traforama-clickhouse
+    restart: unless-stopped
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-traforama}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+    volumes:
+      - chdata:/var/lib/clickhouse
+      - ../../scripts/migrations/002_clickhouse.sql:/docker-entrypoint-initdb.d/002_clickhouse.sql:ro
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - traforama
+
+  # ── API (Go) ────────────────────────────────────────────────
+  api:
+    build:
+      context: ../../api
+      dockerfile: Dockerfile
+    container_name: traforama-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-traforama}:${POSTGRES_PASSWORD:-traforama}@postgres:5432/${POSTGRES_DB:-traforama}?sslmode=disable"
+      REDIS_URL: "redis://redis:6379/0"
+      CLICKHOUSE_URL: "clickhouse://${CLICKHOUSE_USER:-default}:${CLICKHOUSE_PASSWORD:-traforama}@clickhouse:9000/${CLICKHOUSE_DB:-traforama}"
+      CACHE_LIST_TTL: "${CACHE_LIST_TTL:-60s}"
+      CACHE_DETAIL_TTL: "${CACHE_DETAIL_TTL:-300s}"
+      EVENT_BUFFER_SIZE: "${EVENT_BUFFER_SIZE:-1000}"
+      EVENT_FLUSH_INTERVAL: "${EVENT_FLUSH_INTERVAL:-1s}"
+      RATE_LIMIT_RPS: "${RATE_LIMIT_RPS:-100}"
+      ADMIN_TOKEN: "${ADMIN_TOKEN:-xcj-admin-2024}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - traforama
+
+  # ── Parser Worker (Python) ──────────────────────────────────
+  parser-worker:
+    build:
+      context: ../../parser
+      dockerfile: Dockerfile
+    container_name: traforama-parser-worker
+    restart: unless-stopped
+    command: python -m parser worker
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-traforama}:${POSTGRES_PASSWORD:-traforama}@postgres:5432/${POSTGRES_DB:-traforama}?sslmode=disable"
+      S3_ENDPOINT: "${S3_ENDPOINT:-https://s3.amazonaws.com}"
+      S3_BUCKET: "${S3_BUCKET:-traforama-media}"
+      S3_ACCESS_KEY: "${S3_ACCESS_KEY:-}"
+      S3_SECRET_KEY: "${S3_SECRET_KEY:-}"
+      S3_REGION: "${S3_REGION:-auto}"
+      S3_PUBLIC_URL: "${S3_PUBLIC_URL:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      PARSE_INTERVAL_SEC: "${PARSE_INTERVAL_SEC:-30}"
+      MAX_PARSE_ERRORS: "${MAX_PARSE_ERRORS:-5}"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - traforama
+
+  # ── Web (Next.js) ───────────────────────────────────────────
+  web:
+    build:
+      context: ../../web
+      dockerfile: Dockerfile
+    container_name: traforama-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    environment:
+      API_URL: "http://api:8080"
+      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:8080}"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - traforama
+
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+  chdata:
+    driver: local
+
+networks:
+  traforama:
+    driver: bridge

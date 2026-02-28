@@ -1,0 +1,500 @@
+package handler
+
+import (
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/xcj/videosite-api/internal/cache"
+	"github.com/xcj/videosite-api/internal/clickhouse"
+	"github.com/xcj/videosite-api/internal/store"
+	"github.com/xcj/videosite-api/internal/worker"
+)
+
+type AdminHandler struct {
+	admin     *store.AdminStore
+	ch        *clickhouse.Reader
+	workerMgr *worker.Manager
+	cache     *cache.Cache
+}
+
+func NewAdminHandler(admin *store.AdminStore, ch *clickhouse.Reader, workerMgr *worker.Manager, c *cache.Cache) *AdminHandler {
+	return &AdminHandler{admin: admin, ch: ch, workerMgr: workerMgr, cache: c}
+}
+
+// AdminAuth is middleware that checks the Bearer token against the ADMIN_TOKEN env var.
+func AdminAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := os.Getenv("ADMIN_TOKEN")
+		if token == "" {
+			token = "xcj-admin-2024"
+		}
+
+		auth := r.Header.Get("Authorization")
+		if auth == "" {
+			writeError(w, http.StatusUnauthorized, "authorization header required")
+			return
+		}
+
+		parts := strings.SplitN(auth, " ", 2)
+		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" || parts[1] != token {
+			writeError(w, http.StatusUnauthorized, "invalid token")
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// ─── Stats ───────────────────────────────────────────────────────────────────
+
+// GetStats handles GET /api/v1/admin/stats
+func (h *AdminHandler) GetStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.admin.GetStats(r.Context())
+	if err != nil {
+		slog.Error("admin: get stats", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get stats")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+// ─── Accounts ────────────────────────────────────────────────────────────────
+
+// ListAccounts handles GET /api/v1/admin/accounts
+func (h *AdminHandler) ListAccounts(w http.ResponseWriter, r *http.Request) {
+	platform := r.URL.Query().Get("platform")
+	status := r.URL.Query().Get("status")
+	page := intParam(r, "page", 1)
+	perPage := intParam(r, "per_page", 20)
+
+	result, err := h.admin.ListAccounts(r.Context(), platform, status, page, perPage)
+	if err != nil {
+		slog.Error("admin: list accounts", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list accounts")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// CreateAccount handles POST /api/v1/admin/accounts
+func (h *AdminHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
+	var input store.CreateAccountInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if input.Platform == "" || input.Username == "" {
+		writeError(w, http.StatusBadRequest, "platform and username are required")
+		return
+	}
+
+	input.Platform = strings.ToLower(input.Platform)
+	if input.Platform != "twitter" && input.Platform != "instagram" {
+		writeError(w, http.StatusBadRequest, "platform must be 'twitter' or 'instagram'")
+		return
+	}
+
+	account, err := h.admin.CreateAccount(r.Context(), input)
+	if err != nil {
+		slog.Error("admin: create account", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create account")
+		return
+	}
+	h.workerMgr.EnsureRunning()
+	writeJSON(w, http.StatusCreated, account)
+}
+
+// UpdateAccount handles PUT /api/v1/admin/accounts/{id}
+func (h *AdminHandler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	var input store.UpdateAccountInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	account, err := h.admin.UpdateAccount(r.Context(), id, input)
+	if err != nil {
+		slog.Error("admin: update account", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to update account")
+		return
+	}
+	if account == nil {
+		writeError(w, http.StatusNotFound, "account not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, account)
+}
+
+// DeleteAccount handles DELETE /api/v1/admin/accounts/{id}
+func (h *AdminHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	if err := h.admin.DeleteAccount(r.Context(), id); err != nil {
+		if err.Error() == "account not found" {
+			writeError(w, http.StatusNotFound, "account not found")
+			return
+		}
+		slog.Error("admin: delete account", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to delete account")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// ReparseAccount handles POST /api/v1/admin/accounts/{id}/reparse
+func (h *AdminHandler) ReparseAccount(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	if err := h.admin.ReparseAccount(r.Context(), id); err != nil {
+		if err.Error() == "account not found" {
+			writeError(w, http.StatusNotFound, "account not found")
+			return
+		}
+		slog.Error("admin: reparse account", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to enqueue reparse")
+		return
+	}
+	h.workerMgr.EnsureRunning()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "enqueued"})
+}
+
+// ReparseAllAccounts handles POST /api/v1/admin/accounts/reparse-all
+func (h *AdminHandler) ReparseAllAccounts(w http.ResponseWriter, r *http.Request) {
+	count, err := h.admin.ReparseAllAccounts(r.Context())
+	if err != nil {
+		slog.Error("admin: reparse all accounts", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to enqueue reparse all")
+		return
+	}
+	if count > 0 {
+		h.workerMgr.EnsureRunning()
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":   "enqueued",
+		"enqueued": count,
+	})
+}
+
+// ─── Queue ───────────────────────────────────────────────────────────────────
+
+// ListQueue handles GET /api/v1/admin/queue
+func (h *AdminHandler) ListQueue(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+	page := intParam(r, "page", 1)
+	perPage := intParam(r, "per_page", 20)
+
+	result, err := h.admin.ListQueue(r.Context(), status, page, perPage)
+	if err != nil {
+		slog.Error("admin: list queue", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list queue")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// RetryFailedJobs handles POST /api/v1/admin/queue/retry-failed
+func (h *AdminHandler) RetryFailedJobs(w http.ResponseWriter, r *http.Request) {
+	count, err := h.admin.RetryFailedJobs(r.Context())
+	if err != nil {
+		slog.Error("admin: retry failed jobs", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to retry failed jobs")
+		return
+	}
+	if count > 0 {
+		h.workerMgr.EnsureRunning()
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "ok",
+		"retried": count,
+	})
+}
+
+// ClearFailedJobs handles DELETE /api/v1/admin/queue/failed
+func (h *AdminHandler) ClearFailedJobs(w http.ResponseWriter, r *http.Request) {
+	count, err := h.admin.ClearFailedJobs(r.Context())
+	if err != nil {
+		slog.Error("admin: clear failed jobs", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to clear failed jobs")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "ok",
+		"cleared": count,
+	})
+}
+
+// CancelQueueItem handles DELETE /api/v1/admin/queue/{id}
+func (h *AdminHandler) CancelQueueItem(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid queue item id")
+		return
+	}
+
+	if err := h.admin.CancelQueueItem(r.Context(), id); err != nil {
+		if err.Error() == "queue item not found or not pending" {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		slog.Error("admin: cancel queue item", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to cancel queue item")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// GetQueueSummary handles GET /api/v1/admin/queue/summary
+func (h *AdminHandler) GetQueueSummary(w http.ResponseWriter, r *http.Request) {
+	summary, err := h.admin.GetQueueSummary(r.Context())
+	if err != nil {
+		slog.Error("admin: queue summary", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get queue summary")
+		return
+	}
+	resp := struct {
+		*store.QueueSummary
+		WorkerRunning bool `json:"worker_running"`
+	}{
+		QueueSummary:  summary,
+		WorkerRunning: h.workerMgr.IsRunning(),
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ─── Videos ──────────────────────────────────────────────────────────────────
+
+// ListVideos handles GET /api/v1/admin/videos
+func (h *AdminHandler) ListVideos(w http.ResponseWriter, r *http.Request) {
+	category := r.URL.Query().Get("category")
+	uncategorized := r.URL.Query().Get("uncategorized") == "true"
+	page := intParam(r, "page", 1)
+	perPage := intParam(r, "per_page", 20)
+
+	result, err := h.admin.ListVideos(r.Context(), category, uncategorized, page, perPage)
+	if err != nil {
+		slog.Error("admin: list videos", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list videos")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// DeleteVideo handles DELETE /api/v1/admin/videos/{id}
+func (h *AdminHandler) DeleteVideo(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid video id")
+		return
+	}
+
+	if err := h.admin.DeleteVideo(r.Context(), id); err != nil {
+		if err.Error() == "video not found" {
+			writeError(w, http.StatusNotFound, "video not found")
+			return
+		}
+		slog.Error("admin: delete video", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to delete video")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// RecategorizeVideos handles POST /api/v1/admin/videos/recategorize
+func (h *AdminHandler) RecategorizeVideos(w http.ResponseWriter, r *http.Request) {
+	var input store.RecategorizeInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	count, err := h.admin.RecategorizeVideos(r.Context(), input)
+	if err != nil {
+		slog.Error("admin: recategorize videos", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to recategorize videos")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "ok",
+		"updated": count,
+	})
+}
+
+// GetVideoStats handles GET /api/v1/admin/videos/stats
+// Reads real site analytics (impressions/clicks) from ClickHouse
+// and enriches with video metadata from PostgreSQL.
+func (h *AdminHandler) GetVideoStats(w http.ResponseWriter, r *http.Request) {
+	sortBy := r.URL.Query().Get("sort")
+	sortDir := r.URL.Query().Get("dir")
+	page := intParam(r, "page", 1)
+	perPage := intParam(r, "per_page", 24)
+
+	ctx := r.Context()
+
+	// Get aggregated stats from ClickHouse.
+	chResult, err := h.ch.GetVideoStats(ctx, sortBy, sortDir, page, perPage)
+	if err != nil {
+		slog.Error("admin: video stats from clickhouse", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get video stats")
+		return
+	}
+
+	// Get total site stats.
+	totalStats, err := h.ch.GetTotalStats(ctx)
+	if err != nil {
+		slog.Error("admin: total site stats", "error", err)
+		// Non-fatal, continue with zero totals.
+		totalStats = &clickhouse.TotalSiteStats{}
+	}
+
+	// Collect video IDs to fetch metadata from PostgreSQL.
+	videoIDs := make([]int64, len(chResult.Stats))
+	for i, s := range chResult.Stats {
+		videoIDs[i] = int64(s.VideoID)
+	}
+
+	// Fetch video metadata from PG.
+	videoMeta, err := h.admin.GetVideoMetaBatch(ctx, videoIDs)
+	if err != nil {
+		slog.Error("admin: video meta batch", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get video metadata")
+		return
+	}
+
+	// Build response combining CH stats + PG metadata.
+	type VideoStatResponse struct {
+		ID           int64   `json:"id"`
+		Platform     string  `json:"platform"`
+		PlatformID   string  `json:"platform_id"`
+		Title        string  `json:"title"`
+		ThumbnailURL string  `json:"thumbnail_url"`
+		DurationSec  int     `json:"duration_sec"`
+		Username     string  `json:"username"`
+		Impressions  uint64  `json:"impressions"`
+		Clicks       uint64  `json:"clicks"`
+		CTR          float64 `json:"ctr"`
+		CreatedAt    string  `json:"created_at"`
+	}
+
+	videos := make([]VideoStatResponse, 0, len(chResult.Stats))
+	for _, s := range chResult.Stats {
+		vid := int64(s.VideoID)
+		meta, ok := videoMeta[vid]
+		v := VideoStatResponse{
+			ID:          vid,
+			Impressions: s.Impressions,
+			Clicks:      s.Clicks,
+			CTR:         s.CTR,
+		}
+		if ok {
+			v.Platform = meta.Platform
+			v.PlatformID = meta.PlatformID
+			v.Title = meta.Title
+			v.ThumbnailURL = meta.ThumbnailURL
+			v.DurationSec = meta.DurationSec
+			v.Username = meta.Username
+			v.CreatedAt = meta.CreatedAt.Format("2006-01-02T15:04:05Z")
+		}
+		videos = append(videos, v)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"videos":           videos,
+		"total":            chResult.Total,
+		"page":             chResult.Page,
+		"per_page":         chResult.PerPage,
+		"total_pages":      chResult.TotalPages,
+		"total_impressions": totalStats.TotalImpressions,
+		"total_clicks":     totalStats.TotalClicks,
+		"total_ctr":        totalStats.TotalCTR,
+	})
+}
+
+// ─── Categories ──────────────────────────────────────────────────────────────
+
+// ListCategories handles GET /api/v1/admin/categories
+func (h *AdminHandler) ListCategories(w http.ResponseWriter, r *http.Request) {
+	categories, err := h.admin.ListCategories(r.Context())
+	if err != nil {
+		slog.Error("admin: list categories", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list categories")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"categories": categories})
+}
+
+// ─── Sites ───────────────────────────────────────────────────────────────────
+
+// ListSites handles GET /api/v1/admin/sites
+func (h *AdminHandler) ListSites(w http.ResponseWriter, r *http.Request) {
+	sites, err := h.admin.ListSites(r.Context())
+	if err != nil {
+		slog.Error("admin: list sites", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list sites")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"sites": sites})
+}
+
+// RefreshSiteContent handles POST /api/v1/admin/sites/{id}/refresh
+// Enqueues all active accounts for reparse and invalidates the site cache.
+func (h *AdminHandler) RefreshSiteContent(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid site id")
+		return
+	}
+
+	// Verify site exists.
+	site, err := h.admin.GetSiteByID(r.Context(), id)
+	if err != nil {
+		slog.Error("admin: refresh site", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to find site")
+		return
+	}
+	if site == nil {
+		writeError(w, http.StatusNotFound, "site not found")
+		return
+	}
+
+	// Enqueue all active accounts for reparse.
+	count, err := h.admin.ReparseAllAccounts(r.Context())
+	if err != nil {
+		slog.Error("admin: refresh site reparse", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to enqueue reparse")
+		return
+	}
+
+	// Invalidate all cached data for this site.
+	if h.cache != nil {
+		h.cache.InvalidateSite(r.Context(), id)
+	}
+
+	if count > 0 {
+		h.workerMgr.EnsureRunning()
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":   "ok",
+		"enqueued": count,
+	})
+}
