@@ -127,7 +127,8 @@ func (eb *EventBuffer) flush() {
 	batch, err := eb.conn.PrepareBatch(ctx, `
 		INSERT INTO events (
 			site_id, video_id, event_type, session_id,
-			user_agent, ip, referrer, extra, created_at
+			user_agent, ip, referrer, extra, created_at,
+			account_id, target_url, source_page, source
 		)
 	`)
 	if err != nil {
@@ -146,6 +147,10 @@ func (eb *EventBuffer) flush() {
 			e.Referrer,
 			e.Extra,
 			e.CreatedAt,
+			e.AccountID,
+			e.TargetURL,
+			e.SourcePage,
+			e.Source,
 		); err != nil {
 			slog.Error("clickhouse: append event", "error", err)
 			continue

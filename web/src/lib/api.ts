@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import type {
   Video,
   VideosResponse,
+  AccountResponse,
   Category,
   VideoQueryParams,
   SearchParams,
@@ -38,6 +39,8 @@ export async function getVideos(params: VideoQueryParams = {}): Promise<VideosRe
   if (params.sort) searchParams.set("sort", params.sort);
   if (params.page) searchParams.set("page", String(params.page));
   if (params.per_page) searchParams.set("per_page", String(params.per_page));
+  if (params.anchor) searchParams.set("anchor", params.anchor);
+  if (params.src) searchParams.set("src", params.src);
 
   const qs = searchParams.toString();
   return fetchAPI<VideosResponse>(`/api/v1/videos${qs ? `?${qs}` : ""}`);
@@ -73,6 +76,20 @@ export async function getVideosByAccount(
 
   return fetchAPI<VideosResponse>(
     `/api/v1/accounts/${platform}/${username}/videos?${searchParams.toString()}`
+  );
+}
+
+export async function getAccountBySlug(
+  slug: string,
+  page: number = 1,
+  per_page: number = 24,
+): Promise<AccountResponse> {
+  const searchParams = new URLSearchParams();
+  searchParams.set("page", String(page));
+  searchParams.set("per_page", String(per_page));
+
+  return fetchAPI<AccountResponse>(
+    `/api/v1/accounts/slug/${encodeURIComponent(slug)}?${searchParams.toString()}`,
   );
 }
 

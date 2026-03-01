@@ -282,6 +282,7 @@ class TwitterParser(BaseParser):
                 "display_name": result.get("uploader") or result.get("channel") or username,
                 "avatar_url": result.get("thumbnails", [{}])[0].get("url") if result.get("thumbnails") else None,
                 "follower_count": result.get("channel_follower_count"),
+                "bio": result.get("description"),
             }
 
         loop = asyncio.get_running_loop()

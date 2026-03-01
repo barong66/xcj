@@ -149,6 +149,47 @@ func (r *Reader) GetVideoStats(ctx context.Context, sortBy, sortDir string, page
 	}, nil
 }
 
+// FeedCTRStat holds aggregated feed impression/click data for ranking.
+type FeedCTRStat struct {
+	VideoID     int64
+	Impressions int64
+	Clicks      int64
+}
+
+// GetFeedCTRStats queries ClickHouse for feed impression/click counts per video
+// over the last 7 days. Used by the cron job to compute Bayesian CTR scores.
+func (r *Reader) GetFeedCTRStats(ctx context.Context) ([]FeedCTRStat, error) {
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			video_id,
+			countIf(event_type = 'feed_impression') AS impressions,
+			countIf(event_type = 'feed_click') AS clicks
+		FROM events
+		WHERE event_type IN ('feed_impression', 'feed_click')
+			AND created_at > now() - INTERVAL 7 DAY
+			AND video_id > 0
+		GROUP BY video_id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse reader: feed ctr stats: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []FeedCTRStat
+	for rows.Next() {
+		var s FeedCTRStat
+		if err := rows.Scan(&s.VideoID, &s.Impressions, &s.Clicks); err != nil {
+			return nil, fmt.Errorf("clickhouse reader: scan feed ctr: %w", err)
+		}
+		stats = append(stats, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("clickhouse reader: feed ctr rows: %w", err)
+	}
+
+	return stats, nil
+}
+
 // GetTotalStats returns overall site stats: total impressions, clicks, and CTR.
 type TotalSiteStats struct {
 	TotalImpressions uint64  `json:"total_impressions"`

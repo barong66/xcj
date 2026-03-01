@@ -298,6 +298,71 @@ def _apify_get_user_videos(username: str, max_videos: int = 0) -> List[Dict]:
     return videos
 
 
+# ─── Profile info via Apify ───────────────────────────────────────
+
+def _apify_get_profile_info(username: str) -> Optional[Dict]:
+    """Fetch Instagram profile details (avatar, bio, followers) via Apify.
+
+    This is a synchronous blocking call — run via ``run_in_executor``.
+    """
+    if ApifyClient is None:
+        return None
+
+    token = settings.apify_token
+    if not token:
+        return None
+
+    client = ApifyClient(token)
+
+    run_input = {
+        "directUrls": [f"https://www.instagram.com/{username}/"],
+        "resultsType": "details",
+        "resultsLimit": 1,
+        "searchType": "user",
+        "searchLimit": 1,
+    }
+
+    logger.info("Fetching profile info for @%s via Apify", username)
+
+    run = client.actor(settings.apify_instagram_actor).call(
+        run_input=run_input,
+        timeout_secs=120,
+        memory_mbytes=settings.apify_run_memory_mbytes,
+    )
+
+    dataset_id = run.get("defaultDatasetId")
+    if not dataset_id:
+        return None
+
+    items = list(client.dataset(dataset_id).iterate_items())
+    if not items:
+        return None
+
+    profile = items[0]
+    avatar_url = (
+        profile.get("profilePicUrlHD")
+        or profile.get("profilePicUrl")
+    )
+    display_name = profile.get("fullName") or username
+    bio = profile.get("biography")
+    follower_count = profile.get("followersCount")
+
+    logger.info(
+        "Profile @%s: display_name=%s followers=%s bio_len=%d avatar=%s",
+        username, display_name, follower_count,
+        len(bio) if bio else 0,
+        bool(avatar_url),
+    )
+
+    return {
+        "platform_id": username,
+        "display_name": display_name,
+        "avatar_url": avatar_url,
+        "follower_count": follower_count,
+        "bio": bio,
+    }
+
+
 # ─── Parser class ────────────────────────────────────────────────
 
 class InstagramParser(BaseParser):
@@ -313,16 +378,21 @@ class InstagramParser(BaseParser):
     # ── Account info ─────────────────────────────────────────────
 
     async def get_account_info(self, username: str) -> dict:
-        """Return basic account info from the username.
+        """Fetch profile metadata (avatar, bio, followers) via Apify details scrape."""
+        loop = asyncio.get_running_loop()
+        try:
+            info = await loop.run_in_executor(None, _apify_get_profile_info, username)
+            if info:
+                return info
+        except Exception:
+            logger.warning("Apify profile fetch failed for @%s, using fallback", username, exc_info=True)
 
-        Full profile metadata (avatar, followers) will be populated
-        from Apify results when videos are parsed.
-        """
         return {
             "platform_id": username,
             "display_name": username,
             "avatar_url": None,
             "follower_count": None,
+            "bio": None,
         }
 
     # ── Main parse ───────────────────────────────────────────────

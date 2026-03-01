@@ -10,6 +10,7 @@ import (
 	"github.com/xcj/videosite-api/internal/cache"
 	"github.com/xcj/videosite-api/internal/clickhouse"
 	"github.com/xcj/videosite-api/internal/middleware"
+	"github.com/xcj/videosite-api/internal/ranking"
 	"github.com/xcj/videosite-api/internal/store"
 	"github.com/xcj/videosite-api/internal/worker"
 )
@@ -27,6 +28,7 @@ func NewRouter(
 	chReader *clickhouse.Reader,
 	rateLimitRPS int,
 	workerMgr *worker.Manager,
+	ranker *ranking.Service,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -101,7 +103,7 @@ func NewRouter(
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(middleware.SiteDetection(siteStore))
 
-		videoHandler := NewVideoHandler(videoStore, c)
+		videoHandler := NewVideoHandler(videoStore, accountStore, c, ranker)
 		categoryHandler := NewCategoryHandler(categoryStore, c)
 		accountHandler := NewAccountHandler(accountStore, c)
 		eventHandler := NewEventHandler(eventBuffer)
@@ -119,6 +121,7 @@ func NewRouter(
 
 		// Accounts.
 		r.Get("/accounts/{id}", accountHandler.Get)
+		r.Get("/accounts/slug/{slug}", accountHandler.GetBySlug)
 
 		// Events.
 		r.Post("/events", eventHandler.Create)

@@ -137,12 +137,29 @@ func CategoryDetailKey(siteID int64, slug string) string {
 	return fmt.Sprintf("catd:%d:%s", siteID, slug)
 }
 
-func AccountKey(accountID int64) string {
-	return fmt.Sprintf("acc:%d", accountID)
+func AccountKey(accountID int64, perPage int) string {
+	return fmt.Sprintf("acc:%d:%d", accountID, perPage)
+}
+
+func AccountSlugKey(slug string, perPage int) string {
+	return fmt.Sprintf("accs:%s:%d", slug, perPage)
 }
 
 func SearchKey(siteID int64, query string, page int) string {
 	return fmt.Sprintf("src:%d:%s:%d", siteID, query, page)
+}
+
+// Client returns the underlying Redis client (used by ranking service).
+func (c *Cache) Client() *redis.Client {
+	return c.client
+}
+
+func AnchorFeedKey(siteID int64, slug string, page int) string {
+	return fmt.Sprintf("af:%d:%s:%d", siteID, slug, page)
+}
+
+func RankedFeedKey(siteID int64, page int) string {
+	return fmt.Sprintf("rf:%d:%d", siteID, page)
 }
 
 // InvalidateSite removes all cached data for a given site.
@@ -152,4 +169,6 @@ func (c *Cache) InvalidateSite(ctx context.Context, siteID int64) {
 	c.InvalidatePattern(ctx, "cat:"+sid)
 	c.InvalidatePattern(ctx, "catd:"+sid+":*")
 	c.InvalidatePattern(ctx, "src:"+sid+":*")
+	c.InvalidatePattern(ctx, "af:"+sid+":*")
+	c.InvalidatePattern(ctx, "rf:"+sid+":*")
 }

@@ -3,9 +3,8 @@ import { Suspense } from "react";
 import { getVideos, getCategories } from "@/lib/api";
 import { SITE_NAME, SITE_URL } from "@/lib/constants";
 import type { SortOption } from "@/types";
-import { VideoGrid } from "@/components/VideoGrid";
+import { InfiniteVideoGrid } from "@/components/InfiniteVideoGrid";
 import { SortControls } from "@/components/SortControls";
-import { LoadMoreButton } from "@/components/LoadMoreButton";
 import { BreadcrumbJsonLd } from "@/components/JsonLd";
 import { ErrorState } from "@/components/ErrorState";
 
@@ -83,10 +82,13 @@ export default async function CategoryPage({
             <SortControls currentSort={sort} />
           </Suspense>
         </div>
-        <VideoGrid videos={data.videos} />
-        <Suspense fallback={null}>
-          <LoadMoreButton currentPage={data.page} totalPages={data.pages} />
-        </Suspense>
+        <InfiniteVideoGrid
+          initialVideos={data.videos}
+          initialPage={data.page}
+          totalPages={data.pages}
+          sort={sort}
+          category={slug}
+        />
       </>
     );
   } catch {

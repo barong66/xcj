@@ -2,6 +2,7 @@ package handler
 
 import (
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -19,6 +20,27 @@ type AccountHandler struct {
 
 func NewAccountHandler(accounts *store.AccountStore, cache *cache.Cache) *AccountHandler {
 	return &AccountHandler{accounts: accounts, cache: cache}
+}
+
+// accountResponse wraps Account with pagination fields.
+type accountResponse struct {
+	model.Account
+	Page  int `json:"page"`
+	Pages int `json:"pages"`
+	Total int `json:"total"`
+}
+
+func buildAccountResponse(a *model.Account, page, perPage int) accountResponse {
+	totalPages := int(math.Ceil(float64(a.VideoCount) / float64(perPage)))
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	return accountResponse{
+		Account: *a,
+		Page:    page,
+		Pages:   totalPages,
+		Total:   int(a.VideoCount),
+	}
 }
 
 // Get handles GET /api/v1/accounts/{id}
@@ -39,10 +61,10 @@ func (h *AccountHandler) Get(w http.ResponseWriter, r *http.Request) {
 	page := intParam(r, "page", 1)
 	perPage := intParam(r, "per_page", 24)
 
-	// Try cache (only first page without pagination params).
+	// Try cache (only first page).
 	if page == 1 {
-		cacheKey := cache.AccountKey(id)
-		var cached model.Account
+		cacheKey := cache.AccountKey(id, perPage)
+		var cached accountResponse
 		if h.cache.GetJSON(r.Context(), cacheKey, &cached) {
 			writeJSON(w, http.StatusOK, cached)
 			return
@@ -61,10 +83,61 @@ func (h *AccountHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resp := buildAccountResponse(account, page, perPage)
+
 	if page == 1 {
-		cacheKey := cache.AccountKey(id)
-		h.cache.SetDetail(r.Context(), cacheKey, account)
+		cacheKey := cache.AccountKey(id, perPage)
+		h.cache.SetDetail(r.Context(), cacheKey, resp)
 	}
 
-	writeJSON(w, http.StatusOK, account)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetBySlug handles GET /api/v1/accounts/slug/{slug}
+func (h *AccountHandler) GetBySlug(w http.ResponseWriter, r *http.Request) {
+	site := middleware.SiteFromContext(r.Context())
+	if site == nil {
+		writeError(w, http.StatusInternalServerError, "site not resolved")
+		return
+	}
+
+	slug := chi.URLParam(r, "slug")
+	if slug == "" {
+		writeError(w, http.StatusBadRequest, "slug is required")
+		return
+	}
+
+	page := intParam(r, "page", 1)
+	perPage := intParam(r, "per_page", 24)
+
+	// Try cache (only first page).
+	if page == 1 {
+		cacheKey := cache.AccountSlugKey(slug, perPage)
+		var cached accountResponse
+		if h.cache.GetJSON(r.Context(), cacheKey, &cached) {
+			writeJSON(w, http.StatusOK, cached)
+			return
+		}
+	}
+
+	account, err := h.accounts.GetBySlug(r.Context(), slug, site.ID, page, perPage)
+	if err != nil {
+		slog.Error("handler: get account by slug", "error", err, "slug", slug)
+		writeError(w, http.StatusInternalServerError, "failed to get account")
+		return
+	}
+
+	if account == nil {
+		writeError(w, http.StatusNotFound, "account not found")
+		return
+	}
+
+	resp := buildAccountResponse(account, page, perPage)
+
+	if page == 1 {
+		cacheKey := cache.AccountSlugKey(slug, perPage)
+		h.cache.SetDetail(r.Context(), cacheKey, resp)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }

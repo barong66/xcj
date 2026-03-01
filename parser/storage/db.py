@@ -54,22 +54,34 @@ async def create_account(
     display_name: Optional[str] = None,
     avatar_url: Optional[str] = None,
     follower_count: Optional[int] = None,
+    bio: Optional[str] = None,
+    social_links: Optional[dict] = None,
 ) -> int:
     """Insert a new account row and return its ``id``."""
+    import json as _json
+
     pool = await get_pool()
+    sl_json = _json.dumps(social_links) if social_links else "{}"
     row = await pool.fetchrow(
         """
-        INSERT INTO accounts (platform, username, platform_id, display_name, avatar_url, follower_count)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO accounts (platform, username, slug, platform_id, display_name,
+                              avatar_url, follower_count, bio, social_links)
+        VALUES ($1, $2, LOWER($2), $3, $4, $5, $6, $7, $8::jsonb)
         ON CONFLICT (platform, username) DO UPDATE
             SET platform_id    = COALESCE(EXCLUDED.platform_id,    accounts.platform_id),
                 display_name   = COALESCE(EXCLUDED.display_name,   accounts.display_name),
                 avatar_url     = COALESCE(EXCLUDED.avatar_url,     accounts.avatar_url),
                 follower_count = COALESCE(EXCLUDED.follower_count, accounts.follower_count),
+                bio            = COALESCE(EXCLUDED.bio,            accounts.bio),
+                social_links   = CASE WHEN EXCLUDED.social_links != '{}'::jsonb
+                                      THEN EXCLUDED.social_links
+                                      ELSE accounts.social_links END,
+                slug           = COALESCE(accounts.slug, LOWER(EXCLUDED.username)),
                 updated_at     = NOW()
         RETURNING id
         """,
         platform, username, platform_id, display_name, avatar_url, follower_count,
+        bio, sl_json,
     )
     return row["id"]
 
@@ -81,6 +93,7 @@ async def update_account_info(
     display_name: Optional[str] = None,
     avatar_url: Optional[str] = None,
     follower_count: Optional[int] = None,
+    bio: Optional[str] = None,
 ) -> None:
     pool = await get_pool()
     await pool.execute(
@@ -90,10 +103,12 @@ async def update_account_info(
             display_name   = COALESCE($3, display_name),
             avatar_url     = COALESCE($4, avatar_url),
             follower_count = COALESCE($5, follower_count),
+            bio            = COALESCE($6, bio),
+            slug           = COALESCE(slug, LOWER(username)),
             updated_at     = NOW()
         WHERE id = $1
         """,
-        account_id, platform_id, display_name, avatar_url, follower_count,
+        account_id, platform_id, display_name, avatar_url, follower_count, bio,
     )
 
 

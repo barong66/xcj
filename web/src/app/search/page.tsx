@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { searchVideos } from "@/lib/api";
 import { SITE_NAME, SITE_URL } from "@/lib/constants";
-import { VideoGrid } from "@/components/VideoGrid";
-import { LoadMoreButton } from "@/components/LoadMoreButton";
+import { InfiniteVideoGrid } from "@/components/InfiniteVideoGrid";
 import { SearchBar } from "@/components/SearchBar";
 import { ErrorState } from "@/components/ErrorState";
 
@@ -77,10 +76,12 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             {data.total} result{data.total !== 1 ? "s" : ""} for &ldquo;{query}&rdquo;
           </p>
         </div>
-        <VideoGrid videos={data.videos} />
-        <Suspense fallback={null}>
-          <LoadMoreButton currentPage={data.page} totalPages={data.pages} />
-        </Suspense>
+        <InfiniteVideoGrid
+          initialVideos={data.videos}
+          initialPage={data.page}
+          totalPages={data.pages}
+          searchQuery={query}
+        />
       </>
     );
   } catch {

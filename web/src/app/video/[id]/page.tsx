@@ -4,7 +4,7 @@ import Link from "next/link";
 import { getVideo, getVideos } from "@/lib/api";
 import { SITE_NAME, SITE_URL } from "@/lib/constants";
 import { formatViewCount, formatDuration } from "@/lib/utils";
-import { VideoGrid } from "@/components/VideoGrid";
+import { InfiniteVideoGrid } from "@/components/InfiniteVideoGrid";
 import { VideoJsonLd, BreadcrumbJsonLd } from "@/components/JsonLd";
 import { PlatformIcon } from "@/components/PlatformIcon";
 import { ViewTracker } from "@/components/ViewTracker";
@@ -230,7 +230,11 @@ export default async function VideoPage({ params }: VideoPageProps) {
           <p className="px-4 py-3 text-[13px] font-semibold text-txt">
             More like this
           </p>
-          <VideoGrid videos={relatedVideos.videos.slice(0, 6)} />
+          <InfiniteVideoGrid
+            initialVideos={relatedVideos.videos.slice(0, 6)}
+            initialPage={1}
+            totalPages={1}
+          />
         </div>
       )}
     </>

@@ -12,7 +12,9 @@ import (
 	"github.com/xcj/videosite-api/internal/cache"
 	"github.com/xcj/videosite-api/internal/clickhouse"
 	"github.com/xcj/videosite-api/internal/config"
+	"github.com/xcj/videosite-api/internal/cron"
 	"github.com/xcj/videosite-api/internal/handler"
+	"github.com/xcj/videosite-api/internal/ranking"
 	"github.com/xcj/videosite-api/internal/store"
 	"github.com/xcj/videosite-api/internal/worker"
 )
@@ -73,6 +75,19 @@ func main() {
 	// Worker manager for the Python parser subprocess.
 	workerMgr := worker.New(cfg.ProjectDir)
 
+	// Ranking service for Bayesian CTR feed ordering.
+	rankingService := ranking.NewService(redisCache.Client())
+
+	// Cron scheduler for periodic tasks.
+	scheduler := cron.NewScheduler()
+	feedRefresher := cron.NewFeedScoreRefresher(chReader, rankingService)
+	scheduler.Add(cron.Job{
+		Name:     "feed-score-refresh",
+		Interval: 1 * time.Hour,
+		Fn:       feedRefresher.Run,
+	})
+	scheduler.Start()
+
 	// Build router.
 	router := handler.NewRouter(
 		pool,
@@ -86,6 +101,7 @@ func main() {
 		chReader,
 		cfg.RateLimitRPS,
 		workerMgr,
+		rankingService,
 	)
 
 	// Create HTTP server.
@@ -116,6 +132,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	scheduler.Stop()
 	workerMgr.Stop()
 
 	if err := srv.Shutdown(ctx); err != nil {

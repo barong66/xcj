@@ -1,7 +1,15 @@
 export interface Account {
+  id: number;
   username: string;
+  slug: string;
+  display_name: string;
   avatar_url: string;
+  bio?: string;
+  social_links?: Record<string, string>;
   platform: "twitter" | "instagram";
+  is_paid: boolean;
+  video_count?: number;
+  videos?: Video[];
 }
 
 export interface Category {
@@ -41,6 +49,9 @@ export interface VideosResponse {
   pages: number;
 }
 
+/** The API returns Account directly, with videos and video_count embedded. */
+export type AccountResponse = Account;
+
 export interface CategoriesResponse extends Array<Category> {}
 
 export type SortOption = "recent" | "popular" | "random";
@@ -51,6 +62,8 @@ export interface VideoQueryParams {
   sort?: SortOption;
   page?: number;
   per_page?: number;
+  anchor?: string;
+  src?: string;
 }
 
 export interface SearchParams {
@@ -59,8 +72,26 @@ export interface SearchParams {
   per_page?: number;
 }
 
+export type AnalyticsEventType =
+  | "view"
+  | "click"
+  | "hover"
+  | "impression"
+  | "feed_impression"
+  | "feed_click"
+  | "profile_view"
+  | "profile_thumb_impression"
+  | "profile_thumb_click"
+  | "social_click"
+  | "share_click"
+  | "ad_landing";
+
 export interface AnalyticsEvent {
-  type: "view" | "click" | "hover" | "impression";
-  video_id: string;
+  type: AnalyticsEventType;
+  video_id?: string;
+  account_id?: number;
+  target_url?: string;
+  source_page?: string;
+  source?: string;
   timestamp?: number;
 }

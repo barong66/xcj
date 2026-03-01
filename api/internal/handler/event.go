@@ -21,10 +21,18 @@ func NewEventHandler(buffer *clickhouse.EventBuffer) *EventHandler {
 
 // validEventTypes defines the allowed event type values.
 var validEventTypes = map[string]bool{
-	"view":       true,
-	"click":      true,
-	"hover":      true,
-	"impression": true,
+	"view":                     true,
+	"click":                    true,
+	"hover":                    true,
+	"impression":               true,
+	"feed_impression":          true,
+	"feed_click":               true,
+	"profile_view":             true,
+	"profile_thumb_impression": true,
+	"profile_thumb_click":      true,
+	"social_click":             true,
+	"share_click":              true,
+	"ad_landing":               true,
 }
 
 // Create handles POST /api/v1/events
@@ -41,13 +49,13 @@ func (h *EventHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if input.VideoID == 0 {
-		writeError(w, http.StatusBadRequest, "video_id is required")
+	if input.VideoID == 0 && input.AccountID == 0 {
+		writeError(w, http.StatusBadRequest, "video_id or account_id is required")
 		return
 	}
 
 	if !validEventTypes[input.Type] {
-		writeError(w, http.StatusBadRequest, "type must be one of: view, click, hover, impression")
+		writeError(w, http.StatusBadRequest, "invalid event type")
 		return
 	}
 
@@ -60,15 +68,19 @@ func (h *EventHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	event := model.Event{
-		SiteID:    site.ID,
-		VideoID:   input.VideoID,
-		Type:      input.Type,
-		SessionID: input.SessionID,
-		UserAgent: r.UserAgent(),
-		IP:        ip,
-		Referrer:  input.Referrer,
-		Extra:     input.Extra,
-		CreatedAt: time.Now().UTC(),
+		SiteID:     site.ID,
+		VideoID:    input.VideoID,
+		AccountID:  input.AccountID,
+		Type:       input.Type,
+		SessionID:  input.SessionID,
+		UserAgent:  r.UserAgent(),
+		IP:         ip,
+		Referrer:   input.Referrer,
+		Extra:      input.Extra,
+		TargetURL:  input.TargetURL,
+		SourcePage: input.SourcePage,
+		Source:     input.Source,
+		CreatedAt:  time.Now().UTC(),
 	}
 
 	h.buffer.Push(event)
@@ -110,20 +122,24 @@ func (h *EventHandler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 
 	accepted := 0
 	for _, input := range inputs {
-		if input.VideoID == 0 || !validEventTypes[input.Type] {
+		if (input.VideoID == 0 && input.AccountID == 0) || !validEventTypes[input.Type] {
 			continue
 		}
 
 		event := model.Event{
-			SiteID:    site.ID,
-			VideoID:   input.VideoID,
-			Type:      input.Type,
-			SessionID: input.SessionID,
-			UserAgent: ua,
-			IP:        ip,
-			Referrer:  input.Referrer,
-			Extra:     input.Extra,
-			CreatedAt: now,
+			SiteID:     site.ID,
+			VideoID:    input.VideoID,
+			AccountID:  input.AccountID,
+			Type:       input.Type,
+			SessionID:  input.SessionID,
+			UserAgent:  ua,
+			IP:         ip,
+			Referrer:   input.Referrer,
+			Extra:      input.Extra,
+			TargetURL:  input.TargetURL,
+			SourcePage: input.SourcePage,
+			Source:     input.Source,
+			CreatedAt:  now,
 		}
 		h.buffer.Push(event)
 		accepted++

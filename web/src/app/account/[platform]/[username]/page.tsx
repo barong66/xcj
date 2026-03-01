@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
 import Image from "next/image";
-import { Suspense } from "react";
 import { getVideosByAccount } from "@/lib/api";
 import { SITE_NAME, SITE_URL } from "@/lib/constants";
-import { VideoGrid } from "@/components/VideoGrid";
-import { LoadMoreButton } from "@/components/LoadMoreButton";
+import { InfiniteVideoGrid } from "@/components/InfiniteVideoGrid";
 import { BreadcrumbJsonLd } from "@/components/JsonLd";
 import { PlatformIcon } from "@/components/PlatformIcon";
 import { ErrorState } from "@/components/ErrorState";
@@ -85,10 +83,12 @@ export default async function AccountPage({
           </div>
         </div>
 
-        <VideoGrid videos={data.videos} />
-        <Suspense fallback={null}>
-          <LoadMoreButton currentPage={data.page} totalPages={data.pages} />
-        </Suspense>
+        <InfiniteVideoGrid
+          initialVideos={data.videos}
+          initialPage={data.page}
+          totalPages={data.pages}
+          fetchUrlOverride={`/api/v1/accounts/${platform}/${username}/videos?per_page=12`}
+        />
       </>
     );
   } catch {

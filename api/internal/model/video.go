@@ -54,6 +54,8 @@ type VideoListParams struct {
 	Page       int
 	PerPage    int
 	Search     string
+	AnchorSlug string
+	Source     string
 }
 
 type VideoListResult struct {

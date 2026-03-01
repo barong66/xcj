@@ -21,6 +21,53 @@ def _get_parser(platform: str) -> BaseParser:
     return get_parser(platform)
 
 
+async def _upload_avatar_to_r2(
+    avatar_url: str,
+    platform: str,
+    username: str,
+) -> Optional[str]:
+    """Download an avatar image from a URL and upload it to R2.
+
+    Returns the R2 public URL, or None on failure.
+    """
+    import tempfile
+
+    import httpx
+
+    loop = asyncio.get_running_loop()
+
+    # Download to a temp file.
+    tmp_path: Optional[str] = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        def _download() -> bool:
+            with httpx.Client(timeout=20, follow_redirects=True) as client:
+                resp = client.get(avatar_url)
+                resp.raise_for_status()
+                with open(tmp_path, "wb") as fh:
+                    fh.write(resp.content)
+            return True
+
+        ok = await loop.run_in_executor(None, _download)
+        if not ok:
+            return None
+
+        r2_url = await loop.run_in_executor(
+            None, s3.upload_avatar, tmp_path, platform, username,
+        )
+        logger.info("Avatar uploaded to R2 for @%s: %s", username, r2_url)
+        return r2_url
+    finally:
+        if tmp_path:
+            import os
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
 async def _upload_and_save(
     parsed: ParsedVideo,
     *,
@@ -110,16 +157,30 @@ async def run_parse_for_account(
     """
     parser = _get_parser(platform)
 
-    # Refresh account metadata.
+    # Refresh account metadata (including avatar upload to R2).
     try:
         info = await parser.get_account_info(username)
         if info:
+            avatar_url = info.get("avatar_url")
+
+            # If avatar is an external URL, download and re-upload to R2.
+            if avatar_url and avatar_url.startswith("http"):
+                try:
+                    r2_url = await _upload_avatar_to_r2(
+                        avatar_url, platform, username,
+                    )
+                    if r2_url:
+                        avatar_url = r2_url
+                except Exception:
+                    logger.warning("Avatar R2 upload failed for @%s", username, exc_info=True)
+
             await db.update_account_info(
                 account_id,
                 platform_id=info.get("platform_id"),
                 display_name=info.get("display_name"),
-                avatar_url=info.get("avatar_url"),
+                avatar_url=avatar_url,
                 follower_count=info.get("follower_count"),
+                bio=info.get("bio"),
             )
     except Exception:
         logger.warning("Could not update account info for @%s", username, exc_info=True)

@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import type { Video } from "@/types";
 import { formatDuration, formatViewCount, timeAgo } from "@/lib/utils";
-import { trackClick, trackImpression } from "@/lib/analytics";
+import { trackFeedClick, trackFeedImpression } from "@/lib/analytics";
 import { PlatformIcon } from "./PlatformIcon";
 
 interface VideoCardProps {
@@ -15,6 +16,10 @@ interface VideoCardProps {
 export function VideoCard({ video }: VideoCardProps) {
   const cardRef = useRef<HTMLElement>(null);
   const hasTrackedImpression = useRef(false);
+  const router = useRouter();
+
+  const modelSlug = video.account.slug || video.account.username;
+  const modelHref = `/model/${modelSlug}?v=${video.id}&u=${encodeURIComponent(video.original_url)}`;
 
   useEffect(() => {
     const el = cardRef.current;
@@ -24,7 +29,7 @@ export function VideoCard({ video }: VideoCardProps) {
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting && !hasTrackedImpression.current) {
-            trackImpression(video.id);
+            trackFeedImpression(video.id);
             hasTrackedImpression.current = true;
             observer.disconnect();
           }
@@ -38,20 +43,15 @@ export function VideoCard({ video }: VideoCardProps) {
   }, [video.id]);
 
   const handleOpen = useCallback(() => {
-    trackClick(video.id);
-    window.open(video.original_url, "_blank", "noopener,noreferrer");
-  }, [video.id, video.original_url]);
-
-  const platformLabel = video.platform === "twitter" ? "X" : "Instagram";
+    trackFeedClick(video.id, video.account.id);
+    router.push(modelHref);
+  }, [video.id, video.account.id, modelHref, router]);
 
   return (
     <article ref={cardRef} className="border-b border-border">
       {/* Post header — avatar + username + platform + time */}
       <div className="flex items-center gap-3 px-4 py-2.5">
-        <Link
-          href={`/account/${video.account.platform}/${video.account.username}`}
-          className="shrink-0"
-        >
+        <Link href={modelHref} className="shrink-0">
           <div className="w-8 h-8 rounded-full overflow-hidden bg-bg-elevated">
             {video.account.avatar_url ? (
               <Image
@@ -71,7 +71,7 @@ export function VideoCard({ video }: VideoCardProps) {
 
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
           <Link
-            href={`/account/${video.account.platform}/${video.account.username}`}
+            href={modelHref}
             className="text-[13px] font-semibold text-txt truncate"
           >
             {video.account.username}
@@ -124,26 +124,13 @@ export function VideoCard({ video }: VideoCardProps) {
           </span>
         </span>
 
-        {/* Open original */}
-        <button
-          onClick={handleOpen}
-          className="flex items-center gap-1.5 text-txt-secondary hover:text-txt transition-colors"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-            <polyline points="15 3 21 3 21 9" />
-            <line x1="10" y1="14" x2="21" y2="3" />
-          </svg>
-          <span className="text-[13px] font-medium">{platformLabel}</span>
-        </button>
-
         {/* Share */}
         <button
           onClick={() => {
             if (navigator.share) {
-              navigator.share({ url: `/video/${video.id}`, title: video.title });
+              navigator.share({ url: modelHref, title: video.title });
             } else {
-              navigator.clipboard.writeText(`${window.location.origin}/video/${video.id}`);
+              navigator.clipboard.writeText(`${window.location.origin}${modelHref}`);
             }
           }}
           className="flex items-center gap-1.5 text-txt-secondary hover:text-txt transition-colors ml-auto"
@@ -158,7 +145,9 @@ export function VideoCard({ video }: VideoCardProps) {
       {/* Title + categories */}
       <div className="px-4 pb-3">
         <p className="text-[13px] text-txt leading-[18px]">
-          <span className="font-semibold">{video.account.username}</span>{" "}
+          <Link href={modelHref} className="font-semibold hover:underline">
+            {video.account.username}
+          </Link>{" "}
           {video.title}
         </p>
         {video.categories && video.categories.length > 0 && (
