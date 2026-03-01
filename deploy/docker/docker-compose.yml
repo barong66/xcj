@@ -107,7 +107,7 @@ services:
       dockerfile: Dockerfile
     container_name: traforama-parser-worker
     restart: unless-stopped
-    command: python -m parser worker
+    command: ["worker"]
     environment:
       DATABASE_URL: "postgres://${POSTGRES_USER:-traforama}:${POSTGRES_PASSWORD:-traforama}@postgres:5432/${POSTGRES_DB:-traforama}?sslmode=disable"
       S3_ENDPOINT: "${S3_ENDPOINT:-https://s3.amazonaws.com}"
