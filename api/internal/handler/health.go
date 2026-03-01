@@ -164,9 +164,10 @@ func (h *HealthHandler) checkInfrastructure(ctx context.Context) []ComponentStat
 func (h *HealthHandler) checkWorkers(ctx context.Context) []WorkerStatus {
 	workers := make([]WorkerStatus, 0, 2)
 
-	// Parser worker: use process manager + parse_queue activity.
+	// Parser worker: infer status from parse_queue activity.
+	// In Docker setup the parser runs as a separate container,
+	// so we check DB activity instead of subprocess state.
 	parser := WorkerStatus{Name: "parser", Status: "offline"}
-	processRunning := h.workerMgr.IsRunning()
 
 	var jobsRunning int64
 	var lastFinished *time.Time
@@ -177,17 +178,20 @@ func (h *HealthHandler) checkWorkers(ctx context.Context) []WorkerStatus {
 		FROM parse_queue
 	`).Scan(&jobsRunning, &lastFinished)
 
-	if processRunning {
-		if err == nil && jobsRunning > 0 {
+	if err == nil {
+		if jobsRunning > 0 {
 			parser.Status = "active"
-			parser.Details = fmt.Sprintf("process running, %d jobs processing", jobsRunning)
+			parser.Details = fmt.Sprintf("%d jobs processing", jobsRunning)
+		} else if lastFinished != nil && time.Since(*lastFinished) < 5*time.Minute {
+			parser.Status = "idle"
+			parser.Details = "waiting for jobs"
+		} else if lastFinished != nil {
+			parser.Status = "idle"
+			parser.Details = fmt.Sprintf("last job %s ago", time.Since(*lastFinished).Truncate(time.Second))
 		} else {
 			parser.Status = "idle"
-			parser.Details = "process running, waiting for jobs"
+			parser.Details = "no jobs processed yet"
 		}
-	} else {
-		parser.Status = "offline"
-		parser.Details = "process not running"
 	}
 
 	if err == nil && lastFinished != nil {
