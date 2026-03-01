@@ -78,7 +78,8 @@ CREATE TABLE videos (
     title           TEXT,                             -- extracted or generated title
     description     TEXT,
     duration_sec    INT,                              -- video duration in seconds
-    thumbnail_url   TEXT,                             -- URL in our R2 storage
+    thumbnail_url   TEXT,                             -- small thumbnail URL in R2
+    thumbnail_lg_url TEXT,                            -- large thumbnail URL in R2
     preview_url     TEXT,                             -- 5-sec preview clip URL in R2
     width           INT,
     height          INT,
