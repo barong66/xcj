@@ -90,8 +90,8 @@ function DashboardContent() {
           label="Total Accounts"
           value={stats.total_accounts.toLocaleString()}
           sub={stats.accounts_by_platform
-            .map((p) => `${p.platform}: ${p.active}`)
-            .join(", ")}
+            ?.map((p) => `${p.platform}: ${p.active}`)
+            .join(", ") || "no accounts"}
           color="blue"
         />
         <StatCard
