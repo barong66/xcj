@@ -142,6 +142,8 @@ services:
     environment:
       API_URL: "http://api:8080"
       NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:8080}"
+      ADMIN_TOKEN: "${ADMIN_TOKEN:-xcj-admin-2024}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-xcj2024}"
     depends_on:
       api:
         condition: service_healthy
