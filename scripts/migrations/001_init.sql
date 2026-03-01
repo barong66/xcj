@@ -57,6 +57,7 @@ CREATE TABLE accounts (
     paid_until      TIMESTAMPTZ,
     last_parsed_at  TIMESTAMPTZ,
     parse_errors    INT NOT NULL DEFAULT 0,
+    max_videos      INT DEFAULT NULL,               -- per-account limit (NULL = use global default)
     country_id      INT REFERENCES countries(id),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
