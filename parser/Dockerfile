@@ -11,15 +11,8 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Install Python dependencies first (cache layer)
-COPY pyproject.toml ./
-RUN mkdir -p parser && touch parser/__init__.py && \
-    pip install --no-cache-dir -e .
-
-# Copy source code
+# Copy source code and install
 COPY . .
-
-# Reinstall with actual source
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir .
 
 ENTRYPOINT ["python", "-m", "parser"]
