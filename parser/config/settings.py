@@ -59,7 +59,6 @@ class Settings(BaseSettings):
 
     # ── Instagram ─────────────────────────────────────────────────
     instagram_proxies: Optional[str] = None        # comma-separated proxy URLs for rotation
-    instagram_session_id: Optional[str] = None     # sessionid cookie for authenticated access
     instagram_rate_limit_sec: int = 5           # delay between requests (seconds)
 
     # ── Apify ──────────────────────────────────────────────────────
