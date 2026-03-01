@@ -37,9 +37,12 @@ func SiteDetection(siteStore *store.SiteStore) func(http.Handler) http.Handler {
 				}
 			}
 
-			// Fall back to Host header domain detection.
+			// Fall back to domain detection via X-Forwarded-Host or Host header.
 			if site == nil {
-				host := r.Host
+				host := r.Header.Get("X-Forwarded-Host")
+				if host == "" {
+					host = r.Host
+				}
 				// Strip port if present.
 				if idx := strings.LastIndex(host, ":"); idx != -1 {
 					host = host[:idx]

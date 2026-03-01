@@ -20,6 +20,9 @@ export async function proxyToGoApi(
   if (auth) headers["Authorization"] = auth;
   const ct = req.headers.get("content-type");
   if (ct) headers["Content-Type"] = ct;
+  // Forward original Host so Go API can detect the site.
+  const host = req.headers.get("host");
+  if (host) headers["X-Forwarded-Host"] = host;
 
   const init: RequestInit = { method: req.method, headers };
 

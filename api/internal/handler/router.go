@@ -40,7 +40,7 @@ func NewRouter(
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Content-Type", "X-Site-Id", "Authorization"},
+		AllowedHeaders:   []string{"Accept", "Content-Type", "X-Site-Id", "X-Forwarded-Host", "Authorization"},
 		ExposedHeaders:   []string{"X-Request-Id"},
 		AllowCredentials: false,
 		MaxAge:           300,
