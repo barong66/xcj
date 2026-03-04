@@ -163,11 +163,16 @@ export interface AdminCategory {
   video_count: number;
 }
 
+export interface SiteConfig {
+  show_social_buttons?: boolean;
+}
+
 export interface AdminSite {
   id: number;
   slug: string;
   domain: string;
   name: string;
+  config: SiteConfig;
   is_active: boolean;
   created_at: string;
   category_count: number;
@@ -313,6 +318,20 @@ export async function getAdminCategories(): Promise<AdminCategory[]> {
 export async function getAdminSites(): Promise<AdminSite[]> {
   const res = await adminFetch<{ sites: AdminSite[] }>("/sites");
   return res.sites;
+}
+
+export async function getAdminSite(id: number): Promise<AdminSite> {
+  return adminFetch<AdminSite>(`/sites/${id}`);
+}
+
+export async function updateAdminSite(
+  id: number,
+  data: { config: SiteConfig },
+): Promise<AdminSite> {
+  return adminFetch<AdminSite>(`/sites/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
 }
 
 export async function refreshSiteContent(

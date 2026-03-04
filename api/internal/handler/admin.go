@@ -465,6 +465,67 @@ func (h *AdminHandler) ListCategories(w http.ResponseWriter, r *http.Request) {
 
 // ─── Sites ───────────────────────────────────────────────────────────────────
 
+// GetSite handles GET /api/v1/admin/sites/{id}
+func (h *AdminHandler) GetSite(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid site id")
+		return
+	}
+
+	site, err := h.admin.GetSiteByID(r.Context(), id)
+	if err != nil {
+		slog.Error("admin: get site", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to get site")
+		return
+	}
+	if site == nil {
+		writeError(w, http.StatusNotFound, "site not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, site)
+}
+
+// UpdateSite handles PUT /api/v1/admin/sites/{id}
+func (h *AdminHandler) UpdateSite(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid site id")
+		return
+	}
+
+	var body struct {
+		Config json.RawMessage `json:"config"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := h.admin.UpdateSiteConfig(r.Context(), id, body.Config); err != nil {
+		if err.Error() == "site not found" {
+			writeError(w, http.StatusNotFound, "site not found")
+			return
+		}
+		slog.Error("admin: update site", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to update site")
+		return
+	}
+
+	// Invalidate cache for this site.
+	if h.cache != nil {
+		h.cache.InvalidateSite(r.Context(), id)
+	}
+
+	site, err := h.admin.GetSiteByID(r.Context(), id)
+	if err != nil {
+		slog.Error("admin: get site after update", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to get site")
+		return
+	}
+	writeJSON(w, http.StatusOK, site)
+}
+
 // ListSites handles GET /api/v1/admin/sites
 func (h *AdminHandler) ListSites(w http.ResponseWriter, r *http.Request) {
 	sites, err := h.admin.ListSites(r.Context())

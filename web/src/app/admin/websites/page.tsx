@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { getAdminSites, refreshSiteContent } from "@/lib/admin-api";
 import type { AdminSite } from "@/lib/admin-api";
 import { ToastProvider, useToast } from "../Toast";
@@ -14,6 +15,7 @@ export default function WebsitesPage() {
 }
 
 function WebsitesContent() {
+  const router = useRouter();
   const [sites, setSites] = useState<AdminSite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -113,8 +115,13 @@ function WebsitesContent() {
                       key={site.id}
                       className="border-b border-[#1e1e1e] hover:bg-[#1a1a1a] transition-colors"
                     >
-                      <td className="px-4 py-3 text-white font-medium font-mono text-xs">
-                        {site.domain}
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => router.push(`/admin/websites/${site.id}`)}
+                          className="text-white font-medium font-mono text-xs hover:text-accent transition-colors"
+                        >
+                          {site.domain}
+                        </button>
                       </td>
                       <td className="px-4 py-3 text-[#a0a0a0]">
                         {site.name}

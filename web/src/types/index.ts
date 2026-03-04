@@ -49,8 +49,14 @@ export interface VideosResponse {
   pages: number;
 }
 
-/** The API returns Account directly, with videos and video_count embedded. */
-export type AccountResponse = Account;
+export interface SiteConfig {
+  show_social_buttons?: boolean;
+}
+
+/** The API returns Account directly, with videos, video_count, and site_config embedded. */
+export interface AccountResponse extends Account {
+  site_config?: SiteConfig;
+}
 
 export interface CategoriesResponse extends Array<Category> {}
 

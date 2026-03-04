@@ -63,6 +63,7 @@ export default async function ModelPage({
 
     const totalPages = Math.ceil((account.video_count || 0) / perPage);
     const videos = account.videos || [];
+    const showSocialButtons = account.site_config?.show_social_buttons !== false;
 
     return (
       <>
@@ -80,9 +81,11 @@ export default async function ModelPage({
 
         <ProfileHeader account={account} />
 
-        <Suspense fallback={null}>
-          <FanSiteButtons account={account} />
-        </Suspense>
+        {showSocialButtons && (
+          <Suspense fallback={null}>
+            <FanSiteButtons account={account} />
+          </Suspense>
+        )}
 
         <ProfileContent
           account={account}

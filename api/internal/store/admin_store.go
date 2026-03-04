@@ -878,25 +878,26 @@ func (s *AdminStore) ListCategories(ctx context.Context) ([]AdminCategory, error
 // ─── Sites ───────────────────────────────────────────────────────────────────
 
 type AdminSite struct {
-	ID           int64     `json:"id"`
-	Slug         string    `json:"slug"`
-	Domain       string    `json:"domain"`
-	Name         string    `json:"name"`
-	IsActive     bool      `json:"is_active"`
-	CreatedAt    time.Time `json:"created_at"`
-	CategoryCount int64    `json:"category_count"`
-	VideoCount   int64     `json:"video_count"`
+	ID            int64           `json:"id"`
+	Slug          string          `json:"slug"`
+	Domain        string          `json:"domain"`
+	Name          string          `json:"name"`
+	Config        json.RawMessage `json:"config"`
+	IsActive      bool            `json:"is_active"`
+	CreatedAt     time.Time       `json:"created_at"`
+	CategoryCount int64           `json:"category_count"`
+	VideoCount    int64           `json:"video_count"`
 }
 
 func (s *AdminStore) GetSiteByID(ctx context.Context, id int64) (*AdminSite, error) {
 	var site AdminSite
 	err := s.pool.QueryRow(ctx, `
-		SELECT s.id, s.slug, s.domain, s.name, s.is_active, s.created_at,
+		SELECT s.id, s.slug, s.domain, s.name, COALESCE(s.config, '{}'), s.is_active, s.created_at,
 			(SELECT COUNT(*) FROM site_categories sc WHERE sc.site_id = s.id) AS cat_count,
 			(SELECT COUNT(*) FROM site_videos sv WHERE sv.site_id = s.id) AS video_count
 		FROM sites s WHERE s.id = $1
 	`, id).Scan(
-		&site.ID, &site.Slug, &site.Domain, &site.Name,
+		&site.ID, &site.Slug, &site.Domain, &site.Name, &site.Config,
 		&site.IsActive, &site.CreatedAt,
 		&site.CategoryCount, &site.VideoCount,
 	)
@@ -909,10 +910,24 @@ func (s *AdminStore) GetSiteByID(ctx context.Context, id int64) (*AdminSite, err
 	return &site, nil
 }
 
+func (s *AdminStore) UpdateSiteConfig(ctx context.Context, id int64, config json.RawMessage) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE sites SET config = $2, updated_at = NOW() WHERE id = $1`,
+		id, config,
+	)
+	if err != nil {
+		return fmt.Errorf("admin_store: update site config: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("site not found")
+	}
+	return nil
+}
+
 func (s *AdminStore) ListSites(ctx context.Context) ([]AdminSite, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT
-			s.id, s.slug, s.domain, s.name, s.is_active, s.created_at,
+			s.id, s.slug, s.domain, s.name, COALESCE(s.config, '{}'), s.is_active, s.created_at,
 			(SELECT COUNT(*) FROM site_categories sc WHERE sc.site_id = s.id) AS cat_count,
 			(SELECT COUNT(*) FROM site_videos sv WHERE sv.site_id = s.id) AS video_count
 		FROM sites s
@@ -927,7 +942,7 @@ func (s *AdminStore) ListSites(ctx context.Context) ([]AdminSite, error) {
 	for rows.Next() {
 		var site AdminSite
 		if err := rows.Scan(
-			&site.ID, &site.Slug, &site.Domain, &site.Name,
+			&site.ID, &site.Slug, &site.Domain, &site.Name, &site.Config,
 			&site.IsActive, &site.CreatedAt,
 			&site.CategoryCount, &site.VideoCount,
 		); err != nil {

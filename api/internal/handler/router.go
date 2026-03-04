@@ -97,6 +97,8 @@ func NewRouter(
 
 		// Sites.
 		r.Get("/sites", adminHandler.ListSites)
+		r.Get("/sites/{id}", adminHandler.GetSite)
+		r.Put("/sites/{id}", adminHandler.UpdateSite)
 		r.Post("/sites/{id}/refresh", adminHandler.RefreshSiteContent)
 	})
 
