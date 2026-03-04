@@ -90,10 +90,11 @@ func (h *AdminHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 	platform := r.URL.Query().Get("platform")
 	status := r.URL.Query().Get("status")
+	paid := r.URL.Query().Get("paid")
 	page := intParam(r, "page", 1)
 	perPage := intParam(r, "per_page", 20)
 
-	result, err := h.admin.ListAccounts(r.Context(), platform, status, page, perPage)
+	result, err := h.admin.ListAccounts(r.Context(), platform, status, paid, page, perPage)
 	if err != nil {
 		slog.Error("admin: list accounts", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list accounts")
@@ -512,9 +513,10 @@ func (h *AdminHandler) UpdateSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Invalidate cache for this site.
+	// Invalidate cache for this site and accounts (site_config is embedded in account responses).
 	if h.cache != nil {
 		h.cache.InvalidateSite(r.Context(), id)
+		h.cache.InvalidateAccounts(r.Context())
 	}
 
 	site, err := h.admin.GetSiteByID(r.Context(), id)

@@ -162,6 +162,12 @@ func RankedFeedKey(siteID int64, page int) string {
 	return fmt.Sprintf("rf:%d:%d", siteID, page)
 }
 
+// InvalidateAccounts removes all cached account data.
+func (c *Cache) InvalidateAccounts(ctx context.Context) {
+	c.InvalidatePattern(ctx, "acc:*")
+	c.InvalidatePattern(ctx, "accs:*")
+}
+
 // InvalidateSite removes all cached data for a given site.
 func (c *Cache) InvalidateSite(ctx context.Context, siteID int64) {
 	sid := fmt.Sprintf("%d", siteID)
