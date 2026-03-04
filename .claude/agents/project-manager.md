@@ -40,6 +40,7 @@ Assign to the right agent:
 - **nextjs-frontend** — React pages, components, admin panel, styling (`web/`)
 - **python-parser** — scraping, media processing, AI categorization (`parser/`)
 - **devops** — Docker, deployment, monitoring, migrations (`deploy/`, `scripts/`)
+- **tester** — тесты для нового функционала, прогон регрессий (`parser/tests/`, `api/**/*_test.go`, `web/**/*.test.ts`)
 
 Always specify:
 - What to do (acceptance criteria)
@@ -47,10 +48,16 @@ Always specify:
 - What NOT to touch (avoid conflicts)
 - Dependencies ("wait for go-backend to finish the endpoint first")
 
+### After code is written → ALWAYS test
+1. **tester** writes tests for new/changed functionality
+2. Run all existing tests to catch regressions
+3. Do NOT commit if tests fail
+
 ### After work is completed
-1. **Mark tasks done** in ClickUp via `clickup_update_task`
-2. **Add implementation comments** — what was built, key files changed via `clickup_create_task_comment`
-3. **Create follow-up tasks** if new bugs/TODOs discovered via `clickup_create_task`
+1. **Run tests** — `pytest parser/tests/`, `go test ./...`
+2. **Mark tasks done** in ClickUp via `clickup_update_task`
+3. **Add implementation comments** — what was built, key files changed via `clickup_create_task_comment`
+4. **Create follow-up tasks** if new bugs/TODOs discovered via `clickup_create_task`
 
 ## Documentation
 
