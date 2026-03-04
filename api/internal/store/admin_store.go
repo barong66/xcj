@@ -163,7 +163,7 @@ type AdminAccountList struct {
 	TotalPages int            `json:"total_pages"`
 }
 
-func (s *AdminStore) ListAccounts(ctx context.Context, platform, status string, page, perPage int) (*AdminAccountList, error) {
+func (s *AdminStore) ListAccounts(ctx context.Context, platform, status, paid string, page, perPage int) (*AdminAccountList, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -188,6 +188,11 @@ func (s *AdminStore) ListAccounts(ctx context.Context, platform, status string, 
 		conditions = append(conditions, "a.is_active = true")
 	} else if status == "inactive" {
 		conditions = append(conditions, "a.is_active = false")
+	}
+	if paid == "paid" {
+		conditions = append(conditions, "a.is_paid = true")
+	} else if paid == "free" {
+		conditions = append(conditions, "a.is_paid = false")
 	}
 
 	whereClause := ""

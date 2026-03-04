@@ -192,12 +192,14 @@ export async function getAdminAccount(id: number): Promise<AdminAccount> {
 export async function getAdminAccounts(params?: {
   platform?: string;
   status?: string;
+  paid?: string;
   page?: number;
   per_page?: number;
 }): Promise<AdminAccountList> {
   const sp = new URLSearchParams();
   if (params?.platform) sp.set("platform", params.platform);
   if (params?.status) sp.set("status", params.status);
+  if (params?.paid) sp.set("paid", params.paid);
   if (params?.page) sp.set("page", String(params.page));
   if (params?.per_page) sp.set("per_page", String(params.per_page));
   const qs = sp.toString();

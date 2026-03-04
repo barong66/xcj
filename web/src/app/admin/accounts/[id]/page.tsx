@@ -88,6 +88,17 @@ function AccountProfileContent() {
     }
   };
 
+  const handleTogglePaid = async () => {
+    if (!account) return;
+    try {
+      const updated = await updateAdminAccount(account.id, { is_paid: !account.is_paid });
+      setAccount(updated);
+      toast(`Promotion ${updated.is_paid ? "enabled" : "disabled"}`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to update", "error");
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -180,6 +191,16 @@ function AccountProfileContent() {
           className="px-3 py-2 text-sm rounded-lg bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525] transition-colors"
         >
           Reparse
+        </button>
+        <button
+          onClick={handleTogglePaid}
+          className={`px-3 py-2 text-sm rounded-lg transition-colors ${
+            account.is_paid
+              ? "bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25"
+              : "bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525]"
+          }`}
+        >
+          {account.is_paid ? "Disable Promotion" : "Enable Promotion"}
         </button>
         <button
           onClick={handleToggleActive}

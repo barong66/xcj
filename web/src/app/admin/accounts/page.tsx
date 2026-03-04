@@ -19,6 +19,7 @@ function AccountsContent() {
   const [loading, setLoading] = useState(true);
   const [platform, setPlatform] = useState("");
   const [status, setStatus] = useState("");
+  const [paid, setPaid] = useState("");
   const [page, setPage] = useState(1);
   const [showAddModal, setShowAddModal] = useState(false);
   const { toast } = useToast();
@@ -29,6 +30,7 @@ function AccountsContent() {
       const result = await getAdminAccounts({
         platform: platform || undefined,
         status: status || undefined,
+        paid: paid || undefined,
         page,
         per_page: 20,
       });
@@ -38,7 +40,7 @@ function AccountsContent() {
     } finally {
       setLoading(false);
     }
-  }, [platform, status, page, toast]);
+  }, [platform, status, paid, page, toast]);
 
   useEffect(() => {
     loadAccounts();
@@ -127,6 +129,15 @@ function AccountsContent() {
           <option value="">All Status</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
+        </select>
+        <select
+          value={paid}
+          onChange={(e) => { setPaid(e.target.value); setPage(1); }}
+          className="px-3 py-2 text-sm rounded-lg bg-[#141414] border border-[#2a2a2a] text-white focus:outline-none focus:border-accent"
+        >
+          <option value="">All Accounts</option>
+          <option value="paid">Paid</option>
+          <option value="free">Free</option>
         </select>
         {data && (
           <span className="text-sm text-[#6b6b6b] ml-auto">
