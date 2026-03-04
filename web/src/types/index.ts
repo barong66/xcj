@@ -70,6 +70,7 @@ export interface VideoQueryParams {
   per_page?: number;
   anchor?: string;
   src?: string;
+  exclude_account_id?: number;
 }
 
 export interface SearchParams {

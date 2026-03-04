@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { getAccountBySlug } from "@/lib/api";
+import { getAccountBySlug, getVideos } from "@/lib/api";
 import { SITE_NAME, SITE_URL } from "@/lib/constants";
 import { ProfileHeader } from "./ProfileHeader";
 import { FanSiteButtons } from "./FanSiteButtons";
@@ -9,6 +9,7 @@ import { ProfileContent } from "./ProfileContent";
 import { ProfileViewTracker } from "./ProfileViewTracker";
 import { BreadcrumbJsonLd, ProfileJsonLd } from "@/components/JsonLd";
 import { ErrorState } from "@/components/ErrorState";
+import { SimilarModels } from "./SimilarModels";
 
 interface ModelPageProps {
   params: Promise<{ slug: string }>;
@@ -65,6 +66,25 @@ export default async function ModelPage({
     const videos = account.videos || [];
     const showSocialButtons = account.site_config?.show_social_buttons !== false;
 
+    // For free accounts, fetch similar models from the same category.
+    let similarVideos: import("@/types").Video[] = [];
+    if (!account.is_paid && videos.length > 0) {
+      const topCategory = videos[0]?.categories?.[0]?.slug;
+      if (topCategory) {
+        try {
+          const related = await getVideos({
+            category: topCategory,
+            exclude_account_id: account.id,
+            per_page: 9,
+            sort: "popular",
+          });
+          similarVideos = related.videos || [];
+        } catch {
+          // Silently fail — similar models section is optional.
+        }
+      }
+    }
+
     return (
       <>
         <BreadcrumbJsonLd
@@ -94,6 +114,10 @@ export default async function ModelPage({
           slug={slug}
           perPage={perPage}
         />
+
+        {similarVideos.length > 0 && (
+          <SimilarModels videos={similarVideos} />
+        )}
       </>
     );
   } catch {

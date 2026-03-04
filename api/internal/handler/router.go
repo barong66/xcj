@@ -78,6 +78,17 @@ func NewRouter(
 		r.Put("/accounts/{id}", adminHandler.UpdateAccount)
 		r.Delete("/accounts/{id}", adminHandler.DeleteAccount)
 		r.Post("/accounts/{id}/reparse", adminHandler.ReparseAccount)
+		r.Get("/accounts/{id}/banners/summary", adminHandler.GetAccountBannerSummary)
+		r.Get("/accounts/{id}/banners", adminHandler.ListAccountBanners)
+		r.Post("/accounts/{id}/banners/generate", adminHandler.GenerateAccountBanners)
+
+		// Banner Sizes.
+		r.Get("/banner-sizes", adminHandler.ListBannerSizes)
+		r.Post("/banner-sizes", adminHandler.CreateBannerSize)
+		r.Put("/banner-sizes/{id}", adminHandler.UpdateBannerSize)
+
+		// Banners (all accounts).
+		r.Get("/banners", adminHandler.ListAllBanners)
 
 		// Queue.
 		r.Get("/queue", adminHandler.ListQueue)
@@ -102,11 +113,16 @@ func NewRouter(
 		r.Post("/sites/{id}/refresh", adminHandler.RefreshSiteContent)
 	})
 
+	// Public banner serving — no auth, no site detection.
+	bannerHandler := NewBannerHandler(adminStore, eventBuffer)
+	r.Get("/b/{id}", bannerHandler.ServeBanner)
+	r.Get("/b/{id}/click", bannerHandler.ClickBanner)
+
 	// API v1 routes — all require site detection.
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(middleware.SiteDetection(siteStore))
 
-		videoHandler := NewVideoHandler(videoStore, accountStore, c, ranker)
+		videoHandler := NewVideoHandler(videoStore, accountStore, categoryStore, c, ranker)
 		categoryHandler := NewCategoryHandler(categoryStore, c)
 		accountHandler := NewAccountHandler(accountStore, c)
 		eventHandler := NewEventHandler(eventBuffer)

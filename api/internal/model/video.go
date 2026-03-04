@@ -47,15 +47,16 @@ type SiteVideo struct {
 }
 
 type VideoListParams struct {
-	SiteID     int64
-	CategoryID *int64
-	CountryID  *int64
-	Sort       string // recent, popular, random, promoted
-	Page       int
-	PerPage    int
-	Search     string
-	AnchorSlug string
-	Source     string
+	SiteID           int64
+	CategoryID       *int64
+	CountryID        *int64
+	ExcludeAccountID *int64
+	Sort             string // recent, popular, random, promoted
+	Page             int
+	PerPage          int
+	Search           string
+	AnchorSlug       string
+	Source           string
 }
 
 type VideoListResult struct {

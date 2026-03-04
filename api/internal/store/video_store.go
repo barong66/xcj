@@ -51,6 +51,10 @@ func (s *VideoStore) List(ctx context.Context, params model.VideoListParams) (*m
 		conditions = append(conditions, "v.country_id = "+nextArg(*params.CountryID))
 	}
 
+	if params.ExcludeAccountID != nil {
+		conditions = append(conditions, "v.account_id != "+nextArg(*params.ExcludeAccountID))
+	}
+
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
 	joinClause := "JOIN site_videos sv ON sv.video_id = v.id"

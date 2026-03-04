@@ -53,11 +53,20 @@ Always specify:
 2. Run all existing tests to catch regressions
 3. Do NOT commit if tests fail
 
-### After work is completed
-1. **Run tests** — `pytest parser/tests/`, `go test ./...`
-2. **Mark tasks done** in ClickUp via `clickup_update_task`
-3. **Add implementation comments** — what was built, key files changed via `clickup_create_task_comment`
-4. **Create follow-up tasks** if new bugs/TODOs discovered via `clickup_create_task`
+### After work is completed — ОБЯЗАТЕЛЬНО оба шага
+
+**Шаг 1: ClickUp** (всегда)
+1. Найти или создать задачу в ClickUp
+2. Отметить задачу как done (`clickup_update_task`)
+3. Добавить комментарий: что сделано, какие файлы изменены (`clickup_create_task_comment`)
+4. Создать follow-up задачи если есть (`clickup_create_task`)
+
+**Шаг 2: MD-файлы** (всегда, сразу после ClickUp)
+1. **TECHNICAL_SPEC.md** — новые/изменённые эндпоинты, параметры API, изменения схемы БД
+2. **DOCS.md** — описание фичи для пользователей (на русском)
+3. **docs/tasks/*.md** — обновить спеку если есть, или создать новую для follow-up задач
+
+Оба шага выполняются ВСЕГДА. Нельзя сделать только ClickUp без MD или наоборот.
 
 ## Documentation
 
@@ -66,13 +75,6 @@ Always specify:
 - `docs/` — project documentation, task specs
 - `.claude/agents/*.md` — agent team definitions
 - `deploy/cloudflare-rules.md` — CDN documentation
-
-### After feature work
-Update:
-1. **TECHNICAL_SPEC.md** — new endpoints, schema changes, architecture
-2. **DOCS.md** — user-facing feature descriptions
-3. **docs/tasks/*.md** — mark completed specs, add new ones
-4. **Agent files** — update `.claude/agents/*.md` if architecture changed
 
 ### After database changes
 - Track applied migrations in agent docs

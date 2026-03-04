@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import type { Video } from "@/types";
 import { formatDuration } from "@/lib/utils";
-import { trackProfileThumbImpression } from "@/lib/analytics";
+import {
+  trackProfileThumbImpression,
+  trackProfileThumbClick,
+} from "@/lib/analytics";
 
 interface ProfileGridProps {
   videos: Video[];
@@ -96,10 +98,17 @@ function GridItem({
     return () => observer.disconnect();
   }, [video.id, accountId]);
 
+  const handleClick = useCallback(() => {
+    trackProfileThumbClick(video.id, accountId, video.original_url);
+  }, [video.id, accountId, video.original_url]);
+
   return (
-    <Link
+    <a
       ref={ref}
-      href={`/video/${video.id}`}
+      href={video.original_url}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={handleClick}
       className="relative block aspect-[4/5] bg-bg-card border-b border-border"
     >
       <Image
@@ -113,6 +122,6 @@ function GridItem({
       <span className="absolute bottom-3 right-3 px-1.5 py-0.5 text-xs font-medium bg-black/70 text-white rounded">
         {formatDuration(video.duration_sec)}
       </span>
-    </Link>
+    </a>
   );
 }

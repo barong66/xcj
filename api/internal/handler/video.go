@@ -15,14 +15,15 @@ import (
 )
 
 type VideoHandler struct {
-	videos   *store.VideoStore
-	accounts *store.AccountStore
-	cache    *cache.Cache
-	ranker   *ranking.Service
+	videos     *store.VideoStore
+	accounts   *store.AccountStore
+	categories *store.CategoryStore
+	cache      *cache.Cache
+	ranker     *ranking.Service
 }
 
-func NewVideoHandler(videos *store.VideoStore, accounts *store.AccountStore, cache *cache.Cache, ranker *ranking.Service) *VideoHandler {
-	return &VideoHandler{videos: videos, accounts: accounts, cache: cache, ranker: ranker}
+func NewVideoHandler(videos *store.VideoStore, accounts *store.AccountStore, categories *store.CategoryStore, cache *cache.Cache, ranker *ranking.Service) *VideoHandler {
+	return &VideoHandler{videos: videos, accounts: accounts, categories: categories, cache: cache, ranker: ranker}
 }
 
 // List handles GET /api/v1/videos
@@ -52,6 +53,20 @@ func (h *VideoHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Support filtering by category slug (resolves to ID).
+	if catSlug := r.URL.Query().Get("category"); catSlug != "" && params.CategoryID == nil {
+		cat, err := h.categories.GetBySlug(r.Context(), site.ID, catSlug)
+		if err == nil && cat != nil {
+			params.CategoryID = &cat.ID
+		}
+	}
+
+	if exclStr := r.URL.Query().Get("exclude_account_id"); exclStr != "" {
+		if exclID, err := strconv.ParseInt(exclStr, 10, 64); err == nil {
+			params.ExcludeAccountID = &exclID
+		}
+	}
+
 	if countryStr := r.URL.Query().Get("country_id"); countryStr != "" {
 		if countryID, err := strconv.ParseInt(countryStr, 10, 64); err == nil {
 			params.CountryID = &countryID
@@ -68,7 +83,7 @@ func (h *VideoHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ranked feed for default "recent" sort when ranker is available and no filters
-	if params.Sort == "recent" && h.ranker != nil && params.CategoryID == nil && params.CountryID == nil {
+	if params.Sort == "recent" && h.ranker != nil && params.CategoryID == nil && params.CountryID == nil && params.ExcludeAccountID == nil {
 		if result := h.serveRankedFeed(r, site.ID, params); result != nil {
 			writeJSON(w, http.StatusOK, result)
 			return
@@ -85,7 +100,8 @@ func (h *VideoHandler) List(w http.ResponseWriter, r *http.Request) {
 		cntID = *params.CountryID
 	}
 
-	if params.Sort != "random" {
+	useCache := params.Sort != "random" && params.ExcludeAccountID == nil
+	if useCache {
 		cacheKey := cache.VideoListKey(site.ID, params.Sort, catID, cntID, params.Page)
 		var result model.VideoListResult
 		if h.cache.GetJSON(r.Context(), cacheKey, &result) {
@@ -101,7 +117,7 @@ func (h *VideoHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if params.Sort != "random" {
+	if useCache {
 		cacheKey := cache.VideoListKey(site.ID, params.Sort, catID, cntID, params.Page)
 		h.cache.SetList(r.Context(), cacheKey, result)
 	}

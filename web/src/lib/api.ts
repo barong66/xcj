@@ -41,6 +41,7 @@ export async function getVideos(params: VideoQueryParams = {}): Promise<VideosRe
   if (params.per_page) searchParams.set("per_page", String(params.per_page));
   if (params.anchor) searchParams.set("anchor", params.anchor);
   if (params.src) searchParams.set("src", params.src);
+  if (params.exclude_account_id) searchParams.set("exclude_account_id", String(params.exclude_account_id));
 
   const qs = searchParams.toString();
   return fetchAPI<VideosResponse>(`/api/v1/videos${qs ? `?${qs}` : ""}`);
