@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"time"
@@ -136,19 +137,22 @@ func (s *AdminStore) GetStats(ctx context.Context) (*AdminStats, error) {
 // ─── Accounts ────────────────────────────────────────────────────────────────
 
 type AdminAccount struct {
-	ID           int64      `json:"id"`
-	Platform     string     `json:"platform"`
-	Username     string     `json:"username"`
-	DisplayName  string     `json:"display_name"`
-	AvatarURL    string     `json:"avatar_url"`
-	IsActive     bool       `json:"is_active"`
-	IsPaid       bool       `json:"is_paid"`
-	PaidUntil    *time.Time `json:"paid_until,omitempty"`
-	FollowerCount int64     `json:"follower_count"`
-	LastParsedAt *time.Time `json:"last_parsed_at,omitempty"`
-	ParseErrors  int        `json:"parse_errors"`
-	VideoCount   int64      `json:"video_count"`
-	CreatedAt    time.Time  `json:"created_at"`
+	ID            int64             `json:"id"`
+	Platform      string            `json:"platform"`
+	Username      string            `json:"username"`
+	Slug          string            `json:"slug"`
+	DisplayName   string            `json:"display_name"`
+	AvatarURL     string            `json:"avatar_url"`
+	Bio           string            `json:"bio"`
+	SocialLinks   map[string]string `json:"social_links"`
+	IsActive      bool              `json:"is_active"`
+	IsPaid        bool              `json:"is_paid"`
+	PaidUntil     *time.Time        `json:"paid_until,omitempty"`
+	FollowerCount int64             `json:"follower_count"`
+	LastParsedAt  *time.Time        `json:"last_parsed_at,omitempty"`
+	ParseErrors   int               `json:"parse_errors"`
+	VideoCount    int64             `json:"video_count"`
+	CreatedAt     time.Time         `json:"created_at"`
 }
 
 type AdminAccountList struct {
@@ -206,7 +210,8 @@ func (s *AdminStore) ListAccounts(ctx context.Context, platform, status string, 
 
 	offset := (page - 1) * perPage
 	selectQ := fmt.Sprintf(`
-		SELECT a.id, a.platform, a.username, COALESCE(a.display_name,''), COALESCE(a.avatar_url,''),
+		SELECT a.id, a.platform, a.username, COALESCE(a.slug,''), COALESCE(a.display_name,''), COALESCE(a.avatar_url,''),
+			COALESCE(a.bio,''), COALESCE(a.social_links, '{}'),
 			a.is_active, a.is_paid, a.paid_until, COALESCE(a.follower_count, 0),
 			a.last_parsed_at, a.parse_errors,
 			COUNT(v.id) AS video_count,
@@ -228,14 +233,18 @@ func (s *AdminStore) ListAccounts(ctx context.Context, platform, status string, 
 	var accounts []AdminAccount
 	for rows.Next() {
 		var a AdminAccount
+		var socialLinksRaw []byte
 		if err := rows.Scan(
-			&a.ID, &a.Platform, &a.Username, &a.DisplayName, &a.AvatarURL,
+			&a.ID, &a.Platform, &a.Username, &a.Slug, &a.DisplayName, &a.AvatarURL,
+			&a.Bio, &socialLinksRaw,
 			&a.IsActive, &a.IsPaid, &a.PaidUntil, &a.FollowerCount,
 			&a.LastParsedAt, &a.ParseErrors,
 			&a.VideoCount, &a.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("admin_store: scan account: %w", err)
 		}
+		a.SocialLinks = map[string]string{}
+		_ = json.Unmarshal(socialLinksRaw, &a.SocialLinks)
 		accounts = append(accounts, a)
 	}
 	if err := rows.Err(); err != nil {
@@ -330,14 +339,17 @@ func (s *AdminStore) enqueueIfNotExists(ctx context.Context, accountID int64) {
 
 func (s *AdminStore) getAccountByID(ctx context.Context, id int64) (*AdminAccount, error) {
 	var a AdminAccount
+	var socialLinksRaw []byte
 	err := s.pool.QueryRow(ctx, `
-		SELECT a.id, a.platform, a.username, COALESCE(a.display_name,''), COALESCE(a.avatar_url,''),
+		SELECT a.id, a.platform, a.username, COALESCE(a.slug,''), COALESCE(a.display_name,''), COALESCE(a.avatar_url,''),
+			COALESCE(a.bio,''), COALESCE(a.social_links, '{}'),
 			a.is_active, a.is_paid, a.paid_until, COALESCE(a.follower_count, 0),
 			a.last_parsed_at, a.parse_errors, a.created_at,
 			(SELECT COUNT(*) FROM videos v WHERE v.account_id = a.id AND v.is_active = true) AS video_count
 		FROM accounts a WHERE a.id = $1
 	`, id).Scan(
-		&a.ID, &a.Platform, &a.Username, &a.DisplayName, &a.AvatarURL,
+		&a.ID, &a.Platform, &a.Username, &a.Slug, &a.DisplayName, &a.AvatarURL,
+		&a.Bio, &socialLinksRaw,
 		&a.IsActive, &a.IsPaid, &a.PaidUntil, &a.FollowerCount,
 		&a.LastParsedAt, &a.ParseErrors, &a.CreatedAt, &a.VideoCount,
 	)
@@ -347,12 +359,20 @@ func (s *AdminStore) getAccountByID(ctx context.Context, id int64) (*AdminAccoun
 		}
 		return nil, fmt.Errorf("admin_store: get account by id: %w", err)
 	}
+	a.SocialLinks = map[string]string{}
+	_ = json.Unmarshal(socialLinksRaw, &a.SocialLinks)
 	return &a, nil
 }
 
+// GetAccountByID is the exported version for use by handlers.
+func (s *AdminStore) GetAccountByID(ctx context.Context, id int64) (*AdminAccount, error) {
+	return s.getAccountByID(ctx, id)
+}
+
 type UpdateAccountInput struct {
-	IsActive *bool `json:"is_active,omitempty"`
-	IsPaid   *bool `json:"is_paid,omitempty"`
+	IsActive    *bool              `json:"is_active,omitempty"`
+	IsPaid      *bool              `json:"is_paid,omitempty"`
+	SocialLinks *map[string]string `json:"social_links,omitempty"`
 }
 
 func (s *AdminStore) UpdateAccount(ctx context.Context, id int64, input UpdateAccountInput) (*AdminAccount, error) {
@@ -372,6 +392,19 @@ func (s *AdminStore) UpdateAccount(ctx context.Context, id int64, input UpdateAc
 		)
 		if err != nil {
 			return nil, fmt.Errorf("admin_store: update is_paid: %w", err)
+		}
+	}
+	if input.SocialLinks != nil {
+		linksJSON, err := json.Marshal(*input.SocialLinks)
+		if err != nil {
+			return nil, fmt.Errorf("admin_store: marshal social_links: %w", err)
+		}
+		_, err = s.pool.Exec(ctx,
+			`UPDATE accounts SET social_links = $2, updated_at = NOW() WHERE id = $1`,
+			id, linksJSON,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("admin_store: update social_links: %w", err)
 		}
 	}
 	return s.getAccountByID(ctx, id)

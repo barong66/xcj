@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   getAdminAccounts,
   createAdminAccount,
@@ -13,6 +14,7 @@ import type { AdminAccount, AdminAccountList } from "@/lib/admin-api";
 import { ToastProvider, useToast } from "../Toast";
 
 function AccountsContent() {
+  const router = useRouter();
   const [data, setData] = useState<AdminAccountList | null>(null);
   const [loading, setLoading] = useState(true);
   const [platform, setPlatform] = useState("");
@@ -160,6 +162,7 @@ function AccountsContent() {
                   <AccountRow
                     key={account.id}
                     account={account}
+                    onOpen={() => router.push(`/admin/accounts/${account.id}`)}
                     onToggleActive={() => handleToggleActive(account)}
                     onDelete={() => handleDelete(account)}
                     onReparse={() => handleReparse(account)}
@@ -215,15 +218,18 @@ function AccountsContent() {
 
 function AccountRow({
   account,
+  onOpen,
   onToggleActive,
   onDelete,
   onReparse,
 }: {
   account: AdminAccount;
+  onOpen: () => void;
   onToggleActive: () => void;
   onDelete: () => void;
   onReparse: () => void;
 }) {
+  const linkCount = account.social_links ? Object.keys(account.social_links).length : 0;
   return (
     <tr className="border-b border-[#1e1e1e] hover:bg-[#1a1a1a] transition-colors">
       <td className="px-4 py-3">
@@ -240,7 +246,9 @@ function AccountRow({
             </div>
           )}
           <div>
-            <span className="text-white font-medium">@{account.username}</span>
+            <button onClick={onOpen} className="text-white font-medium hover:text-accent transition-colors">
+              @{account.username}
+            </button>
             {account.display_name && (
               <span className="text-[#6b6b6b] ml-1.5">{account.display_name}</span>
             )}
@@ -248,6 +256,11 @@ function AccountRow({
           {account.is_paid && (
             <span className="px-1.5 py-0.5 text-[10px] rounded bg-yellow-500/20 text-yellow-400 font-medium">
               PAID
+            </span>
+          )}
+          {linkCount > 0 && (
+            <span className="px-1.5 py-0.5 text-[10px] rounded bg-accent/15 text-accent font-medium">
+              {linkCount} {linkCount === 1 ? "link" : "links"}
             </span>
           )}
         </div>

@@ -14,6 +14,8 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./scripts/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+      - ./scripts/migrations/003_account_max_videos.sql:/docker-entrypoint-initdb.d/003_account_max_videos.sql:ro
+      - ./scripts/migrations/004_account_profiles.sql:/docker-entrypoint-initdb.d/004_account_profiles.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U traforama -d traforama"]
       interval: 5s

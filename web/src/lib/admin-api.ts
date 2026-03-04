@@ -72,8 +72,11 @@ export interface AdminAccount {
   id: number;
   platform: string;
   username: string;
+  slug: string;
   display_name: string;
   avatar_url: string;
+  bio: string;
+  social_links: Record<string, string>;
   is_active: boolean;
   is_paid: boolean;
   paid_until?: string;
@@ -177,6 +180,10 @@ export async function getAdminStats(): Promise<AdminStats> {
   return adminFetch<AdminStats>("/stats");
 }
 
+export async function getAdminAccount(id: number): Promise<AdminAccount> {
+  return adminFetch<AdminAccount>(`/accounts/${id}`);
+}
+
 export async function getAdminAccounts(params?: {
   platform?: string;
   status?: string;
@@ -205,7 +212,7 @@ export async function createAdminAccount(data: {
 
 export async function updateAdminAccount(
   id: number,
-  data: { is_active?: boolean; is_paid?: boolean }
+  data: { is_active?: boolean; is_paid?: boolean; social_links?: Record<string, string> }
 ): Promise<AdminAccount> {
   return adminFetch<AdminAccount>(`/accounts/${id}`, {
     method: "PUT",

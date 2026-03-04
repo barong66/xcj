@@ -74,6 +74,7 @@ func NewRouter(
 		r.Get("/accounts", adminHandler.ListAccounts)
 		r.Post("/accounts", adminHandler.CreateAccount)
 		r.Post("/accounts/reparse-all", adminHandler.ReparseAllAccounts)
+		r.Get("/accounts/{id}", adminHandler.GetAccount)
 		r.Put("/accounts/{id}", adminHandler.UpdateAccount)
 		r.Delete("/accounts/{id}", adminHandler.DeleteAccount)
 		r.Post("/accounts/{id}/reparse", adminHandler.ReparseAccount)

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import type { Video } from "@/types";
 import { formatDuration } from "@/lib/utils";
 import { trackProfileThumbImpression } from "@/lib/analytics";
@@ -71,7 +72,7 @@ function GridItem({
   video: Video;
   accountId: number;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLAnchorElement>(null);
   const tracked = useRef(false);
 
   useEffect(() => {
@@ -96,9 +97,10 @@ function GridItem({
   }, [video.id, accountId]);
 
   return (
-    <div
+    <Link
       ref={ref}
-      className="relative aspect-[4/5] bg-bg-card border-b border-border"
+      href={`/video/${video.id}`}
+      className="relative block aspect-[4/5] bg-bg-card border-b border-border"
     >
       <Image
         src={video.thumbnail_url}
@@ -111,6 +113,6 @@ function GridItem({
       <span className="absolute bottom-3 right-3 px-1.5 py-0.5 text-xs font-medium bg-black/70 text-white rounded">
         {formatDuration(video.duration_sec)}
       </span>
-    </div>
+    </Link>
   );
 }

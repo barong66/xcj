@@ -65,6 +65,27 @@ func (h *AdminHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 
 // ─── Accounts ────────────────────────────────────────────────────────────────
 
+// GetAccount handles GET /api/v1/admin/accounts/{id}
+func (h *AdminHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	account, err := h.admin.GetAccountByID(r.Context(), id)
+	if err != nil {
+		slog.Error("admin: get account", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to get account")
+		return
+	}
+	if account == nil {
+		writeError(w, http.StatusNotFound, "account not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, account)
+}
+
 // ListAccounts handles GET /api/v1/admin/accounts
 func (h *AdminHandler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 	platform := r.URL.Query().Get("platform")
