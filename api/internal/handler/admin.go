@@ -582,3 +582,135 @@ func (h *AdminHandler) RefreshSiteContent(w http.ResponseWriter, r *http.Request
 		"enqueued": count,
 	})
 }
+
+// ─── Banner Sizes ─────────────────────────────────────────────────────────────
+
+// ListBannerSizes handles GET /api/v1/admin/banner-sizes
+func (h *AdminHandler) ListBannerSizes(w http.ResponseWriter, r *http.Request) {
+	sizes, err := h.admin.ListBannerSizes(r.Context())
+	if err != nil {
+		slog.Error("admin: list banner sizes", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list banner sizes")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"sizes": sizes})
+}
+
+// CreateBannerSize handles POST /api/v1/admin/banner-sizes
+func (h *AdminHandler) CreateBannerSize(w http.ResponseWriter, r *http.Request) {
+	var input store.CreateBannerSizeInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if input.Width <= 0 || input.Height <= 0 {
+		writeError(w, http.StatusBadRequest, "width and height must be positive")
+		return
+	}
+
+	size, err := h.admin.CreateBannerSize(r.Context(), input)
+	if err != nil {
+		slog.Error("admin: create banner size", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create banner size")
+		return
+	}
+	writeJSON(w, http.StatusCreated, size)
+}
+
+// UpdateBannerSize handles PUT /api/v1/admin/banner-sizes/{id}
+func (h *AdminHandler) UpdateBannerSize(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid banner size id")
+		return
+	}
+
+	var body struct {
+		IsActive bool `json:"is_active"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := h.admin.UpdateBannerSize(r.Context(), id, body.IsActive); err != nil {
+		if err.Error() == "banner size not found" {
+			writeError(w, http.StatusNotFound, "banner size not found")
+			return
+		}
+		slog.Error("admin: update banner size", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to update banner size")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// ─── Banners ──────────────────────────────────────────────────────────────────
+
+// GetAccountBannerSummary handles GET /api/v1/admin/accounts/{id}/banners/summary
+func (h *AdminHandler) GetAccountBannerSummary(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	summary, err := h.admin.GetAccountBannerSummary(r.Context(), id)
+	if err != nil {
+		slog.Error("admin: banner summary", "error", err, "account_id", id)
+		writeError(w, http.StatusInternalServerError, "failed to get banner summary")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"sizes": summary})
+}
+
+// ListAccountBanners handles GET /api/v1/admin/accounts/{id}/banners
+func (h *AdminHandler) ListAccountBanners(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	sizeID, _ := strconv.ParseInt(r.URL.Query().Get("size_id"), 10, 64)
+	page := intParam(r, "page", 1)
+	perPage := intParam(r, "per_page", 20)
+
+	result, err := h.admin.ListAccountBanners(r.Context(), id, sizeID, page, perPage)
+	if err != nil {
+		slog.Error("admin: list account banners", "error", err, "account_id", id)
+		writeError(w, http.StatusInternalServerError, "failed to list banners")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GenerateAccountBanners handles POST /api/v1/admin/accounts/{id}/banners/generate
+func (h *AdminHandler) GenerateAccountBanners(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	if err := h.admin.EnqueueBannerGeneration(r.Context(), id, 0); err != nil {
+		slog.Error("admin: generate banners", "error", err, "account_id", id)
+		writeError(w, http.StatusInternalServerError, "failed to enqueue banner generation")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "enqueued"})
+}
+
+// ListAllBanners handles GET /api/v1/admin/banners
+func (h *AdminHandler) ListAllBanners(w http.ResponseWriter, r *http.Request) {
+	page := intParam(r, "page", 1)
+	perPage := intParam(r, "per_page", 20)
+
+	result, err := h.admin.ListAllBanners(r.Context(), page, perPage)
+	if err != nil {
+		slog.Error("admin: list all banners", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list banners")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}

@@ -391,12 +391,21 @@ func (s *AdminStore) UpdateAccount(ctx context.Context, id int64, input UpdateAc
 		}
 	}
 	if input.IsPaid != nil {
+		// Check current is_paid to detect false→true transition.
+		var wasPaid bool
+		_ = s.pool.QueryRow(ctx, `SELECT is_paid FROM accounts WHERE id = $1`, id).Scan(&wasPaid)
+
 		_, err := s.pool.Exec(ctx,
 			`UPDATE accounts SET is_paid = $2, updated_at = NOW() WHERE id = $1`,
 			id, *input.IsPaid,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("admin_store: update is_paid: %w", err)
+		}
+
+		// When promotion is enabled, enqueue banner generation for all videos.
+		if *input.IsPaid && !wasPaid {
+			_ = s.EnqueueBannerGeneration(ctx, id, 0)
 		}
 	}
 	if input.SocialLinks != nil {
@@ -1071,6 +1080,325 @@ func (s *AdminStore) ListVideoStats(ctx context.Context, sortBy string, sortDir 
 		PerPage:    perPage,
 		TotalPages: totalPages,
 	}, nil
+}
+
+// ─── Banner Sizes ─────────────────────────────────────────────────────────────
+
+type BannerSize struct {
+	ID        int64     `json:"id"`
+	Width     int       `json:"width"`
+	Height    int       `json:"height"`
+	Label     string    `json:"label"`
+	IsActive  bool      `json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (s *AdminStore) ListBannerSizes(ctx context.Context) ([]BannerSize, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, width, height, label, is_active, created_at FROM banner_sizes ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: list banner sizes: %w", err)
+	}
+	defer rows.Close()
+
+	var sizes []BannerSize
+	for rows.Next() {
+		var bs BannerSize
+		if err := rows.Scan(&bs.ID, &bs.Width, &bs.Height, &bs.Label, &bs.IsActive, &bs.CreatedAt); err != nil {
+			return nil, fmt.Errorf("admin_store: scan banner size: %w", err)
+		}
+		sizes = append(sizes, bs)
+	}
+	if sizes == nil {
+		sizes = []BannerSize{}
+	}
+	return sizes, rows.Err()
+}
+
+type CreateBannerSizeInput struct {
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Label  string `json:"label"`
+}
+
+func (s *AdminStore) CreateBannerSize(ctx context.Context, input CreateBannerSizeInput) (*BannerSize, error) {
+	var bs BannerSize
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO banner_sizes (width, height, label) VALUES ($1, $2, $3) RETURNING id, width, height, label, is_active, created_at`,
+		input.Width, input.Height, input.Label,
+	).Scan(&bs.ID, &bs.Width, &bs.Height, &bs.Label, &bs.IsActive, &bs.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: create banner size: %w", err)
+	}
+	return &bs, nil
+}
+
+func (s *AdminStore) UpdateBannerSize(ctx context.Context, id int64, isActive bool) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE banner_sizes SET is_active = $2 WHERE id = $1`, id, isActive)
+	if err != nil {
+		return fmt.Errorf("admin_store: update banner size: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("banner size not found")
+	}
+	return nil
+}
+
+// ─── Banners ──────────────────────────────────────────────────────────────────
+
+type AdminBanner struct {
+	ID           int64     `json:"id"`
+	AccountID    int64     `json:"account_id"`
+	VideoID      int64     `json:"video_id"`
+	BannerSizeID int64     `json:"banner_size_id"`
+	ImageURL     string    `json:"image_url"`
+	Width        int       `json:"width"`
+	Height       int       `json:"height"`
+	IsActive     bool      `json:"is_active"`
+	CreatedAt    time.Time `json:"created_at"`
+	VideoTitle   string    `json:"video_title"`
+	Username     string    `json:"username"`
+}
+
+type AdminBannerList struct {
+	Banners    []AdminBanner `json:"banners"`
+	Total      int64         `json:"total"`
+	Page       int           `json:"page"`
+	PerPage    int           `json:"per_page"`
+	TotalPages int           `json:"total_pages"`
+}
+
+type BannerSizeSummary struct {
+	BannerSizeID int64  `json:"banner_size_id"`
+	Width        int    `json:"width"`
+	Height       int    `json:"height"`
+	Label        string `json:"label"`
+	Count        int64  `json:"count"`
+}
+
+func (s *AdminStore) GetAccountBannerSummary(ctx context.Context, accountID int64) ([]BannerSizeSummary, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT bs.id, bs.width, bs.height, bs.label, COUNT(b.id) AS cnt
+		FROM banner_sizes bs
+		LEFT JOIN banners b ON b.banner_size_id = bs.id AND b.account_id = $1 AND b.is_active = true
+		WHERE bs.is_active = true
+		GROUP BY bs.id, bs.width, bs.height, bs.label
+		ORDER BY bs.id
+	`, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: banner summary: %w", err)
+	}
+	defer rows.Close()
+
+	var result []BannerSizeSummary
+	for rows.Next() {
+		var s BannerSizeSummary
+		if err := rows.Scan(&s.BannerSizeID, &s.Width, &s.Height, &s.Label, &s.Count); err != nil {
+			return nil, fmt.Errorf("admin_store: scan banner summary: %w", err)
+		}
+		result = append(result, s)
+	}
+	if result == nil {
+		result = []BannerSizeSummary{}
+	}
+	return result, rows.Err()
+}
+
+func (s *AdminStore) ListAccountBanners(ctx context.Context, accountID int64, sizeID int64, page, perPage int) (*AdminBannerList, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 || perPage > 100 {
+		perPage = 20
+	}
+
+	conditions := []string{"b.account_id = $1"}
+	args := []interface{}{accountID}
+	argIdx := 1
+
+	if sizeID > 0 {
+		argIdx++
+		conditions = append(conditions, fmt.Sprintf("b.banner_size_id = $%d", argIdx))
+		args = append(args, sizeID)
+	}
+
+	where := "WHERE " + conditions[0]
+	for _, c := range conditions[1:] {
+		where += " AND " + c
+	}
+
+	var total int64
+	countArgs := make([]interface{}, len(args))
+	copy(countArgs, args)
+	if err := s.pool.QueryRow(ctx, fmt.Sprintf("SELECT COUNT(*) FROM banners b %s", where), countArgs...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("admin_store: count banners: %w", err)
+	}
+
+	argIdx++
+	limitArg := fmt.Sprintf("$%d", argIdx)
+	args = append(args, perPage)
+	argIdx++
+	offsetArg := fmt.Sprintf("$%d", argIdx)
+	args = append(args, (page-1)*perPage)
+
+	query := fmt.Sprintf(`
+		SELECT b.id, b.account_id, b.video_id, b.banner_size_id, b.image_url, b.width, b.height, b.is_active, b.created_at,
+			COALESCE(v.title,''), COALESCE(a.username,'')
+		FROM banners b
+		JOIN videos v ON v.id = b.video_id
+		JOIN accounts a ON a.id = b.account_id
+		%s
+		ORDER BY b.created_at DESC
+		LIMIT %s OFFSET %s
+	`, where, limitArg, offsetArg)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: list banners: %w", err)
+	}
+	defer rows.Close()
+
+	var banners []AdminBanner
+	for rows.Next() {
+		var b AdminBanner
+		if err := rows.Scan(&b.ID, &b.AccountID, &b.VideoID, &b.BannerSizeID, &b.ImageURL,
+			&b.Width, &b.Height, &b.IsActive, &b.CreatedAt, &b.VideoTitle, &b.Username); err != nil {
+			return nil, fmt.Errorf("admin_store: scan banner: %w", err)
+		}
+		banners = append(banners, b)
+	}
+	if banners == nil {
+		banners = []AdminBanner{}
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(perPage)))
+
+	return &AdminBannerList{
+		Banners:    banners,
+		Total:      total,
+		Page:       page,
+		PerPage:    perPage,
+		TotalPages: totalPages,
+	}, rows.Err()
+}
+
+func (s *AdminStore) ListAllBanners(ctx context.Context, page, perPage int) (*AdminBannerList, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 || perPage > 100 {
+		perPage = 20
+	}
+
+	var total int64
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM banners WHERE is_active = true`).Scan(&total); err != nil {
+		return nil, fmt.Errorf("admin_store: count all banners: %w", err)
+	}
+
+	offset := (page - 1) * perPage
+	rows, err := s.pool.Query(ctx, `
+		SELECT b.id, b.account_id, b.video_id, b.banner_size_id, b.image_url, b.width, b.height, b.is_active, b.created_at,
+			COALESCE(v.title,''), COALESCE(a.username,'')
+		FROM banners b
+		JOIN videos v ON v.id = b.video_id
+		JOIN accounts a ON a.id = b.account_id
+		WHERE b.is_active = true
+		ORDER BY b.created_at DESC
+		LIMIT $1 OFFSET $2
+	`, perPage, offset)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: list all banners: %w", err)
+	}
+	defer rows.Close()
+
+	var banners []AdminBanner
+	for rows.Next() {
+		var b AdminBanner
+		if err := rows.Scan(&b.ID, &b.AccountID, &b.VideoID, &b.BannerSizeID, &b.ImageURL,
+			&b.Width, &b.Height, &b.IsActive, &b.CreatedAt, &b.VideoTitle, &b.Username); err != nil {
+			return nil, fmt.Errorf("admin_store: scan banner: %w", err)
+		}
+		banners = append(banners, b)
+	}
+	if banners == nil {
+		banners = []AdminBanner{}
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(perPage)))
+
+	return &AdminBannerList{
+		Banners:    banners,
+		Total:      total,
+		Page:       page,
+		PerPage:    perPage,
+		TotalPages: totalPages,
+	}, rows.Err()
+}
+
+func (s *AdminStore) InsertBanner(ctx context.Context, accountID, videoID, bannerSizeID int64, imageURL string, width, height int) (*AdminBanner, error) {
+	var b AdminBanner
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO banners (account_id, video_id, banner_size_id, image_url, width, height)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (video_id, banner_size_id) DO UPDATE SET image_url = EXCLUDED.image_url, is_active = true
+		RETURNING id, account_id, video_id, banner_size_id, image_url, width, height, is_active, created_at
+	`, accountID, videoID, bannerSizeID, imageURL, width, height).Scan(
+		&b.ID, &b.AccountID, &b.VideoID, &b.BannerSizeID, &b.ImageURL,
+		&b.Width, &b.Height, &b.IsActive, &b.CreatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: insert banner: %w", err)
+	}
+	return &b, nil
+}
+
+// EnqueueBannerGeneration inserts a job into banner_queue.
+// videoID=0 means generate for all videos of the account.
+func (s *AdminStore) EnqueueBannerGeneration(ctx context.Context, accountID int64, videoID int64) error {
+	var vidPtr *int64
+	if videoID > 0 {
+		vidPtr = &videoID
+	}
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO banner_queue (account_id, video_id, status) VALUES ($1, $2, 'pending')`,
+		accountID, vidPtr,
+	)
+	if err != nil {
+		return fmt.Errorf("admin_store: enqueue banner generation: %w", err)
+	}
+	return nil
+}
+
+// GetBannerByID returns a banner with its image_url for public serving.
+func (s *AdminStore) GetBannerByID(ctx context.Context, id int64) (*AdminBanner, error) {
+	var b AdminBanner
+	err := s.pool.QueryRow(ctx, `
+		SELECT b.id, b.account_id, b.video_id, b.banner_size_id, b.image_url, b.width, b.height, b.is_active, b.created_at,
+			COALESCE(v.title,''), COALESCE(a.username,'')
+		FROM banners b
+		JOIN videos v ON v.id = b.video_id
+		JOIN accounts a ON a.id = b.account_id
+		WHERE b.id = $1
+	`, id).Scan(
+		&b.ID, &b.AccountID, &b.VideoID, &b.BannerSizeID, &b.ImageURL,
+		&b.Width, &b.Height, &b.IsActive, &b.CreatedAt, &b.VideoTitle, &b.Username,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("admin_store: get banner by id: %w", err)
+	}
+	return &b, nil
+}
+
+// GetAccountSlug returns the slug for public redirect from banner click.
+func (s *AdminStore) GetAccountSlug(ctx context.Context, accountID int64) (string, error) {
+	var slug string
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(slug,'') FROM accounts WHERE id = $1`, accountID).Scan(&slug)
+	if err != nil {
+		return "", fmt.Errorf("admin_store: get account slug: %w", err)
+	}
+	return slug, nil
 }
 
 // ─── Video Metadata for ClickHouse stats ─────────────────────────────────────

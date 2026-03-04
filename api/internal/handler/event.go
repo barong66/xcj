@@ -33,6 +33,8 @@ var validEventTypes = map[string]bool{
 	"social_click":             true,
 	"share_click":              true,
 	"ad_landing":               true,
+	"banner_impression":        true,
+	"banner_click":             true,
 }
 
 // Create handles POST /api/v1/events
