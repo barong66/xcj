@@ -3,6 +3,7 @@ from __future__ import annotations
 import abc
 import dataclasses
 import logging
+import re
 from datetime import datetime
 from typing import List, Optional
 
@@ -31,6 +32,53 @@ class ParsedVideo:
     thumbnail_source_url: Optional[str] = None
     # Direct video URL (for preview generation)
     video_url: Optional[str] = None
+
+
+# ─── Bio text cleaning ────────────────────────────────────────────
+
+_CTA_PATTERNS = re.compile(
+    r"(?:link\s*(?:in\s*)?(?:bio|below|here|⬇️|👇))"
+    r"|(?:linktree|linktr\.ee|beacons\.ai|allmylinks|hoo\.be|solo\.to)"
+    r"|(?:tap\s*(?:the\s*)?link)"
+    r"|(?:👇\s*👇)"
+    r"|(?:⬇️\s*⬇️)",
+    re.IGNORECASE,
+)
+
+
+def clean_bio(text: str) -> str:
+    """Strip URLs, @mentions, #hashtags, emails, and CTA spam from bio text."""
+    if not text:
+        return ""
+
+    # Remove email addresses first (before URL/domain stripping).
+    text = re.sub(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b", "", text)
+
+    # Remove URLs.
+    text = re.sub(r"https?://\S+", "", text)
+    text = re.sub(r"www\.\S+", "", text)
+    text = re.sub(
+        r"\b\w+\.(?:com|net|org|io|co|me|link|bio|tv|app|xyz|gg|ly|ee)\b(?:/\S*)?",
+        "", text,
+    )
+
+    # Remove @mentions.
+    text = re.sub(r"@[\w.]+", "", text)
+
+    # Remove #hashtags.
+    text = re.sub(r"#\w+", "", text)
+
+    # Remove CTA phrases.
+    text = _CTA_PATTERNS.sub("", text)
+
+    # Remove orphaned pointing emojis.
+    text = re.sub(r"[👇⬇️➡️👆⬆️🔗🔽]+", "", text)
+
+    # Collapse whitespace, preserve intentional line breaks.
+    lines = text.split("\n")
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in lines]
+    lines = [line for line in lines if line]
+    return "\n".join(lines).strip()
 
 
 def should_skip_video(

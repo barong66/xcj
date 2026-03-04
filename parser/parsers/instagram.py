@@ -14,7 +14,7 @@ import httpx
 from PIL import Image
 
 from parser.config.settings import settings
-from parser.parsers.base import BaseParser, ParsedVideo, should_skip_video
+from parser.parsers.base import BaseParser, ParsedVideo, clean_bio, should_skip_video
 
 try:
     from apify_client import ApifyClient
@@ -344,7 +344,7 @@ def _apify_get_profile_info(username: str) -> Optional[Dict]:
         or profile.get("profilePicUrl")
     )
     display_name = profile.get("fullName") or username
-    bio = profile.get("biography")
+    bio = clean_bio(profile.get("biography") or "")
     follower_count = profile.get("followersCount")
 
     logger.info(

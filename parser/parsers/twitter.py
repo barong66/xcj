@@ -14,7 +14,7 @@ from PIL import Image
 from yt_dlp import YoutubeDL
 
 from parser.config.settings import settings
-from parser.parsers.base import BaseParser, ParsedVideo, should_skip_video
+from parser.parsers.base import BaseParser, ParsedVideo, clean_bio, should_skip_video
 
 logger = logging.getLogger(__name__)
 
@@ -282,7 +282,7 @@ class TwitterParser(BaseParser):
                 "display_name": result.get("uploader") or result.get("channel") or username,
                 "avatar_url": result.get("thumbnails", [{}])[0].get("url") if result.get("thumbnails") else None,
                 "follower_count": result.get("channel_follower_count"),
-                "bio": result.get("description"),
+                "bio": clean_bio(result.get("description") or ""),
             }
 
         loop = asyncio.get_running_loop()
