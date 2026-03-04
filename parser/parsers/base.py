@@ -71,8 +71,8 @@ def clean_bio(text: str) -> str:
     # Remove CTA phrases.
     text = _CTA_PATTERNS.sub("", text)
 
-    # Remove orphaned pointing emojis.
-    text = re.sub(r"[👇⬇️➡️👆⬆️🔗🔽]+", "", text)
+    # Remove orphaned pointing/link emojis (specific sequences, not bare variation selectors).
+    text = re.sub(r"(?:👇|⬇️|➡️|👆|⬆️|🔗|🔽)+", "", text)
 
     # Collapse whitespace, preserve intentional line breaks.
     lines = text.split("\n")
