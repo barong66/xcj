@@ -85,7 +85,8 @@ def gemini_crop_and_enhance(
             "You are a professional photographer choosing the best frame. "
             "Apply rule of thirds, find the most flattering and seductive composition. "
             "Focus on face and body, keep the subject well-framed. "
-            "Boost contrast and color saturation to make it vivid and eye-catching. "
+            "Significantly boost contrast, color saturation, and sharpness — "
+            "make the image punchy, crisp, and vivid like a magazine cover. "
             "Do not add any text, logos, or watermarks. "
             "Return only the cropped and enhanced image."
         )
