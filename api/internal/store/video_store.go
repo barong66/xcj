@@ -85,12 +85,14 @@ func (s *VideoStore) List(ctx context.Context, params model.VideoListParams) (*m
 	offset := (params.Page - 1) * params.PerPage
 
 	selectQuery := fmt.Sprintf(`
-		SELECT DISTINCT v.id, v.account_id, v.platform, v.platform_id, v.original_url,
+		SELECT v.id, v.account_id, v.platform, v.platform_id, v.original_url,
 			COALESCE(v.title,''), COALESCE(v.description,''), v.duration_sec, COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(v.preview_url,''),
 			v.width, v.height, v.country_id, v.view_count, v.click_count,
 			v.is_active, v.is_promoted, v.promoted_until, v.promotion_weight,
 			v.published_at, v.created_at
-		FROM videos v %s %s %s
+		FROM videos v %s %s
+		GROUP BY v.id
+		%s
 		LIMIT %s OFFSET %s
 	`, joinClause, whereClause, orderBy, nextArg(params.PerPage), nextArg(offset))
 
