@@ -207,6 +207,7 @@ func (h *BannerHandler) getBannerPool(r *http.Request, width, height int, cat, k
 	// Try cache.
 	var pool []store.ServableBanner
 	if h.cache.GetJSON(ctx, cacheKey, &pool) {
+		slog.Info("banner: cache hit", "key", cacheKey, "count", len(pool))
 		return pool
 	}
 
@@ -218,7 +219,7 @@ func (h *BannerHandler) getBannerPool(r *http.Request, width, height int, cat, k
 		return nil
 	}
 
-	// Cache the result (even if empty, to avoid repeated misses).
+	slog.Info("banner: cache miss", "key", cacheKey, "count", len(pool))
 	h.cache.SetList(ctx, cacheKey, pool)
 	return pool
 }
