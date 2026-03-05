@@ -102,6 +102,7 @@ func main() {
 		cfg.RateLimitRPS,
 		workerMgr,
 		rankingService,
+		cfg.SiteBaseURL,
 	)
 
 	// Create HTTP server.

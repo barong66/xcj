@@ -29,6 +29,7 @@ func NewRouter(
 	rateLimitRPS int,
 	workerMgr *worker.Manager,
 	ranker *ranking.Service,
+	siteBaseURL string,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -114,7 +115,8 @@ func NewRouter(
 	})
 
 	// Public banner serving — no auth, no site detection.
-	bannerHandler := NewBannerHandler(adminStore, eventBuffer)
+	bannerHandler := NewBannerHandler(adminStore, eventBuffer, c, siteBaseURL)
+	r.Get("/b/serve", bannerHandler.ServeDynamic)
 	r.Get("/b/{id}", bannerHandler.ServeBanner)
 	r.Get("/b/{id}/click", bannerHandler.ClickBanner)
 

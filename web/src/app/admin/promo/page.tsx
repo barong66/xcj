@@ -6,9 +6,97 @@ import {
   getAllBanners,
   getBannerSizes,
   createBannerSize,
+  getAdminCategories,
 } from "@/lib/admin-api";
-import type { AdminBanner, BannerSize } from "@/lib/admin-api";
+import type { AdminBanner, AdminCategory, BannerSize } from "@/lib/admin-api";
 import { ToastProvider, useToast } from "../Toast";
+
+function EmbedCodeSection({
+  sizes,
+  toast,
+}: {
+  sizes: BannerSize[];
+  toast: (msg: string, type?: "error" | "success" | "info") => void;
+}) {
+  const [categories, setCategories] = useState<AdminCategory[]>([]);
+  const [selectedCat, setSelectedCat] = useState("");
+  const [keywords, setKeywords] = useState("");
+
+  useEffect(() => {
+    getAdminCategories().then(setCategories).catch(() => {});
+  }, []);
+
+  const buildCode = (size: BannerSize) => {
+    const params = new URLSearchParams();
+    params.set("size", `${size.width}x${size.height}`);
+    if (selectedCat) params.set("cat", selectedCat);
+    if (keywords.trim()) params.set("kw", keywords.trim());
+
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const src = `${origin}/b/serve?${params.toString()}`;
+
+    return `<iframe src="${src}" width="${size.width}" height="${size.height}" frameborder="0" scrolling="no" style="border:none;overflow:hidden"></iframe>`;
+  };
+
+  const handleCopy = (code: string) => {
+    navigator.clipboard.writeText(code);
+    toast("Embed code copied");
+  };
+
+  return (
+    <div className="mb-6">
+      <h2 className="text-sm font-semibold text-white mb-3">Embed Code</h2>
+
+      <div className="flex items-center gap-3 mb-3">
+        <select
+          value={selectedCat}
+          onChange={(e) => setSelectedCat(e.target.value)}
+          className="px-3 py-1.5 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white focus:outline-none focus:border-accent"
+        >
+          <option value="">All categories</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.slug}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <input
+          value={keywords}
+          onChange={(e) => setKeywords(e.target.value)}
+          placeholder="Keywords (optional)"
+          className="px-3 py-1.5 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white placeholder-[#4a4a4a] focus:outline-none focus:border-accent"
+        />
+      </div>
+
+      <div className="space-y-2">
+        {sizes.map((size) => (
+          <div
+            key={size.id}
+            className="bg-[#141414] rounded-lg border border-[#1e1e1e] p-3"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-white">
+                {size.label || `${size.width}x${size.height}`}{" "}
+                <span className="text-[#6b6b6b]">
+                  ({size.width}x{size.height})
+                </span>
+              </span>
+              <button
+                onClick={() => handleCopy(buildCode(size))}
+                className="px-2 py-1 text-[10px] rounded bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525] transition-colors"
+              >
+                Copy
+              </button>
+            </div>
+            <pre className="text-[11px] text-[#6b6b6b] bg-[#0a0a0a] rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">
+              {buildCode(size)}
+            </pre>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function PromoContent() {
   const [banners, setBanners] = useState<AdminBanner[]>([]);
@@ -172,6 +260,11 @@ function PromoContent() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Embed Code */}
+      {sizes.filter((s) => s.is_active).length > 0 && (
+        <EmbedCodeSection sizes={sizes.filter((s) => s.is_active)} toast={toast} />
       )}
 
       {/* Banner list */}

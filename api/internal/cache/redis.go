@@ -162,6 +162,18 @@ func RankedFeedKey(siteID int64, page int) string {
 	return fmt.Sprintf("rf:%d:%d", siteID, page)
 }
 
+func BannerPoolKey(width, height int) string {
+	return fmt.Sprintf("bp:%dx%d", width, height)
+}
+
+func BannerPoolCatKey(width, height int, catSlug string) string {
+	return fmt.Sprintf("bp:%dx%d:%s", width, height, catSlug)
+}
+
+func BannerPoolAccKey(width, height int, accountID int64) string {
+	return fmt.Sprintf("bp:%dx%d:a%d", width, height, accountID)
+}
+
 // InvalidateAccounts removes all cached account data.
 func (c *Cache) InvalidateAccounts(ctx context.Context) {
 	c.InvalidatePattern(ctx, "acc:*")

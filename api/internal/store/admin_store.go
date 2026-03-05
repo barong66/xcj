@@ -1409,6 +1409,89 @@ func (s *AdminStore) GetAccountSlug(ctx context.Context, accountID int64) (strin
 	return slug, nil
 }
 
+// ─── Dynamic Banner Serving ──────────────────────────────────────────────────
+
+// ServableBanner holds minimal data for dynamic banner serving.
+type ServableBanner struct {
+	ID        int64  `json:"id"`
+	AccountID int64  `json:"aid"`
+	VideoID   int64  `json:"vid"`
+	ImageURL  string `json:"url"`
+	Width     int    `json:"w"`
+	Height    int    `json:"h"`
+}
+
+// ListServableBanners returns all active banners for given size, optionally filtered by category or account.
+func (s *AdminStore) ListServableBanners(ctx context.Context, width, height int, categorySlug string, accountID int64) ([]ServableBanner, error) {
+	query := `
+		SELECT b.id, b.account_id, b.video_id, b.image_url, b.width, b.height
+		FROM banners b
+		JOIN videos v ON v.id = b.video_id AND v.is_active = true
+		JOIN accounts a ON a.id = b.account_id AND a.is_paid = true AND a.is_active = true`
+
+	args := []interface{}{width, height}
+	argN := 3
+
+	if categorySlug != "" {
+		query += `
+		JOIN video_categories vc ON vc.video_id = v.id
+		JOIN categories c ON c.id = vc.category_id AND c.slug = $` + fmt.Sprintf("%d", argN)
+		args = append(args, categorySlug)
+		argN++
+	}
+
+	query += `
+		WHERE b.is_active = true AND b.width = $1 AND b.height = $2`
+
+	if accountID > 0 {
+		query += fmt.Sprintf(` AND b.account_id = $%d`, argN)
+		args = append(args, accountID)
+		argN++
+	}
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: list servable banners: %w", err)
+	}
+	defer rows.Close()
+
+	var banners []ServableBanner
+	for rows.Next() {
+		var b ServableBanner
+		if err := rows.Scan(&b.ID, &b.AccountID, &b.VideoID, &b.ImageURL, &b.Width, &b.Height); err != nil {
+			return nil, fmt.Errorf("admin_store: scan servable banner: %w", err)
+		}
+		banners = append(banners, b)
+	}
+	return banners, rows.Err()
+}
+
+// ListServableBannersByKeyword returns banners matching a keyword in video title/description.
+func (s *AdminStore) ListServableBannersByKeyword(ctx context.Context, width, height int, keyword string) ([]ServableBanner, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT b.id, b.account_id, b.video_id, b.image_url, b.width, b.height
+		FROM banners b
+		JOIN videos v ON v.id = b.video_id AND v.is_active = true
+		JOIN accounts a ON a.id = b.account_id AND a.is_paid = true AND a.is_active = true
+		WHERE b.is_active = true AND b.width = $1 AND b.height = $2
+			AND (v.title ILIKE '%' || $3 || '%' OR COALESCE(v.description,'') ILIKE '%' || $3 || '%')
+	`, width, height, keyword)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: list servable banners by keyword: %w", err)
+	}
+	defer rows.Close()
+
+	var banners []ServableBanner
+	for rows.Next() {
+		var b ServableBanner
+		if err := rows.Scan(&b.ID, &b.AccountID, &b.VideoID, &b.ImageURL, &b.Width, &b.Height); err != nil {
+			return nil, fmt.Errorf("admin_store: scan servable banner kw: %w", err)
+		}
+		banners = append(banners, b)
+	}
+	return banners, rows.Err()
+}
+
 // ─── Video Metadata for ClickHouse stats ─────────────────────────────────────
 
 // VideoMeta holds basic video info for enriching ClickHouse stats.

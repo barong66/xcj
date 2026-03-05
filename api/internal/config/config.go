@@ -24,6 +24,8 @@ type Config struct {
 	AdminToken string
 
 	ProjectDir string // root directory containing parser/ package
+
+	SiteBaseURL string // public site URL for absolute redirects (e.g. https://temptguide.com)
 }
 
 func Load() *Config {
@@ -45,6 +47,8 @@ func Load() *Config {
 		AdminToken: envOrDefault("ADMIN_TOKEN", "xcj-admin-2024"),
 
 		ProjectDir: envOrDefault("PROJECT_DIR", ".."),
+
+		SiteBaseURL: envOrDefault("SITE_BASE_URL", ""),
 	}
 }
 
