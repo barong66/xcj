@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { searchVideos } from "@/lib/api";
+import Link from "next/link";
+import { searchVideos, getCategories, getVideos } from "@/lib/api";
 import { SITE_NAME, SITE_URL } from "@/lib/constants";
 import { InfiniteVideoGrid } from "@/components/InfiniteVideoGrid";
+import { ExploreGrid } from "@/components/ExploreGrid";
 import { SearchBar } from "@/components/SearchBar";
 import { ErrorState } from "@/components/ErrorState";
 
@@ -17,12 +19,12 @@ export async function generateMetadata({
   const query = params.q || "";
 
   return {
-    title: query ? `Search: ${query}` : "Search Videos",
+    title: query ? `Search: ${query}` : "Explore",
     description: query
       ? `Search results for "${query}" on ${SITE_NAME}.`
-      : `Search for videos on ${SITE_NAME}.`,
+      : `Explore trending videos on ${SITE_NAME}.`,
     openGraph: {
-      title: query ? `Search: ${query} | ${SITE_NAME}` : `Search | ${SITE_NAME}`,
+      title: query ? `Search: ${query} | ${SITE_NAME}` : `Explore | ${SITE_NAME}`,
       url: `${SITE_URL}/search${query ? `?q=${encodeURIComponent(query)}` : ""}`,
     },
     robots: {
@@ -38,28 +40,54 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   const page = parseInt(params.page || "1", 10);
 
   if (!query) {
+    let categories;
+    let videos;
+    try {
+      [categories, videos] = await Promise.all([
+        getCategories(),
+        getVideos({ sort: "random", per_page: 12 }),
+      ]);
+    } catch {
+      return <ErrorState message="Could not load explore page." />;
+    }
+
+    // Top 12 categories sorted by video count
+    const topCategories = [...categories]
+      .sort((a, b) => (b.video_count || 0) - (a.video_count || 0))
+      .slice(0, 12);
+
     return (
-      <div className="px-4 pt-4">
-        <Suspense fallback={null}>
-          <SearchBar />
-        </Suspense>
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <svg
-            className="w-16 h-16 text-txt-muted mb-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            strokeWidth={1.5}
-          >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <p className="text-txt-secondary text-lg font-medium">Search</p>
-          <p className="text-txt-muted text-sm mt-1">
-            Find videos, accounts, and more
-          </p>
+      <>
+        <div className="px-4 pt-4 pb-3">
+          <Suspense fallback={null}>
+            <SearchBar />
+          </Suspense>
         </div>
-      </div>
+
+        {topCategories.length > 0 && (
+          <div className="px-4 pb-3">
+            <div className="grid grid-cols-4 gap-1.5">
+              {topCategories.map((cat) => (
+                <Link
+                  key={cat.slug}
+                  href={`/category/${cat.slug}`}
+                  className="px-2 py-2 bg-bg-card border border-border rounded-lg text-center hover:bg-bg-hover transition-colors"
+                >
+                  <span className="text-[11px] font-medium text-txt leading-tight line-clamp-1">
+                    {cat.name}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <ExploreGrid
+          initialVideos={videos.videos}
+          initialPage={videos.page}
+          totalPages={videos.pages}
+        />
+      </>
     );
   }
 
