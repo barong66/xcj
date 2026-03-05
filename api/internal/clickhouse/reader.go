@@ -49,7 +49,7 @@ func (r *Reader) Close() error {
 
 // VideoStat holds aggregated stats for a single video from ClickHouse events.
 type VideoStat struct {
-	VideoID     uint64  `json:"video_id"`
+	VideoID     int64   `json:"video_id"`
 	Impressions uint64  `json:"impressions"`
 	Clicks      uint64  `json:"clicks"`
 	CTR         float64 `json:"ctr"`
@@ -164,8 +164,8 @@ func (r *Reader) GetFeedCTRStats(ctx context.Context) ([]FeedCTRStat, error) {
 	rows, err := r.conn.Query(ctx, `
 		SELECT
 			video_id,
-			countIf(event_type = 'feed_impression') AS impressions,
-			countIf(event_type = 'feed_click') AS clicks
+			toInt64(countIf(event_type = 'feed_impression')) AS impressions,
+			toInt64(countIf(event_type = 'feed_click')) AS clicks
 		FROM events
 		WHERE event_type IN ('feed_impression', 'feed_click')
 			AND created_at > now() - INTERVAL 7 DAY
@@ -194,15 +194,15 @@ func (r *Reader) GetFeedCTRStats(ctx context.Context) ([]FeedCTRStat, error) {
 
 // BannerStat holds per-video banner impression/click stats.
 type BannerStat struct {
-	VideoID     uint64  `json:"video_id"`
+	VideoID     int64   `json:"video_id"`
 	Impressions uint64  `json:"impressions"`
 	Clicks      uint64  `json:"clicks"`
 	CTR         float64 `json:"ctr"`
 }
 
 // GetBannerStats queries ClickHouse for banner_impression/banner_click stats grouped by video_id.
-func (r *Reader) GetBannerStats(ctx context.Context, videoIDs []uint64) (map[uint64]BannerStat, error) {
-	result := make(map[uint64]BannerStat, len(videoIDs))
+func (r *Reader) GetBannerStats(ctx context.Context, videoIDs []int64) (map[int64]BannerStat, error) {
+	result := make(map[int64]BannerStat, len(videoIDs))
 	if len(videoIDs) == 0 {
 		return result, nil
 	}

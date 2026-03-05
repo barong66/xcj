@@ -392,7 +392,7 @@ func (h *AdminHandler) GetVideoStats(w http.ResponseWriter, r *http.Request) {
 	// Collect video IDs to fetch metadata from PostgreSQL.
 	videoIDs := make([]int64, len(chResult.Stats))
 	for i, s := range chResult.Stats {
-		videoIDs[i] = int64(s.VideoID)
+		videoIDs[i] = s.VideoID
 	}
 
 	// Fetch video metadata from PG.
@@ -420,10 +420,9 @@ func (h *AdminHandler) GetVideoStats(w http.ResponseWriter, r *http.Request) {
 
 	videos := make([]VideoStatResponse, 0, len(chResult.Stats))
 	for _, s := range chResult.Stats {
-		vid := int64(s.VideoID)
-		meta, ok := videoMeta[vid]
+		meta, ok := videoMeta[s.VideoID]
 		v := VideoStatResponse{
-			ID:          vid,
+			ID:          s.VideoID,
 			Impressions: s.Impressions,
 			Clicks:      s.Clicks,
 			CTR:         s.CTR,
@@ -723,9 +722,9 @@ func (h *AdminHandler) enrichBannerStats(ctx context.Context, banners []store.Ad
 	if len(banners) == 0 {
 		return
 	}
-	videoIDs := make([]uint64, 0, len(banners))
+	videoIDs := make([]int64, 0, len(banners))
 	for _, b := range banners {
-		videoIDs = append(videoIDs, uint64(b.VideoID))
+		videoIDs = append(videoIDs, b.VideoID)
 	}
 	stats, err := h.ch.GetBannerStats(ctx, videoIDs)
 	if err != nil {
@@ -733,7 +732,7 @@ func (h *AdminHandler) enrichBannerStats(ctx context.Context, banners []store.Ad
 		return
 	}
 	for i := range banners {
-		if s, ok := stats[uint64(banners[i].VideoID)]; ok {
+		if s, ok := stats[banners[i].VideoID]; ok {
 			banners[i].Impressions = s.Impressions
 			banners[i].Clicks = s.Clicks
 			banners[i].CTR = s.CTR
