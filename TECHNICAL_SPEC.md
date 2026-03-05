@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-04
+> Last updated: 2026-03-05
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -182,12 +182,13 @@ xcj/
 | width | INT | Ширина в пикселях |
 | height | INT | Высота в пикселях |
 | label | VARCHAR(64) | Название (Medium Rectangle, Leaderboard, etc) |
+| type | VARCHAR(16) DEFAULT 'image' | Тип промо: image (баннер) или video (preroll) |
 | is_active | BOOLEAN DEFAULT true | Используется ли |
 | created_at | TIMESTAMPTZ | |
 
 **UNIQUE:** (width, height)
 
-**Начальные размеры:** 300x250 (Medium Rectangle), 728x90 (Leaderboard), 160x600 (Wide Skyscraper), 320x50 (Mobile Banner)
+**Начальный размер:** 300x250 (Medium Rectangle, type=image)
 
 #### `banners` — Сгенерированные баннеры
 | Поле | Тип | Описание |
@@ -432,6 +433,22 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 | banner_quality | 90 | JPEG quality баннеров |
 | banner_poll_interval_sec | 10 | Интервал опроса banner_queue |
 
+### 6.5 Генерация баннеров (parser/utils/image.py)
+
+**Зависимости:** opencv-python-headless (face detection), numpy, Pillow, fonts-dejavu-core (Docker)
+
+**Пайплайн:**
+1. **detect_face(img)** — OpenCV Haar cascade, возвращает (x,y,w,h) наибольшего лица
+2. **smart_crop(img, ratio)** — face-aware кроп:
+   - Лицо найдено → кроп центрируется на лице (face в верхних 35% кропа)
+   - Лицо не найдено → upper-third bias (offset = 25% вместо 50% при center crop)
+   - Горизонтальный кроп: аналогично по X-оси
+3. **add_overlay(img, username)** — gradient + текст:
+   - Нижние 35% — чёрный градиент (0→70% opacity, numpy vectorized)
+   - @username — белый, слева (DejaVu Sans Bold, 7% высоты)
+   - "Watch Now →" — accent red (#EA384C), справа
+4. **generate_banner(src, dest, w, h, quality, username)** — полный пайплайн
+
 ---
 
 ## 7. Next.js Frontend
@@ -546,9 +563,12 @@ Banner Worker забирает задачу из banner_queue
 → Получает active banner_sizes
 → Если video_id=NULL → все видео аккаунта, иначе конкретное видео
 → Для каждого (video, size):
-   → Скачать thumbnail_lg_url
-   → crop_to_ratio (центр) → resize (Lanczos) → JPEG q=90
-   → Загрузить в R2: banners/{account_id}/{video_id}_{w}x{h}.jpg
+   → Скачать thumbnail_lg_url (810x1440 портрет)
+   → Face detection (OpenCV Haar cascade) → определить позицию лица
+   → Smart crop: лицо в верхней трети кропа; без лица — upper-third bias (25%)
+   → Resize (Lanczos) → целевой размер
+   → Text overlay: gradient внизу (0→70% чёрный) + @username + "Watch Now →"
+   → JPEG q=90 → загрузить в R2: banners/{account_id}/{video_id}_{w}x{h}.jpg
    → INSERT в таблицу banners
 → Обновить статус задачи (done/failed)
 ```

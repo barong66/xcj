@@ -102,6 +102,12 @@ def upload_avatar(local_path: str, platform: str, username: str) -> str:
 
 
 def upload_banner(local_path: str, account_id: int, video_id: int, width: int, height: int) -> str:
-    """Upload a banner image and return its public URL."""
+    """Upload a banner image and return its public URL.
+
+    Appends a cache-busting timestamp param so regenerated banners
+    bypass CDN/browser cache (same S3 key, immutable headers).
+    """
+    import time
     s3_key = f"banners/{account_id}/{video_id}_{width}x{height}.jpg"
-    return upload_file(local_path, s3_key)
+    url = upload_file(local_path, s3_key)
+    return f"{url}?v={int(time.time())}"
