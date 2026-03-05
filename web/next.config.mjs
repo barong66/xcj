@@ -13,6 +13,15 @@ const nextConfig = {
       },
     ],
   },
+  async rewrites() {
+    const apiUrl = process.env.INTERNAL_API_URL || "http://api:8080";
+    return [
+      {
+        source: "/b/:path*",
+        destination: `${apiUrl}/b/:path*`,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
