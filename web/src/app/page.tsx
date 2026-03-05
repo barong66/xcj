@@ -8,6 +8,7 @@ import { SortControls } from "@/components/SortControls";
 import { WebsiteJsonLd } from "@/components/JsonLd";
 import { ErrorState } from "@/components/ErrorState";
 import { AdLandingTracker } from "@/components/AdLandingTracker";
+import { ProfileStories } from "@/components/ProfileStories";
 
 export const metadata: Metadata = {
   title: `${SITE_NAME} - Trending Videos from Twitter & Instagram`,
@@ -33,6 +34,11 @@ export default async function HomePage({ searchParams }: HomePageProps) {
       <>
         <WebsiteJsonLd searchUrl="/search" />
         {src && <AdLandingTracker source={src} anchor={anchor} />}
+        {!anchor && (
+          <Suspense fallback={null}>
+            <ProfileStories />
+          </Suspense>
+        )}
         {!anchor && (
           <div className="px-4 py-2">
             <Suspense fallback={null}>

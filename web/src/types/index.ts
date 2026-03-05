@@ -12,6 +12,14 @@ export interface Account {
   videos?: Video[];
 }
 
+export interface AccountSummary {
+  id: number;
+  username: string;
+  slug: string;
+  display_name: string;
+  avatar_url: string;
+}
+
 export interface Category {
   slug: string;
   name: string;

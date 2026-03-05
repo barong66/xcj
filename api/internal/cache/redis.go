@@ -145,6 +145,10 @@ func AccountSlugKey(slug string, perPage int) string {
 	return fmt.Sprintf("accs:%s:%d", slug, perPage)
 }
 
+func AccountListKey(siteID int64) string {
+	return fmt.Sprintf("accl:%d", siteID)
+}
+
 func SearchKey(siteID int64, query string, page int) string {
 	return fmt.Sprintf("src:%d:%s:%d", siteID, query, page)
 }

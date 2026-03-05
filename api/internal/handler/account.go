@@ -49,6 +49,38 @@ func buildAccountResponse(a *model.Account, page, perPage int, site *model.Site)
 	return resp
 }
 
+// List handles GET /api/v1/accounts
+func (h *AccountHandler) List(w http.ResponseWriter, r *http.Request) {
+	site := middleware.SiteFromContext(r.Context())
+	if site == nil {
+		writeError(w, http.StatusInternalServerError, "site not resolved")
+		return
+	}
+
+	limit := intParam(r, "limit", 50)
+
+	cacheKey := cache.AccountListKey(site.ID)
+	var cached []store.AccountSummary
+	if h.cache.GetJSON(r.Context(), cacheKey, &cached) {
+		writeJSON(w, http.StatusOK, map[string]any{"accounts": cached})
+		return
+	}
+
+	accounts, err := h.accounts.List(r.Context(), site.ID, limit)
+	if err != nil {
+		slog.Error("handler: list accounts", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list accounts")
+		return
+	}
+
+	if accounts == nil {
+		accounts = []store.AccountSummary{}
+	}
+
+	h.cache.SetList(r.Context(), cacheKey, accounts)
+	writeJSON(w, http.StatusOK, map[string]any{"accounts": accounts})
+}
+
 // Get handles GET /api/v1/accounts/{id}
 func (h *AccountHandler) Get(w http.ResponseWriter, r *http.Request) {
 	site := middleware.SiteFromContext(r.Context())

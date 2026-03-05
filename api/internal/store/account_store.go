@@ -102,6 +102,47 @@ func (s *AccountStore) GetByID(ctx context.Context, id int64, siteID int64, page
 	return &a, nil
 }
 
+// AccountSummary is a lightweight account representation for list views.
+type AccountSummary struct {
+	ID          int64  `json:"id"`
+	Username    string `json:"username"`
+	Slug        string `json:"slug"`
+	DisplayName string `json:"display_name"`
+	AvatarURL   string `json:"avatar_url"`
+}
+
+// List returns accounts linked to a site that have avatars, sorted by video count desc.
+func (s *AccountStore) List(ctx context.Context, siteID int64, limit int) ([]AccountSummary, error) {
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT a.id, a.username, COALESCE(a.slug,''), COALESCE(a.display_name,''), a.avatar_url
+		FROM accounts a
+		JOIN videos v ON v.account_id = a.id
+		JOIN site_videos sv ON sv.video_id = v.id
+		WHERE sv.site_id = $1 AND a.avatar_url IS NOT NULL AND a.avatar_url != '' AND a.is_active = true AND v.is_active = true
+		GROUP BY a.id, a.username, a.slug, a.display_name, a.avatar_url
+		ORDER BY COUNT(v.id) DESC
+		LIMIT $2
+	`, siteID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("account_store: list: %w", err)
+	}
+	defer rows.Close()
+
+	var accounts []AccountSummary
+	for rows.Next() {
+		var a AccountSummary
+		if err := rows.Scan(&a.ID, &a.Username, &a.Slug, &a.DisplayName, &a.AvatarURL); err != nil {
+			return nil, fmt.Errorf("account_store: list scan: %w", err)
+		}
+		accounts = append(accounts, a)
+	}
+	return accounts, rows.Err()
+}
+
 // GetBySlug returns an account by slug, including its videos for a given site.
 func (s *AccountStore) GetBySlug(ctx context.Context, slug string, siteID int64, page, perPage int) (*model.Account, error) {
 	if page < 1 {

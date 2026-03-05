@@ -3,6 +3,7 @@ import type {
   Video,
   VideosResponse,
   AccountResponse,
+  AccountSummary,
   Category,
   VideoQueryParams,
   SearchParams,
@@ -93,6 +94,11 @@ export async function getAccountBySlug(
   return fetchAPI<AccountResponse>(
     `/api/v1/accounts/slug/${encodeURIComponent(slug)}?${searchParams.toString()}`,
   );
+}
+
+export async function getAccounts(): Promise<AccountSummary[]> {
+  const data = await fetchAPI<{ accounts: AccountSummary[] }>("/api/v1/accounts");
+  return data.accounts || [];
 }
 
 export async function getAllVideoIds(): Promise<string[]> {

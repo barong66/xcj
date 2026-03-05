@@ -141,6 +141,7 @@ func NewRouter(
 		r.Get("/categories/{slug}", categoryHandler.GetBySlug)
 
 		// Accounts.
+		r.Get("/accounts", accountHandler.List)
 		r.Get("/accounts/{id}", accountHandler.Get)
 		r.Get("/accounts/slug/{slug}", accountHandler.GetBySlug)
 
