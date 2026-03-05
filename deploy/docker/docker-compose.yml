@@ -7,7 +7,7 @@ services:
     container_name: traforama-postgres
     restart: unless-stopped
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-traforama}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-traforama}
@@ -29,12 +29,12 @@ services:
     container_name: traforama-redis
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
-    command: redis-server --appendonly yes
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-changeme}
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -47,8 +47,8 @@ services:
     container_name: traforama-clickhouse
     restart: unless-stopped
     ports:
-      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
-      - "${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
+      - "127.0.0.1:${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "127.0.0.1:${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
     environment:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-traforama}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
@@ -72,11 +72,11 @@ services:
     container_name: traforama-api
     restart: unless-stopped
     ports:
-      - "${API_PORT:-8080}:8080"
+      - "127.0.0.1:${API_PORT:-8080}:8080"
     environment:
       PORT: "8080"
       DATABASE_URL: "postgres://${POSTGRES_USER:-traforama}:${POSTGRES_PASSWORD:-traforama}@postgres:5432/${POSTGRES_DB:-traforama}?sslmode=disable"
-      REDIS_URL: "redis://redis:6379/0"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
       CLICKHOUSE_URL: "clickhouse://${CLICKHOUSE_USER:-default}:${CLICKHOUSE_PASSWORD:-traforama}@clickhouse:9000/${CLICKHOUSE_DB:-traforama}"
       CACHE_LIST_TTL: "${CACHE_LIST_TTL:-60s}"
       CACHE_DETAIL_TTL: "${CACHE_DETAIL_TTL:-300s}"
