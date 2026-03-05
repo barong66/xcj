@@ -84,6 +84,7 @@ services:
       EVENT_FLUSH_INTERVAL: "${EVENT_FLUSH_INTERVAL:-1s}"
       RATE_LIMIT_RPS: "${RATE_LIMIT_RPS:-100}"
       ADMIN_TOKEN: "${ADMIN_TOKEN:-xcj-admin-2024}"
+      SITE_BASE_URL: "${SITE_BASE_URL:-}"
     depends_on:
       postgres:
         condition: service_healthy
