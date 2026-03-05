@@ -11,7 +11,7 @@ import os
 from io import BytesIO
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 from parser.config.settings import settings
 
@@ -85,10 +85,8 @@ def gemini_crop_and_enhance(
             "You are a professional photographer choosing the best frame. "
             "Apply rule of thirds, find the most flattering and seductive composition. "
             "Focus on face and body, keep the subject well-framed. "
-            "Significantly boost contrast, color saturation, and sharpness — "
-            "make the image punchy, crisp, and vivid like a magazine cover. "
             "Do not add any text, logos, or watermarks. "
-            "Return only the cropped and enhanced image."
+            "Do not change colors or contrast — return the cropped image as-is."
         )
 
         response = client.models.generate_content(
@@ -139,6 +137,19 @@ def crop_to_ratio(img: Image.Image, target_ratio: float) -> Image.Image:
         crop_h = src_h
         crop_w = int(src_h * target_ratio)
     return smart_crop(img, crop_w, crop_h)
+
+
+def enhance_image(img: Image.Image) -> Image.Image:
+    """Make the image punchy: boost contrast, saturation, and sharpness.
+
+    Values > 1.0 increase the effect. Tuned for banner ads —
+    should look vivid, crisp, and slightly retouched.
+    """
+    img = ImageEnhance.Contrast(img).enhance(1.35)
+    img = ImageEnhance.Color(img).enhance(1.40)
+    img = ImageEnhance.Sharpness(img).enhance(1.50)
+    img = ImageEnhance.Brightness(img).enhance(1.05)
+    return img
 
 
 def _find_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -236,6 +247,7 @@ def generate_banner(
             img = img.convert("RGB")
             cropped = gemini_crop_and_enhance(img, width, height)
             resized = cropped.resize((width, height), Image.LANCZOS)
+            resized = enhance_image(resized)
             if username:
                 resized = add_overlay(resized, username)
             resized.save(dest_path, "JPEG", quality=quality)
