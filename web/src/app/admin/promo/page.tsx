@@ -21,20 +21,24 @@ function EmbedCodeSection({
   const [categories, setCategories] = useState<AdminCategory[]>([]);
   const [selectedCat, setSelectedCat] = useState("");
   const [keywords, setKeywords] = useState("");
+  const [previewSizeId, setPreviewSizeId] = useState<number | null>(null);
+  const [iframeKey, setIframeKey] = useState(0);
 
   useEffect(() => {
     getAdminCategories().then(setCategories).catch(() => {});
   }, []);
 
-  const buildCode = (size: BannerSize) => {
+  const buildServeUrl = (size: BannerSize) => {
     const params = new URLSearchParams();
     params.set("size", `${size.width}x${size.height}`);
     if (selectedCat) params.set("cat", selectedCat);
     if (keywords.trim()) params.set("kw", keywords.trim());
-
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const src = `${origin}/b/serve?${params.toString()}`;
+    return `${origin}/b/serve?${params.toString()}`;
+  };
 
+  const buildCode = (size: BannerSize) => {
+    const src = buildServeUrl(size);
     return `<iframe src="${src}" width="${size.width}" height="${size.height}" frameborder="0" scrolling="no" style="border:none;overflow:hidden"></iframe>`;
   };
 
@@ -81,16 +85,55 @@ function EmbedCodeSection({
                   ({size.width}x{size.height})
                 </span>
               </span>
-              <button
-                onClick={() => handleCopy(buildCode(size))}
-                className="px-2 py-1 text-[10px] rounded bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525] transition-colors"
-              >
-                Copy
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => {
+                    setPreviewSizeId(previewSizeId === size.id ? null : size.id);
+                    setIframeKey(Date.now());
+                  }}
+                  className={`px-2 py-1 text-[10px] rounded transition-colors ${
+                    previewSizeId === size.id
+                      ? "bg-accent text-white"
+                      : "bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525]"
+                  }`}
+                >
+                  Preview
+                </button>
+                <button
+                  onClick={() => handleCopy(buildCode(size))}
+                  className="px-2 py-1 text-[10px] rounded bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525] transition-colors"
+                >
+                  Copy
+                </button>
+              </div>
             </div>
             <pre className="text-[11px] text-[#6b6b6b] bg-[#0a0a0a] rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">
               {buildCode(size)}
             </pre>
+            {previewSizeId === size.id && (
+              <div className="mt-3 pt-3 border-t border-[#1e1e1e]">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] text-[#6b6b6b]">Live Preview</span>
+                  <button
+                    onClick={() => setIframeKey(Date.now())}
+                    className="px-2 py-1 text-[10px] rounded bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525] transition-colors"
+                  >
+                    Reload
+                  </button>
+                </div>
+                <div className="bg-[#0a0a0a] rounded p-2 inline-block">
+                  <iframe
+                    key={iframeKey}
+                    src={`${buildServeUrl(size)}&_t=${iframeKey}`}
+                    width={size.width}
+                    height={size.height}
+                    frameBorder="0"
+                    scrolling="no"
+                    style={{ border: "none", overflow: "hidden", display: "block" }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
