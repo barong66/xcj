@@ -9,43 +9,9 @@ from PIL import Image, ImageDraw
 from parser.utils.image import (
     add_overlay,
     crop_to_ratio,
-    detect_face,
     generate_banner,
     smart_crop,
 )
-
-
-def _make_face_image(width: int = 400, height: int = 800) -> Image.Image:
-    """Create a test image with a simple face-like pattern for detection.
-
-    Draws a skin-colored oval with dark eye regions that OpenCV's
-    Haar cascade can detect.
-    """
-    img = Image.new("RGB", (width, height), (50, 50, 50))
-    draw = ImageDraw.Draw(img)
-
-    # Face region in upper third
-    face_cx, face_cy = width // 2, height // 4
-    face_w, face_h = width // 3, width // 3
-
-    # Skin-colored oval
-    draw.ellipse(
-        (face_cx - face_w // 2, face_cy - face_h // 2,
-         face_cx + face_w // 2, face_cy + face_h // 2),
-        fill=(200, 170, 140),
-    )
-
-    # Dark eye regions
-    eye_y = face_cy - face_h // 8
-    eye_offset = face_w // 5
-    eye_size = face_w // 8
-    for ex in (face_cx - eye_offset, face_cx + eye_offset):
-        draw.ellipse(
-            (ex - eye_size, eye_y - eye_size, ex + eye_size, eye_y + eye_size),
-            fill=(30, 30, 30),
-        )
-
-    return img
 
 
 class TestCropToRatio:
@@ -79,47 +45,37 @@ class TestSmartCrop:
     def test_portrait_to_landscape_dimensions(self):
         """Smart crop of portrait to landscape should produce correct dimensions."""
         img = Image.new("RGB", (810, 1440), "red")
-        result = smart_crop(img, 300 / 250)
-        # Expected: width stays 810, height = 810 / 1.2 = 675
+        result = smart_crop(img, 300, 250)
+        # Width stays 810, height = 810 / 1.2 = 675
         assert result.size == (810, 675)
 
-    def test_upper_bias_no_face(self):
-        """Without a face, smart crop should use upper-third bias (not center)."""
-        # Create a solid image — no face to detect
+    def test_solid_image(self):
+        """Smart crop on a solid image should still produce correct dimensions."""
         img = Image.new("RGB", (100, 400), "gray")
-        result = smart_crop(img, 1.0)
-        # Result should be 100x100
+        result = smart_crop(img, 100, 100)
         assert result.size == (100, 100)
-
-        # The crop should come from the upper portion, not center.
-        # With upper-third bias: offset = (400 - 100) * 0.25 = 75
-        # Center would be: offset = (400 - 100) * 0.5 = 150
-        # We can't check exact pixels easily, but size should be correct.
 
     def test_already_correct_ratio(self):
         """Smart crop should return unchanged if ratio already matches."""
         img = Image.new("RGB", (300, 250), "blue")
-        result = smart_crop(img, 300 / 250)
+        result = smart_crop(img, 300, 250)
         assert result.size == (300, 250)
 
     def test_wider_to_narrower(self):
         """Smart crop of landscape to portrait should crop width."""
         img = Image.new("RGB", (800, 400), "green")
-        result = smart_crop(img, 0.5)
+        result = smart_crop(img, 200, 400)
         assert result.size == (200, 400)
 
-
-class TestDetectFace:
-    def test_no_face_in_solid_image(self):
-        """Solid color image should return None (no face)."""
-        img = Image.new("RGB", (200, 200), "white")
-        assert detect_face(img) is None
-
-    def test_returns_tuple_or_none(self):
-        """detect_face should return a 4-tuple or None."""
-        img = Image.new("RGB", (100, 100), "gray")
-        result = detect_face(img)
-        assert result is None or (isinstance(result, tuple) and len(result) == 4)
+    def test_with_detailed_image(self):
+        """Smart crop should find interesting region in a non-uniform image."""
+        img = Image.new("RGB", (400, 800), (50, 50, 50))
+        draw = ImageDraw.Draw(img)
+        # Draw a bright region in upper portion (simulates subject)
+        draw.rectangle((100, 50, 300, 250), fill=(255, 200, 150))
+        result = smart_crop(img, 300, 250)
+        assert result.size[0] == 400  # full width
+        assert result.size[1] > 0
 
 
 class TestAddOverlay:
@@ -137,7 +93,6 @@ class TestAddOverlay:
         # Bottom-left pixel should be darker (gradient)
         orig_px = img.getpixel((5, 245))
         new_px = result.getpixel((5, 245))
-        # At least one channel should be darker due to gradient
         assert sum(new_px) <= sum(orig_px)
 
     def test_small_image(self):
@@ -207,7 +162,6 @@ class TestGenerateBanner:
             img = Image.new("RGB", (300, 250), (128, 128, 128))
             img.save(src, "JPEG")
 
-            # Without username — bottom pixels should be similar to source
             dest = os.path.join(tmp, "banner.jpg")
             ok = generate_banner(src, dest, 300, 250, username="")
             assert ok is True
