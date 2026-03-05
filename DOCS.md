@@ -68,7 +68,7 @@
 - Аналитика: banner_impression (показ) и banner_click (клик) в ClickHouse; Imprs/Clicks/CTR отображаются в админке
 
 **Качество баннеров:**
-- **Face-aware smart crop** — OpenCV детектирует лицо и центрирует кроп на нём (а не тупой center crop). Без лица — bias к верхней трети
+- **Saliency-based smart crop** — smartcrop.py анализирует skin tones, насыщенность и контрастные края для определения оптимального региона кропа. Fallback — bias к верхней трети
 - **Text overlay** — градиент внизу + @username + "Watch Now →" делает баннер кликабельным и узнаваемым
 - Ресайз Lanczos, JPEG q=90
 

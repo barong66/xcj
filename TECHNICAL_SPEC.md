@@ -435,14 +435,12 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 
 ### 6.5 Генерация баннеров (parser/utils/image.py)
 
-**Зависимости:** opencv-python-headless (face detection), numpy, Pillow, fonts-dejavu-core (Docker)
+**Зависимости:** smartcrop (saliency detection), numpy, Pillow, fonts-dejavu-core (Docker)
 
 **Пайплайн:**
-1. **detect_face(img)** — OpenCV Haar cascade, возвращает (x,y,w,h) наибольшего лица
-2. **smart_crop(img, ratio)** — face-aware кроп:
-   - Лицо найдено → кроп центрируется на лице (face в верхних 35% кропа)
-   - Лицо не найдено → upper-third bias (offset = 25% вместо 50% при center crop)
-   - Горизонтальный кроп: аналогично по X-оси
+1. **smart_crop(img, width, height)** — content-aware кроп через smartcrop.py:
+   - Анализирует skin tones, saturation, edge detail для нахождения оптимального региона
+   - Fallback при ошибке → upper-third bias (offset = 25% вместо 50% при center crop)
 3. **add_overlay(img, username)** — gradient + текст:
    - Нижние 35% — чёрный градиент (0→70% opacity, numpy vectorized)
    - @username — белый, слева (DejaVu Sans Bold, 7% высоты)
@@ -564,8 +562,8 @@ Banner Worker забирает задачу из banner_queue
 → Если video_id=NULL → все видео аккаунта, иначе конкретное видео
 → Для каждого (video, size):
    → Скачать thumbnail_lg_url (810x1440 портрет)
-   → Face detection (OpenCV Haar cascade) → определить позицию лица
-   → Smart crop: лицо в верхней трети кропа; без лица — upper-third bias (25%)
+   → Smart crop (smartcrop.py saliency detection: skin tones, saturation, edges)
+   → Fallback: upper-third bias (25%)
    → Resize (Lanczos) → целевой размер
    → Text overlay: gradient внизу (0→70% чёрный) + @username + "Watch Now →"
    → JPEG q=90 → загрузить в R2: banners/{account_id}/{video_id}_{w}x{h}.jpg
