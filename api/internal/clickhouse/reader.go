@@ -94,7 +94,8 @@ func (r *Reader) GetVideoStats(ctx context.Context, sortBy, sortDir string, page
 	err := r.conn.QueryRow(ctx, `
 		SELECT COUNT(DISTINCT video_id)
 		FROM events
-		WHERE event_type IN ('impression', 'click')
+		WHERE event_type IN ('feed_impression', 'feed_click', 'click', 'profile_thumb_impression', 'profile_thumb_click')
+		  AND video_id > 0
 	`).Scan(&total)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse reader: count: %w", err)
@@ -106,11 +107,12 @@ func (r *Reader) GetVideoStats(ctx context.Context, sortBy, sortDir string, page
 	query := fmt.Sprintf(`
 		SELECT
 			video_id,
-			countIf(event_type = 'impression') AS impressions,
-			countIf(event_type = 'click') AS clicks,
+			countIf(event_type IN ('feed_impression', 'profile_thumb_impression')) AS impressions,
+			countIf(event_type IN ('feed_click', 'click', 'profile_thumb_click')) AS clicks,
 			if(impressions > 0, round(clicks * 100.0 / impressions, 2), 0) AS ctr
 		FROM events
-		WHERE event_type IN ('impression', 'click')
+		WHERE event_type IN ('feed_impression', 'feed_click', 'click', 'profile_thumb_impression', 'profile_thumb_click')
+		  AND video_id > 0
 		GROUP BY video_id
 		ORDER BY %s %s
 		LIMIT %d OFFSET %d
@@ -243,12 +245,13 @@ func (r *Reader) GetTotalStats(ctx context.Context) (*TotalSiteStats, error) {
 	var stats TotalSiteStats
 	err := r.conn.QueryRow(ctx, `
 		SELECT
-			countIf(event_type = 'impression') AS total_impressions,
-			countIf(event_type = 'click') AS total_clicks,
+			countIf(event_type IN ('feed_impression', 'profile_thumb_impression')) AS total_impressions,
+			countIf(event_type IN ('feed_click', 'click', 'profile_thumb_click')) AS total_clicks,
 			if(total_impressions > 0, round(total_clicks * 100.0 / total_impressions, 2), 0) AS total_ctr,
 			COUNT(DISTINCT video_id) AS unique_videos
 		FROM events
-		WHERE event_type IN ('impression', 'click')
+		WHERE event_type IN ('feed_impression', 'feed_click', 'click', 'profile_thumb_impression', 'profile_thumb_click')
+		  AND video_id > 0
 	`).Scan(&stats.TotalImpressions, &stats.TotalClicks, &stats.TotalCTR, &stats.UniqueVideos)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse reader: total stats: %w", err)
