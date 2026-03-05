@@ -391,15 +391,26 @@ async def get_videos_for_banners(account_id: int, video_id: Optional[int] = None
 
     If video_id is specified, return just that video.
     Otherwise return all active videos for the account.
+    Includes account username for banner text overlay.
     """
     pool = await get_pool()
     if video_id:
         return await pool.fetch(
-            "SELECT id, platform, platform_id, COALESCE(thumbnail_lg_url, thumbnail_url) AS thumb_url FROM videos WHERE id = $1 AND is_active = true",
+            """SELECT v.id, v.platform, v.platform_id,
+                      COALESCE(v.thumbnail_lg_url, v.thumbnail_url) AS thumb_url,
+                      a.username
+               FROM videos v
+               JOIN accounts a ON a.id = v.account_id
+               WHERE v.id = $1 AND v.is_active = true""",
             video_id,
         )
     return await pool.fetch(
-        "SELECT id, platform, platform_id, COALESCE(thumbnail_lg_url, thumbnail_url) AS thumb_url FROM videos WHERE account_id = $1 AND is_active = true",
+        """SELECT v.id, v.platform, v.platform_id,
+                  COALESCE(v.thumbnail_lg_url, v.thumbnail_url) AS thumb_url,
+                  a.username
+           FROM videos v
+           JOIN accounts a ON a.id = v.account_id
+           WHERE v.account_id = $1 AND v.is_active = true""",
         account_id,
     )
 

@@ -71,6 +71,7 @@ async def _process_banner_job(job) -> None:
         for video in videos:
             vid_id = video["id"]
             thumb_url = video["thumb_url"]
+            username = video.get("username", "")
 
             if not thumb_url:
                 logger.warning("Video %d has no thumbnail, skipping", vid_id)
@@ -91,15 +92,14 @@ async def _process_banner_job(job) -> None:
 
                     banner_path = os.path.join(tmp_dir, f"banner_{w}x{h}.jpg")
 
-                    # Generate the banner image.
+                    # Generate the banner image (face-aware crop + overlay).
                     success = await loop.run_in_executor(
                         None,
-                        generate_banner,
-                        src_path,
-                        banner_path,
-                        w,
-                        h,
-                        settings.banner_quality,
+                        lambda sp=src_path, bp=banner_path, bw=w, bh=h, u=username: generate_banner(
+                            sp, bp, bw, bh,
+                            quality=settings.banner_quality,
+                            username=u,
+                        ),
                     )
                     if not success:
                         continue
