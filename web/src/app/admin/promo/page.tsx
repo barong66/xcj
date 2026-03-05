@@ -21,6 +21,7 @@ function PromoContent() {
   const [newWidth, setNewWidth] = useState("");
   const [newHeight, setNewHeight] = useState("");
   const [newLabel, setNewLabel] = useState("");
+  const [newType, setNewType] = useState("image");
   const [addingSizes, setAddingSizes] = useState(false);
   const { toast } = useToast();
 
@@ -62,11 +63,12 @@ function PromoContent() {
     }
     setAddingSizes(true);
     try {
-      await createBannerSize({ width: w, height: h, label: newLabel });
+      await createBannerSize({ width: w, height: h, label: newLabel, type: newType });
       toast(`Banner size ${w}x${h} created`);
       setNewWidth("");
       setNewHeight("");
       setNewLabel("");
+      setNewType("image");
       setShowAddSize(false);
       loadSizes();
     } catch (err) {
@@ -120,6 +122,17 @@ function PromoContent() {
                 className="w-24 px-3 py-2 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white placeholder-[#4a4a4a] focus:outline-none focus:border-accent"
               />
             </div>
+            <div>
+              <label className="block text-xs text-[#6b6b6b] mb-1">Type</label>
+              <select
+                value={newType}
+                onChange={(e) => setNewType(e.target.value)}
+                className="px-3 py-2 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white focus:outline-none focus:border-accent"
+              >
+                <option value="image">Image</option>
+                <option value="video">Video</option>
+              </select>
+            </div>
             <div className="flex-1">
               <label className="block text-xs text-[#6b6b6b] mb-1">Label</label>
               <input
@@ -155,6 +168,7 @@ function PromoContent() {
                 {s.width}x{s.height}
               </div>
               <div className="text-xs text-[#6b6b6b]">{s.label}</div>
+              <div className="text-[10px] text-[#4a4a4a] mt-0.5">{s.type}</div>
             </div>
           ))}
         </div>
@@ -173,20 +187,22 @@ function PromoContent() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+          <div className="flex flex-wrap gap-4">
             {banners.map((b) => (
               <div
                 key={b.id}
-                className="bg-[#141414] rounded-lg border border-[#1e1e1e] overflow-hidden group"
+                className="bg-[#141414] rounded-lg border border-[#1e1e1e] overflow-hidden"
               >
-                <div className="aspect-video bg-[#0a0a0a] flex items-center justify-center overflow-hidden">
+                <div className="bg-[#0a0a0a] p-2">
                   <img
                     src={b.image_url}
                     alt={b.video_title}
-                    className="max-w-full max-h-full object-contain"
+                    width={b.width}
+                    height={b.height}
+                    style={{ width: b.width, height: b.height }}
                   />
                 </div>
-                <div className="p-3">
+                <div className="p-3" style={{ width: Math.max(b.width + 16, 200) }}>
                   <div className="text-xs text-white truncate mb-0.5">
                     {b.video_title || `Video #${b.video_id}`}
                   </div>
@@ -196,6 +212,9 @@ function PromoContent() {
                   >
                     @{b.username}
                   </Link>
+                  <div className="text-[10px] text-[#6b6b6b] mt-1">
+                    Imprs: {b.impressions || 0} &nbsp;|&nbsp; Clicks: {b.clicks || 0} &nbsp;|&nbsp; CTR: {b.ctr || 0}%
+                  </div>
                   <div className="flex items-center justify-between mt-1.5">
                     <span className="text-[10px] text-[#6b6b6b]">
                       {b.width}x{b.height}

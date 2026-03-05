@@ -518,6 +518,7 @@ export interface BannerSize {
   width: number;
   height: number;
   label: string;
+  type: string;
   is_active: boolean;
   created_at: string;
 }
@@ -542,6 +543,9 @@ export interface AdminBanner {
   created_at: string;
   video_title: string;
   username: string;
+  impressions: number;
+  clicks: number;
+  ctr: number;
 }
 
 export interface AdminBannerList {
@@ -561,6 +565,7 @@ export async function createBannerSize(data: {
   width: number;
   height: number;
   label: string;
+  type?: string;
 }): Promise<BannerSize> {
   return adminFetch<BannerSize>("/banner-sizes", {
     method: "POST",

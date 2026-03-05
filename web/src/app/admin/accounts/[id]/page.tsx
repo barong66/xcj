@@ -432,22 +432,27 @@ function AccountProfileContent() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              <div className="flex flex-wrap gap-4">
                 {banners.map((b) => (
                   <div
                     key={b.id}
-                    className="bg-[#141414] rounded-lg border border-[#1e1e1e] overflow-hidden group"
+                    className="bg-[#141414] rounded-lg border border-[#1e1e1e] overflow-hidden"
                   >
-                    <div className="aspect-video bg-[#0a0a0a] flex items-center justify-center overflow-hidden">
+                    <div className="bg-[#0a0a0a] p-2">
                       <img
                         src={b.image_url}
                         alt={b.video_title}
-                        className="max-w-full max-h-full object-contain"
+                        width={b.width}
+                        height={b.height}
+                        style={{ width: b.width, height: b.height }}
                       />
                     </div>
-                    <div className="p-3">
+                    <div className="p-3" style={{ width: Math.max(b.width + 16, 200) }}>
                       <div className="text-xs text-white truncate mb-1">
                         {b.video_title || `Video #${b.video_id}`}
+                      </div>
+                      <div className="text-[10px] text-[#6b6b6b] mb-1.5">
+                        Imprs: {b.impressions || 0} &nbsp;|&nbsp; Clicks: {b.clicks || 0} &nbsp;|&nbsp; CTR: {b.ctr || 0}%
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] text-[#6b6b6b]">

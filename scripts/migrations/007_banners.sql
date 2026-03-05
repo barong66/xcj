@@ -4,16 +4,14 @@ CREATE TABLE banner_sizes (
     width       INT NOT NULL,
     height      INT NOT NULL,
     label       VARCHAR(64) NOT NULL DEFAULT '',
+    type        VARCHAR(16) NOT NULL DEFAULT 'image',
     is_active   BOOLEAN NOT NULL DEFAULT true,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(width, height)
 );
 
-INSERT INTO banner_sizes (width, height, label) VALUES
-    (300, 250, 'Medium Rectangle'),
-    (728, 90, 'Leaderboard'),
-    (160, 600, 'Wide Skyscraper'),
-    (320, 50, 'Mobile Banner');
+INSERT INTO banner_sizes (width, height, label, type) VALUES
+    (300, 250, 'Medium Rectangle', 'image');
 
 -- Banners (generated images)
 CREATE TABLE banners (

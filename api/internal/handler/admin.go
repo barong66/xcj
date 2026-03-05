@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -682,6 +683,7 @@ func (h *AdminHandler) ListAccountBanners(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to list banners")
 		return
 	}
+	h.enrichBannerStats(r.Context(), result.Banners)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -712,5 +714,29 @@ func (h *AdminHandler) ListAllBanners(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list banners")
 		return
 	}
+	h.enrichBannerStats(r.Context(), result.Banners)
 	writeJSON(w, http.StatusOK, result)
+}
+
+// enrichBannerStats fetches banner impression/click stats from ClickHouse and populates AdminBanner fields.
+func (h *AdminHandler) enrichBannerStats(ctx context.Context, banners []store.AdminBanner) {
+	if len(banners) == 0 {
+		return
+	}
+	videoIDs := make([]uint64, 0, len(banners))
+	for _, b := range banners {
+		videoIDs = append(videoIDs, uint64(b.VideoID))
+	}
+	stats, err := h.ch.GetBannerStats(ctx, videoIDs)
+	if err != nil {
+		slog.Error("admin: get banner stats", "error", err)
+		return
+	}
+	for i := range banners {
+		if s, ok := stats[uint64(banners[i].VideoID)]; ok {
+			banners[i].Impressions = s.Impressions
+			banners[i].Clicks = s.Clicks
+			banners[i].CTR = s.CTR
+		}
+	}
 }

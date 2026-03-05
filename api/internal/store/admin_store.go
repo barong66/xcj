@@ -1089,12 +1089,13 @@ type BannerSize struct {
 	Width     int       `json:"width"`
 	Height    int       `json:"height"`
 	Label     string    `json:"label"`
+	Type      string    `json:"type"`
 	IsActive  bool      `json:"is_active"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 func (s *AdminStore) ListBannerSizes(ctx context.Context) ([]BannerSize, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, width, height, label, is_active, created_at FROM banner_sizes ORDER BY id`)
+	rows, err := s.pool.Query(ctx, `SELECT id, width, height, label, type, is_active, created_at FROM banner_sizes ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("admin_store: list banner sizes: %w", err)
 	}
@@ -1103,7 +1104,7 @@ func (s *AdminStore) ListBannerSizes(ctx context.Context) ([]BannerSize, error) 
 	var sizes []BannerSize
 	for rows.Next() {
 		var bs BannerSize
-		if err := rows.Scan(&bs.ID, &bs.Width, &bs.Height, &bs.Label, &bs.IsActive, &bs.CreatedAt); err != nil {
+		if err := rows.Scan(&bs.ID, &bs.Width, &bs.Height, &bs.Label, &bs.Type, &bs.IsActive, &bs.CreatedAt); err != nil {
 			return nil, fmt.Errorf("admin_store: scan banner size: %w", err)
 		}
 		sizes = append(sizes, bs)
@@ -1118,14 +1119,18 @@ type CreateBannerSizeInput struct {
 	Width  int    `json:"width"`
 	Height int    `json:"height"`
 	Label  string `json:"label"`
+	Type   string `json:"type"`
 }
 
 func (s *AdminStore) CreateBannerSize(ctx context.Context, input CreateBannerSizeInput) (*BannerSize, error) {
+	if input.Type == "" {
+		input.Type = "image"
+	}
 	var bs BannerSize
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO banner_sizes (width, height, label) VALUES ($1, $2, $3) RETURNING id, width, height, label, is_active, created_at`,
-		input.Width, input.Height, input.Label,
-	).Scan(&bs.ID, &bs.Width, &bs.Height, &bs.Label, &bs.IsActive, &bs.CreatedAt)
+		`INSERT INTO banner_sizes (width, height, label, type) VALUES ($1, $2, $3, $4) RETURNING id, width, height, label, type, is_active, created_at`,
+		input.Width, input.Height, input.Label, input.Type,
+	).Scan(&bs.ID, &bs.Width, &bs.Height, &bs.Label, &bs.Type, &bs.IsActive, &bs.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("admin_store: create banner size: %w", err)
 	}
@@ -1157,6 +1162,9 @@ type AdminBanner struct {
 	CreatedAt    time.Time `json:"created_at"`
 	VideoTitle   string    `json:"video_title"`
 	Username     string    `json:"username"`
+	Impressions  uint64    `json:"impressions"`
+	Clicks       uint64    `json:"clicks"`
+	CTR          float64   `json:"ctr"`
 }
 
 type AdminBannerList struct {

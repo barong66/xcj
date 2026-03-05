@@ -190,6 +190,47 @@ func (r *Reader) GetFeedCTRStats(ctx context.Context) ([]FeedCTRStat, error) {
 	return stats, nil
 }
 
+// BannerStat holds per-video banner impression/click stats.
+type BannerStat struct {
+	VideoID     uint64  `json:"video_id"`
+	Impressions uint64  `json:"impressions"`
+	Clicks      uint64  `json:"clicks"`
+	CTR         float64 `json:"ctr"`
+}
+
+// GetBannerStats queries ClickHouse for banner_impression/banner_click stats grouped by video_id.
+func (r *Reader) GetBannerStats(ctx context.Context, videoIDs []uint64) (map[uint64]BannerStat, error) {
+	result := make(map[uint64]BannerStat, len(videoIDs))
+	if len(videoIDs) == 0 {
+		return result, nil
+	}
+
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			video_id,
+			countIf(event_type = 'banner_impression') AS impressions,
+			countIf(event_type = 'banner_click') AS clicks,
+			if(impressions > 0, round(clicks * 100.0 / impressions, 2), 0) AS ctr
+		FROM events
+		WHERE event_type IN ('banner_impression', 'banner_click')
+			AND video_id IN (?)
+		GROUP BY video_id
+	`, videoIDs)
+	if err != nil {
+		return result, nil // gracefully return empty on error
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var s BannerStat
+		if err := rows.Scan(&s.VideoID, &s.Impressions, &s.Clicks, &s.CTR); err != nil {
+			continue
+		}
+		result[s.VideoID] = s
+	}
+	return result, nil
+}
+
 // GetTotalStats returns overall site stats: total impressions, clicks, and CTR.
 type TotalSiteStats struct {
 	TotalImpressions uint64  `json:"total_impressions"`
