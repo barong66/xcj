@@ -53,12 +53,32 @@ async def cmd_parse(username: str, platform: str) -> None:
 async def cmd_worker() -> None:
     """Start the worker loop (runs until SIGINT/SIGTERM).
 
-    Runs parse worker and banner worker concurrently.
+    Runs parse worker, banner worker, and categorizer concurrently.
     """
     from parser.tasks.banner_worker import banner_worker_loop
     from parser.tasks.parse_worker import worker_loop
 
-    await asyncio.gather(worker_loop(), banner_worker_loop())
+    tasks = [worker_loop(), banner_worker_loop()]
+
+    # Start categorizer only if ANTHROPIC_API_KEY is configured
+    import os
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if api_key:
+        from parser.categorizer.pipeline import CategorizationPipeline, PipelineConfig
+        logging.getLogger(__name__).info("Categorizer enabled (ANTHROPIC_API_KEY set)")
+        config = PipelineConfig(
+            database_url=os.environ.get("DATABASE_URL", "postgresql://xcj:xcj@localhost:5432/xcj"),
+            anthropic_api_key=api_key,
+            batch_size=int(os.environ.get("CATEGORIZER_BATCH_SIZE", "50")),
+            concurrency=int(os.environ.get("CATEGORIZER_CONCURRENCY", "5")),
+        )
+        pipeline = CategorizationPipeline(config)
+        interval = float(os.environ.get("CATEGORIZER_INTERVAL_SEC", "30"))
+        tasks.append(pipeline.run_continuous(interval_sec=interval))
+    else:
+        logging.getLogger(__name__).warning("Categorizer disabled: ANTHROPIC_API_KEY not set")
+
+    await asyncio.gather(*tasks)
 
 
 async def cmd_categorize() -> None:
