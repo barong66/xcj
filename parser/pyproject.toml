@@ -33,6 +33,7 @@ packages = [
     "parser.tasks",
     "parser.categorizer",
     "parser.finder",
+    "parser.utils",
 ]
 
 [tool.setuptools.package-dir]
