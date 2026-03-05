@@ -1,35 +1,118 @@
 """Image utilities for banner generation.
 
-Uses smartcrop for content-aware cropping (saliency detection:
-skin tones, contrast, edges) and Pillow for gradient+text overlay.
+Uses Gemini Image Editing API for content-aware cropping and enhancement,
+with Pillow fallback for when Gemini is unavailable. Text overlay (gradient +
+username + CTA) is always done via Pillow for reliability.
 """
 from __future__ import annotations
 
 import logging
 import os
+from io import BytesIO
 
 import numpy as np
-import smartcrop
 from PIL import Image, ImageDraw, ImageFont
+
+from parser.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-_cropper: smartcrop.SmartCrop | None = None
+# Lazy-initialized Gemini client
+_genai_client = None
 
 
-def _get_cropper() -> smartcrop.SmartCrop:
-    """Lazily init the SmartCrop instance."""
-    global _cropper
-    if _cropper is None:
-        _cropper = smartcrop.SmartCrop()
-    return _cropper
+def _get_genai_client():
+    """Lazily init the Gemini client. Returns None if no API key."""
+    global _genai_client
+    if _genai_client is not None:
+        return _genai_client
+
+    api_key = settings.gemini_api_key
+    if not api_key:
+        return None
+
+    try:
+        from google import genai
+        _genai_client = genai.Client(api_key=api_key)
+        return _genai_client
+    except Exception:
+        logger.warning("Failed to initialize Gemini client", exc_info=True)
+        return None
 
 
+def _fallback_crop(img: Image.Image, width: int, height: int) -> Image.Image:
+    """Simple center-crop with upper-third bias (no external deps)."""
+    src_w, src_h = img.size
+    target_ratio = width / height
+    src_ratio = src_w / src_h
+
+    if abs(src_ratio - target_ratio) < 0.01:
+        return img
+
+    if src_ratio > target_ratio:
+        crop_h = src_h
+        crop_w = int(src_h * target_ratio)
+        offset = (src_w - crop_w) // 2
+        return img.crop((offset, 0, offset + crop_w, src_h))
+    else:
+        crop_w = src_w
+        crop_h = int(src_w / target_ratio)
+        offset = int((src_h - crop_h) * 0.25)  # upper-third bias
+        return img.crop((0, offset, src_w, offset + crop_h))
+
+
+def gemini_crop_and_enhance(
+    img: Image.Image, width: int, height: int,
+) -> Image.Image:
+    """Crop and enhance image using Gemini Image Editing API.
+
+    Sends the source image to Gemini with a prompt to find the most
+    attractive composition and enhance colors/contrast. Falls back
+    to simple center-crop if Gemini is unavailable or fails.
+    """
+    client = _get_genai_client()
+    if client is None:
+        logger.debug("Gemini not configured, using fallback crop")
+        return _fallback_crop(img, width, height)
+
+    try:
+        from google.genai import types
+
+        prompt = (
+            f"Crop this image to a {width}x{height} advertising banner. "
+            "Choose the most attractive and eye-catching composition "
+            "focusing on the subject. "
+            "Enhance colors and contrast slightly to make it pop. "
+            "Do not add any text, logos, or watermarks. "
+            "Return only the cropped and enhanced image."
+        )
+
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=[prompt, img],
+            config=types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+            ),
+        )
+
+        for part in response.candidates[0].content.parts:
+            if part.inline_data is not None:
+                result = Image.open(BytesIO(part.inline_data.data))
+                return result.convert("RGB")
+
+        logger.warning("Gemini returned no image data, using fallback crop")
+        return _fallback_crop(img, width, height)
+
+    except Exception:
+        logger.warning("Gemini image editing failed, using fallback crop", exc_info=True)
+        return _fallback_crop(img, width, height)
+
+
+# Keep smart_crop as the main entry point (backward compat)
 def smart_crop(img: Image.Image, width: int, height: int) -> Image.Image:
-    """Content-aware crop to target dimensions using smartcrop.
+    """Content-aware crop to target dimensions.
 
-    smartcrop.js algorithm analyzes skin regions, saturation,
-    and edge detail to find the optimal crop region.
+    Routes to Gemini when available, otherwise uses fallback.
     """
     src_w, src_h = img.size
     target_ratio = width / height
@@ -38,30 +121,7 @@ def smart_crop(img: Image.Image, width: int, height: int) -> Image.Image:
     if abs(src_ratio - target_ratio) < 0.01:
         return img
 
-    # smartcrop needs the target crop dimensions in source-image scale
-    if src_ratio > target_ratio:
-        crop_h = src_h
-        crop_w = int(src_h * target_ratio)
-    else:
-        crop_w = src_w
-        crop_h = int(src_w / target_ratio)
-
-    try:
-        cropper = _get_cropper()
-        result = cropper.crop(img, crop_w, crop_h)
-        box = result["top_crop"]["box"]
-        return img.crop((box["x"], box["y"],
-                         box["x"] + box["width"],
-                         box["y"] + box["height"]))
-    except Exception:
-        logger.debug("smartcrop failed, using upper-third fallback", exc_info=True)
-        # Fallback: upper-third bias
-        if src_ratio > target_ratio:
-            offset = (src_w - crop_w) // 2
-            return img.crop((offset, 0, offset + crop_w, src_h))
-        else:
-            offset = int((src_h - crop_h) * 0.25)
-            return img.crop((0, offset, src_w, offset + crop_h))
+    return gemini_crop_and_enhance(img, width, height)
 
 
 # Backward-compatible alias used by tests
@@ -160,8 +220,8 @@ def generate_banner(
 
     Pipeline:
     1. Open source image -> RGB
-    2. Content-aware smart crop (smartcrop saliency detection)
-    3. Resize to target dimensions (Lanczos)
+    2. Gemini crop + enhance (or fallback center-crop)
+    3. Resize to exact target dimensions (Lanczos)
     4. Add gradient + text overlay (if username provided)
     5. Save as JPEG
 
@@ -170,7 +230,7 @@ def generate_banner(
     try:
         with Image.open(src_path) as img:
             img = img.convert("RGB")
-            cropped = smart_crop(img, width, height)
+            cropped = gemini_crop_and_enhance(img, width, height)
             resized = cropped.resize((width, height), Image.LANCZOS)
             if username:
                 resized = add_overlay(resized, username)

@@ -68,7 +68,7 @@
 - Аналитика: banner_impression (показ) и banner_click (клик) в ClickHouse; Imprs/Clicks/CTR отображаются в админке
 
 **Качество баннеров:**
-- **Saliency-based smart crop** — smartcrop.py анализирует skin tones, насыщенность и контрастные края для определения оптимального региона кропа. Fallback — bias к верхней трети
+- **Gemini AI crop + enhance** — Gemini Image Editing API (`gemini-2.5-flash-image`) выполняет smart crop под нужный aspect ratio с одновременным улучшением цвета и контраста (~$0.04 за изображение). Fallback при недоступности Gemini — center-crop
 - **Text overlay** — градиент внизу + @username + "Watch Now →" делает баннер кликабельным и узнаваемым
 - Ресайз Lanczos, JPEG q=90
 
@@ -151,9 +151,11 @@
 - Парсит Twitter (через yt-dlp) и Instagram (через API)
 - Генерирует тумбы (ffmpeg resize) и превью-клипы (5 сек)
 - Загружает в S3
-- AI категоризация через Claude API (пачками по 50 видео)
+- AI категоризация через Claude Sonnet Vision API (пачками по 50 видео)
 - Работает как фоновый воркер, опрашивая очередь в PostgreSQL
-- **Banner Worker** — генерирует баннеры из тумб видео для платных аккаунтов: face-aware smart crop (OpenCV) + gradient/text overlay → JPEG → R2
+- **Worker loop** запускает 3 корутины через `asyncio.gather`: parse_worker, banner_worker, categorizer_worker
+- **Banner Worker** — генерирует баннеры из тумб видео для платных аккаунтов: Gemini AI crop + color/contrast enhance (fallback: center-crop) + gradient/text overlay → JPEG → R2
+- **Categorizer Worker** — фоновый цикл, берёт uncategorized видео, отправляет thumbnail в Claude Vision, сохраняет категории с confidence
 
 ### Next.js Frontend
 - Server-side rendering для SEO
@@ -222,6 +224,82 @@ Go API → EventBuffer (in-memory)
 - Публичный API: без авторизации, определение сайта по домену
 - Админ API: Bearer token в заголовке Authorization
 - Админ UI: пароль → cookie `admin_token` → Bearer token к API
+
+---
+
+# Операционные заметки
+
+## AI Categorizer (Claude Vision)
+
+### Как работает
+Categorizer — часть parser-worker. Автоматически берёт видео без `ai_processed_at`, отправляет thumbnail в Claude Sonnet Vision, получает 1-5 категорий с confidence score, сохраняет в БД.
+
+### Env-переменные
+| Переменная | Описание |
+|------------|----------|
+| `ANTHROPIC_API_KEY` | API ключ Anthropic (обязателен для работы categorizer) |
+| `CATEGORIZER_BATCH_SIZE` | Размер батча (default: 50) |
+| `CATEGORIZER_CONCURRENCY` | Параллельность запросов к API (default: 5) |
+
+### Проверка статуса категоризации
+```sql
+-- Сколько видео категоризировано
+SELECT count(*) FROM video_categories;
+
+-- Сколько категорий создано
+SELECT count(*) FROM categories;
+SELECT * FROM categories ORDER BY slug;
+
+-- Сколько видео ещё не обработано
+SELECT count(*) FROM videos WHERE ai_processed_at IS NULL AND is_active = true;
+
+-- Видео с категориями
+SELECT v.id, v.title, c.name, vc.confidence
+FROM video_categories vc
+JOIN videos v ON v.id = vc.video_id
+JOIN categories c ON c.id = vc.category_id
+ORDER BY vc.confidence DESC
+LIMIT 20;
+```
+
+### Ручной запуск
+```bash
+# Запустить категоризацию вручную (вне worker loop)
+python -m parser categorize
+```
+
+### Пере-категоризация
+```bash
+# Через Admin API — сбросить ai_processed_at для всех видео
+curl -X POST http://localhost:8080/api/v1/admin/videos/recategorize \
+  -H "Authorization: Bearer xcj-admin-2024"
+```
+Это сбросит `ai_processed_at` у всех видео, и categorizer worker подхватит их при следующем цикле.
+
+### Текущий статус (2026-03-05)
+- Код: готов и задеплоен (commit ef00ee4 добавил categorizer в worker loop)
+- Блокер: баланс Anthropic API = $0. Нужно пополнить на console.anthropic.com
+- Таблицы categories, video_categories, site_categories — пусты
+
+## Banner Worker (Gemini Image Editing)
+
+### Как работает
+Banner Worker генерирует рекламные баннеры из thumbnail видео для платных аккаунтов. Использует Gemini Image Editing API для интеллектуального кропа и улучшения изображений.
+
+### Пайплайн
+```
+thumbnail_lg_url → скачать → Gemini crop + enhance → resize → overlay (@username + "Watch Now →") → JPEG q=90 → R2
+```
+
+### Env-переменные
+| Переменная | Описание |
+|------------|----------|
+| `GEMINI_API_KEY` | Google Gemini API key (обязателен для AI crop; без него — fallback на center-crop) |
+| `GEMINI_MODEL` | Модель Gemini (default: `gemini-2.5-flash-image`) |
+
+### Стоимость
+- ~$0.04 за изображение (Gemini Image Editing API)
+- При недоступности Gemini (нет ключа, ошибка API) — автоматический fallback на center-crop (бесплатно)
 
 ---
 
