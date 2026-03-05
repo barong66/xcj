@@ -79,7 +79,9 @@ def gemini_crop_and_enhance(
         from google.genai import types
 
         prompt = (
-            f"Crop this photo of a female model to a {width}x{height} banner. "
+            f"Crop this photo of a female model to exactly {width}x{height} aspect ratio. "
+            "IMPORTANT: Only crop the image, do not stretch or squash it. "
+            "Keep the crop tight — remove no more than 10-15% from any side. "
             "You are a professional photographer choosing the best frame. "
             "Apply rule of thirds, find the most flattering and seductive composition. "
             "Focus on face and body, keep the subject well-framed. "
