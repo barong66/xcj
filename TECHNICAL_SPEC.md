@@ -228,6 +228,7 @@ xcj/
 - `idx_accounts_platform` — (platform)
 - `idx_parse_queue_status` — (status, created_at)
 - `idx_banners_account` — (account_id)
+- `idx_banners_serve` — (width, height) WHERE is_active = true
 - `idx_banner_queue_status` — (status, created_at)
 
 ---
@@ -354,8 +355,21 @@ WHERE event_type IN ('impression', 'click')
 
 | Метод | Путь | Описание |
 |-------|------|----------|
+| GET | /b/serve | Динамический сервинг: HTML с случайным баннером из пула (iframe embed) |
 | GET | /b/{id} | 302 redirect на R2 URL + banner_impression в ClickHouse |
 | GET | /b/{id}/click | 302 redirect на /model/{slug} + banner_click в ClickHouse |
+
+**GET /b/serve** — параметры:
+| Параметр | Тип | Описание |
+|----------|-----|----------|
+| `size` | string | Размер `WxH` (напр. `300x250`). Альтернативно: `w` + `h` отдельно |
+| `cat` | string | Slug категории (опционально) |
+| `kw` | string | Ключевые слова — ILIKE по title/description (опционально, не кешируется) |
+| `aid` | int | Account ID (опционально) |
+
+Ответ — HTML-страница с `<a href="SITE_BASE_URL/b/{id}/click" target="_top"><img src="CDN_URL">`.
+Пустой пул → пустая прозрачная страница (graceful degradation).
+Headers: `Cache-Control: no-cache, no-store`, без `X-Frame-Options` (разрешён iframe).
 
 ### 5.4 Middleware
 
@@ -378,8 +392,11 @@ WHERE event_type IN ('impression', 'click')
 | catd:{site}:{slug} | 300s | Детали категории |
 | acc:{account_id} | 300s | Аккаунт с видео |
 | src:{site}:{query}:{page} | 60s | Результаты поиска |
+| bp:{w}x{h} | 60s | Пул баннеров по размеру ([]ServableBanner) |
+| bp:{w}x{h}:{cat} | 60s | Пул баннеров по размеру + категории |
+| bp:{w}x{h}:a{aid} | 60s | Пул баннеров по размеру + аккаунту |
 
-Кеш обходится для random сортировки и при использовании `exclude_account_id`.
+Кеш обходится для random сортировки, при `exclude_account_id`, и для keyword-запросов баннеров.
 
 ---
 
@@ -571,7 +588,7 @@ Banner Worker забирает задачу из banner_queue
 → Обновить статус задачи (done/failed)
 ```
 
-### 8.5 Serving баннеров (рекламные сети)
+### 8.5 Serving баннеров (статический, по ID)
 ```
 Рекламная сеть показывает IMG → GET /b/{id}
 → Go API: lookup banner по ID
@@ -581,10 +598,28 @@ Banner Worker забирает задачу из banner_queue
 Клик по баннеру → GET /b/{id}/click
 → Go API: lookup banner → account slug
 → Записать banner_click в ClickHouse EventBuffer
-→ 302 redirect на /model/{slug}
+→ 302 redirect на SITE_BASE_URL/model/{slug}
 ```
 
-### 8.6 Мульти-сайт
+### 8.6 Динамический сервинг баннеров (iframe embed)
+```
+Внешний сайт: <iframe src="temptguide.com/b/serve?size=300x250&cat=xxx">
+→ Next.js rewrite /b/* → Go API (http://api:8080)
+→ Go API /b/serve:
+  1. Парсит size (WxH), cat, kw, aid
+  2. Keyword → skip cache, SQL напрямую
+  3. Иначе → Redis GET по ключу bp:{w}x{h}[:cat|:a{aid}]
+  4. Cache miss → SQL (JOIN banners/videos/accounts, +categories если cat) → Redis SET (TTL 60s)
+  5. rand.Intn(len(pool)) → выбрать случайный баннер
+  6. Push banner_impression event (source=serve) → EventBuffer → ClickHouse
+  7. Ответ HTML: <a href="SITE_BASE_URL/b/{id}/click" target="_top"><img src="CDN_URL">
+
+Hot path (cache hit): < 2ms
+Cold path (cache miss): ~20ms (SQL + Redis SET), раз в 60 сек на ключ
+Пустой пул → пустая HTML-страница (graceful degradation)
+```
+
+### 8.7 Мульти-сайт
 ```
 Request Host: custom-domain.com
 → SiteDetection middleware → SELECT FROM sites WHERE domain = 'custom-domain.com'
@@ -609,6 +644,7 @@ CACHE_DETAIL_TTL=300s
 EVENT_BUFFER_SIZE=1000
 EVENT_FLUSH_INTERVAL=1s
 RATE_LIMIT_RPS=100
+SITE_BASE_URL=https://temptguide.com    # Абсолютный URL для баннерных redirect'ов (пусто → relative path)
 ```
 
 ### Python Parser
