@@ -118,6 +118,7 @@ services:
       S3_REGION: "${S3_REGION:-auto}"
       S3_PUBLIC_URL: "${S3_PUBLIC_URL:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
       GEMINI_MODEL: "${GEMINI_MODEL:-gemini-2.5-flash-image}"
       APIFY_TOKEN: "${APIFY_TOKEN:-}"

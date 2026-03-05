@@ -1,6 +1,6 @@
 """
 Categorization pipeline: fetches uncategorized videos from PostgreSQL,
-runs them through Claude Vision, and saves results back to the database.
+runs them through OpenAI GPT-4o Vision, and saves results back to the database.
 
 CLI entry point: python -m parser categorize
 """
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class PipelineConfig:
     """Configuration for the categorization pipeline."""
     database_url: str
-    anthropic_api_key: str
+    openai_api_key: str
     batch_size: int = 50
     concurrency: int = 5
 
@@ -60,7 +60,7 @@ class CategorizationPipeline:
             min_size=2,
             max_size=self._config.concurrency + 2,
         )
-        self._categorizer = VisionCategorizer(api_key=self._config.anthropic_api_key)
+        self._categorizer = VisionCategorizer(api_key=self._config.openai_api_key)
 
     async def _close(self) -> None:
         """Tear down resources."""
@@ -330,9 +330,9 @@ class CategorizationPipeline:
 
 def _load_config() -> PipelineConfig:
     """Load pipeline config from environment variables."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    api_key = os.environ.get("OPENAI_API_KEY", "")
     if not api_key:
-        print("ERROR: ANTHROPIC_API_KEY environment variable is required.", file=sys.stderr)
+        print("ERROR: OPENAI_API_KEY environment variable is required.", file=sys.stderr)
         sys.exit(1)
 
     database_url = os.environ.get(
@@ -345,7 +345,7 @@ def _load_config() -> PipelineConfig:
 
     return PipelineConfig(
         database_url=database_url,
-        anthropic_api_key=api_key,
+        openai_api_key=api_key,
         batch_size=batch_size,
         concurrency=concurrency,
     )

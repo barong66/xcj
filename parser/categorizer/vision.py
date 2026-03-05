@@ -1,5 +1,5 @@
 """
-AI video categorizer using Claude Vision API.
+AI video categorizer using OpenAI Vision API (GPT-4o).
 
 Analyzes video thumbnails to extract categories, country, description,
 and a suggested title.
@@ -13,14 +13,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-import anthropic
 import httpx
+from openai import AsyncOpenAI
 
 from parser.categorizer.categories import get_category_prompt_list, validate_categories
 
 logger = logging.getLogger(__name__)
 
-# Supported image media types for Claude Vision
+# Supported image media types for OpenAI Vision
 _SUPPORTED_MEDIA_TYPES = frozenset({
     "image/jpeg",
     "image/png",
@@ -48,20 +48,20 @@ class CategorizationResult:
 
 class VisionCategorizer:
     """
-    Categorizes video content by analyzing thumbnails with Claude Vision.
+    Categorizes video content by analyzing thumbnails with OpenAI GPT-4o Vision.
 
     Usage:
-        categorizer = VisionCategorizer(api_key="sk-ant-...")
+        categorizer = VisionCategorizer(api_key="sk-...")
         result = await categorizer.categorize_url("https://example.com/thumb.jpg")
         # or
         result = await categorizer.categorize_bytes(image_bytes, "image/jpeg")
     """
 
-    MODEL = "claude-sonnet-4-20250514"
+    MODEL = "gpt-4o"
     MAX_TOKENS = 1024
 
     def __init__(self, api_key: str) -> None:
-        self._client = anthropic.AsyncAnthropic(api_key=api_key)
+        self._client = AsyncOpenAI(api_key=api_key)
         self._http = httpx.AsyncClient(
             timeout=30.0,
             follow_redirects=True,
@@ -129,7 +129,7 @@ class VisionCategorizer:
         return response.content, media_type
 
     def _build_prompt(self) -> str:
-        """Build the system + user prompt for categorization."""
+        """Build the user prompt for categorization."""
         return f"""\
 Analyze this video thumbnail image. Based on the visual content, categorize the video.
 
@@ -165,11 +165,12 @@ Important:
         image_data: bytes,
         media_type: str,
     ) -> CategorizationResult:
-        """Send image to Claude Vision and parse the response."""
+        """Send image to OpenAI GPT-4o Vision and parse the response."""
         b64_data = base64.standard_b64encode(image_data).decode("ascii")
+        data_url = f"data:{media_type};base64,{b64_data}"
 
         try:
-            message = await self._client.messages.create(
+            response = await self._client.chat.completions.create(
                 model=self.MODEL,
                 max_tokens=self.MAX_TOKENS,
                 messages=[
@@ -177,12 +178,8 @@ Important:
                         "role": "user",
                         "content": [
                             {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": media_type,
-                                    "data": b64_data,
-                                },
+                                "type": "image_url",
+                                "image_url": {"url": data_url, "detail": "low"},
                             },
                             {
                                 "type": "text",
@@ -192,21 +189,15 @@ Important:
                     }
                 ],
             )
-        except anthropic.APIError as exc:
-            logger.error("Claude API error: %s", exc)
+        except Exception as exc:
+            logger.error("OpenAI API error: %s", exc)
             raise
 
-        # Extract text content from response
-        raw_text = ""
-        for block in message.content:
-            if block.type == "text":
-                raw_text = block.text
-                break
-
+        raw_text = response.choices[0].message.content or ""
         return self._parse_response(raw_text)
 
     def _parse_response(self, raw_text: str) -> CategorizationResult:
-        """Parse and validate the JSON response from Claude."""
+        """Parse and validate the JSON response from OpenAI."""
         # Strip markdown fences if present
         text = raw_text.strip()
         if text.startswith("```"):
