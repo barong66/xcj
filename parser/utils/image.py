@@ -79,10 +79,11 @@ def gemini_crop_and_enhance(
         from google.genai import types
 
         prompt = (
-            f"Crop this image to a {width}x{height} advertising banner. "
-            "Choose the most attractive and eye-catching composition "
-            "focusing on the subject. "
-            "Enhance colors and contrast slightly to make it pop. "
+            f"Crop this photo of a female model to a {width}x{height} banner. "
+            "You are a professional photographer choosing the best frame. "
+            "Apply rule of thirds, find the most flattering and seductive composition. "
+            "Focus on face and body, keep the subject well-framed. "
+            "Boost contrast and color saturation to make it vivid and eye-catching. "
             "Do not add any text, logos, or watermarks. "
             "Return only the cropped and enhanced image."
         )
