@@ -78,15 +78,20 @@ def gemini_crop_and_enhance(
     try:
         from google.genai import types
 
+        # Express as ratio, not pixels — so Gemini crops instead of squashing
+        from math import gcd
+        g = gcd(width, height)
+        ratio_w, ratio_h = width // g, height // g
+
         prompt = (
-            f"Crop this photo of a female model to exactly {width}x{height} aspect ratio. "
-            "IMPORTANT: Only crop the image, do not stretch or squash it. "
-            "Keep the crop tight — remove no more than 10-15% from any side. "
+            f"Crop this photo to {ratio_w}:{ratio_h} aspect ratio (landscape). "
+            "ONLY CROP — do not resize, stretch, squash, or change resolution. "
             "You are a professional photographer choosing the best frame. "
-            "Apply rule of thirds, find the most flattering and seductive composition. "
+            "Apply rule of thirds, find the most flattering composition. "
             "Focus on face and body, keep the subject well-framed. "
             "Do not add any text, logos, or watermarks. "
-            "Do not change colors or contrast — return the cropped image as-is."
+            "Do not change colors or contrast. "
+            "Return the cropped image at its original resolution."
         )
 
         response = client.models.generate_content(
