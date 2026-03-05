@@ -51,9 +51,14 @@ async def cmd_parse(username: str, platform: str) -> None:
 
 
 async def cmd_worker() -> None:
-    """Start the worker loop (runs until SIGINT/SIGTERM)."""
+    """Start the worker loop (runs until SIGINT/SIGTERM).
+
+    Runs parse worker and banner worker concurrently.
+    """
+    from parser.tasks.banner_worker import banner_worker_loop
     from parser.tasks.parse_worker import worker_loop
-    await worker_loop()
+
+    await asyncio.gather(worker_loop(), banner_worker_loop())
 
 
 async def cmd_categorize() -> None:

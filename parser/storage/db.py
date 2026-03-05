@@ -266,7 +266,8 @@ async def pick_pending_job() -> Optional[asyncpg.Record]:
             (SELECT username FROM accounts WHERE id = parse_queue.account_id) AS username,
             (SELECT platform FROM accounts WHERE id = parse_queue.account_id) AS platform,
             (SELECT max_videos FROM accounts WHERE id = parse_queue.account_id) AS max_videos,
-            (SELECT last_parsed_at FROM accounts WHERE id = parse_queue.account_id) AS last_parsed_at
+            (SELECT last_parsed_at FROM accounts WHERE id = parse_queue.account_id) AS last_parsed_at,
+            (SELECT is_paid FROM accounts WHERE id = parse_queue.account_id) AS is_paid
         """,
     )
 
@@ -337,3 +338,92 @@ async def enqueue_stale_accounts(interval_hours: int, limit: int = 5) -> int:
         logger.info("Auto-enqueued %d stale account(s) for re-parse", count)
 
     return count
+
+
+# ─── Banner queue ─────────────────────────────────────────────────
+
+async def pick_pending_banner_job() -> Optional[asyncpg.Record]:
+    """Atomically pick the oldest pending banner job and mark it running."""
+    pool = await get_pool()
+    return await pool.fetchrow(
+        """
+        UPDATE banner_queue
+        SET status = 'running', started_at = NOW()
+        WHERE id = (
+            SELECT bq.id
+            FROM banner_queue bq
+            WHERE bq.status = 'pending'
+            ORDER BY bq.created_at
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *
+        """,
+    )
+
+
+async def finish_banner_job(job_id: int) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE banner_queue SET status = 'done', finished_at = NOW() WHERE id = $1",
+        job_id,
+    )
+
+
+async def fail_banner_job(job_id: int, *, error: str) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE banner_queue SET status = 'failed', finished_at = NOW(), error = $2 WHERE id = $1",
+        job_id, error,
+    )
+
+
+async def get_banner_sizes() -> list[asyncpg.Record]:
+    """Return all active banner sizes."""
+    pool = await get_pool()
+    return await pool.fetch(
+        "SELECT id, width, height, label FROM banner_sizes WHERE is_active = true ORDER BY id",
+    )
+
+
+async def get_videos_for_banners(account_id: int, video_id: Optional[int] = None) -> list[asyncpg.Record]:
+    """Return videos that need banners generated.
+
+    If video_id is specified, return just that video.
+    Otherwise return all active videos for the account.
+    """
+    pool = await get_pool()
+    if video_id:
+        return await pool.fetch(
+            "SELECT id, platform, platform_id, COALESCE(thumbnail_lg_url, thumbnail_url) AS thumb_url FROM videos WHERE id = $1 AND is_active = true",
+            video_id,
+        )
+    return await pool.fetch(
+        "SELECT id, platform, platform_id, COALESCE(thumbnail_lg_url, thumbnail_url) AS thumb_url FROM videos WHERE account_id = $1 AND is_active = true",
+        account_id,
+    )
+
+
+async def insert_banner(account_id: int, video_id: int, banner_size_id: int, image_url: str, width: int, height: int) -> int:
+    """Insert or update a banner row. Returns the banner id."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        INSERT INTO banners (account_id, video_id, banner_size_id, image_url, width, height)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (video_id, banner_size_id) DO UPDATE SET image_url = EXCLUDED.image_url, is_active = true
+        RETURNING id
+        """,
+        account_id, video_id, banner_size_id, image_url, width, height,
+    )
+    return row["id"]
+
+
+async def enqueue_banner_generation(account_id: int, video_id: Optional[int] = None) -> int:
+    """Enqueue a banner generation job. Returns the job id."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "INSERT INTO banner_queue (account_id, video_id, status) VALUES ($1, $2, 'pending') RETURNING id",
+        account_id, video_id,
+    )
+    return row["id"]

@@ -257,6 +257,14 @@ async def _process_job(job) -> None:
         await db.update_account_parsed(account_id, reset_errors=True)
         logger.info("Job %d done: %d new videos for @%s", job_id, count, username)
 
+        # Auto-enqueue banner generation for paid accounts with new videos.
+        if count > 0 and job.get("is_paid"):
+            try:
+                await db.enqueue_banner_generation(account_id)
+                logger.info("Enqueued banner generation for paid account @%s", username)
+            except Exception:
+                logger.warning("Failed to enqueue banner generation for @%s", username, exc_info=True)
+
     except Exception as exc:
         tb = traceback.format_exc()
         error_msg = f"{type(exc).__name__}: {exc}"

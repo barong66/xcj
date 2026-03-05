@@ -510,3 +510,103 @@ export async function getVideoStats(params?: {
   const qs = sp.toString();
   return adminFetch<VideoStatsList>(`/videos/stats${qs ? `?${qs}` : ""}`);
 }
+
+// ─── Banners ──────────────────────────────────────────────────────────────────
+
+export interface BannerSize {
+  id: number;
+  width: number;
+  height: number;
+  label: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface BannerSizeSummary {
+  banner_size_id: number;
+  width: number;
+  height: number;
+  label: string;
+  count: number;
+}
+
+export interface AdminBanner {
+  id: number;
+  account_id: number;
+  video_id: number;
+  banner_size_id: number;
+  image_url: string;
+  width: number;
+  height: number;
+  is_active: boolean;
+  created_at: string;
+  video_title: string;
+  username: string;
+}
+
+export interface AdminBannerList {
+  banners: AdminBanner[];
+  total: number;
+  page: number;
+  per_page: number;
+  total_pages: number;
+}
+
+export async function getBannerSizes(): Promise<BannerSize[]> {
+  const res = await adminFetch<{ sizes: BannerSize[] }>("/banner-sizes");
+  return res.sizes;
+}
+
+export async function createBannerSize(data: {
+  width: number;
+  height: number;
+  label: string;
+}): Promise<BannerSize> {
+  return adminFetch<BannerSize>("/banner-sizes", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getAccountBannerSummary(
+  accountId: number,
+): Promise<BannerSizeSummary[]> {
+  const res = await adminFetch<{ sizes: BannerSizeSummary[] }>(
+    `/accounts/${accountId}/banners/summary`,
+  );
+  return res.sizes;
+}
+
+export async function getAccountBanners(
+  accountId: number,
+  params?: { size_id?: number; page?: number; per_page?: number },
+): Promise<AdminBannerList> {
+  const sp = new URLSearchParams();
+  if (params?.size_id) sp.set("size_id", String(params.size_id));
+  if (params?.page) sp.set("page", String(params.page));
+  if (params?.per_page) sp.set("per_page", String(params.per_page));
+  const qs = sp.toString();
+  return adminFetch<AdminBannerList>(
+    `/accounts/${accountId}/banners${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function generateAccountBanners(
+  accountId: number,
+): Promise<{ status: string }> {
+  return adminFetch<{ status: string }>(
+    `/accounts/${accountId}/banners/generate`,
+    { method: "POST" },
+  );
+}
+
+export async function getAllBanners(params?: {
+  page?: number;
+  per_page?: number;
+}): Promise<AdminBannerList> {
+  const sp = new URLSearchParams();
+  if (params?.page) sp.set("page", String(params.page));
+  if (params?.per_page) sp.set("per_page", String(params.per_page));
+  const qs = sp.toString();
+  return adminFetch<AdminBannerList>(`/banners${qs ? `?${qs}` : ""}`);
+}

@@ -99,3 +99,9 @@ def upload_avatar(local_path: str, platform: str, username: str) -> str:
     ext = os.path.splitext(local_path)[1] or ".jpg"
     s3_key = f"avatars/{platform}/{username}{ext}"
     return upload_file(local_path, s3_key)
+
+
+def upload_banner(local_path: str, account_id: int, video_id: int, width: int, height: int) -> str:
+    """Upload a banner image and return its public URL."""
+    s3_key = f"banners/{account_id}/{video_id}_{width}x{height}.jpg"
+    return upload_file(local_path, s3_key)

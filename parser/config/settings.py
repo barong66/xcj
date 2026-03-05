@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     twscrape_db_path: str = "twscrape_accounts.db"    # path to twscrape SQLite account pool
     twscrape_max_results: int = 100                     # max tweets to scan per search
 
+    # ── Banner generation ────────────────────────────────────────
+    banner_quality: int = 90
+    banner_poll_interval_sec: int = 10
+
     # ── Logging ──────────────────────────────────────────────────
     log_level: str = "INFO"
 
