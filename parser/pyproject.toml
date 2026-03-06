@@ -18,7 +18,6 @@ dependencies = [
     "google-genai>=1.0",
     "numpy>=1.24,<3.0",
     "opencv-python-headless>=4.8,<5.0",
-    "html2image>=2.0,<3.0",
 ]
 
 [project.scripts]
