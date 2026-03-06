@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Banner Preview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
+
+  .controls {
+    position: sticky; top: 0; z-index: 10;
+    background: #fff; border-bottom: 1px solid #e0e0e0;
+    padding: 16px 24px;
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: end;
+  }
+  .controls label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .5px; }
+  .controls input, .controls select {
+    padding: 8px 12px; font-size: 14px; border: 1px solid #ddd; border-radius: 6px;
+    background: #fafafa; outline: none;
+  }
+  .controls input:focus, .controls select:focus { border-color: #7c3aed; }
+  .controls button {
+    padding: 8px 20px; font-size: 14px; border: none; border-radius: 6px;
+    background: #7c3aed; color: #fff; cursor: pointer; font-weight: 600;
+  }
+  .controls button:hover { background: #6d28d9; }
+
+  .preview-area { padding: 32px 24px; }
+
+  /* Simulated blog page */
+  .fake-site {
+    max-width: 900px; margin: 0 auto;
+    background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    overflow: hidden;
+  }
+  .fake-header {
+    padding: 20px 32px; border-bottom: 1px solid #eee;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .fake-header .logo { font-size: 20px; font-weight: 700; color: #333; }
+  .fake-header nav { display: flex; gap: 24px; }
+  .fake-header nav a { font-size: 14px; color: #666; text-decoration: none; }
+
+  .fake-content { display: flex; gap: 24px; padding: 32px; }
+  .fake-article { flex: 1; min-width: 0; }
+  .fake-article h1 { font-size: 24px; margin-bottom: 16px; color: #1a1a1a; }
+  .fake-article p { font-size: 15px; line-height: 1.7; color: #555; margin-bottom: 16px; }
+  .fake-sidebar { width: 320px; flex-shrink: 0; }
+  .fake-sidebar .ad-slot {
+    background: #f9f9f9; border: 1px dashed #ddd; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; margin-bottom: 16px;
+  }
+  .fake-sidebar .ad-slot.has-banner { background: none; border: none; }
+  .fake-sidebar .ad-label {
+    font-size: 10px; color: #aaa; text-transform: uppercase; letter-spacing: .5px;
+    margin-bottom: 6px;
+  }
+
+  .inline-ad {
+    margin: 24px 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #f9f9f9; border: 1px dashed #ddd; border-radius: 8px;
+    overflow: hidden;
+  }
+  .inline-ad.has-banner { background: none; border: none; }
+
+  .info-bar {
+    margin: 24px auto; max-width: 900px;
+    padding: 12px 20px; background: #fff; border-radius: 8px;
+    font-size: 12px; color: #888; font-family: monospace;
+    word-break: break-all; box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  }
+  .info-bar span { color: #7c3aed; }
+</style>
+</head>
+<body>
+
+<div class="controls">
+  <div>
+    <label>Size</label>
+    <select id="size">
+      <option value="300x250">300x250 (Medium Rectangle)</option>
+      <option value="728x90">728x90 (Leaderboard)</option>
+      <option value="160x600">160x600 (Wide Skyscraper)</option>
+      <option value="320x50">320x50 (Mobile Banner)</option>
+      <option value="300x600">300x600 (Half Page)</option>
+      <option value="970x250">970x250 (Billboard)</option>
+    </select>
+  </div>
+  <div>
+    <label>Category</label>
+    <input id="cat" type="text" placeholder="e.g. latina, blonde" style="width:180px">
+  </div>
+  <div>
+    <label>Keywords</label>
+    <input id="kw" type="text" placeholder="e.g. onlyfans model" style="width:180px">
+  </div>
+  <div>
+    <label>Source</label>
+    <input id="src" type="text" placeholder="e.g. adnet1" style="width:120px">
+  </div>
+  <div>
+    <label>Account ID</label>
+    <input id="aid" type="number" placeholder="optional" style="width:100px">
+  </div>
+  <div>
+    <label>&nbsp;</label>
+    <button onclick="loadBanner()">Load Banner</button>
+  </div>
+</div>
+
+<div class="info-bar" id="urlInfo">
+  <span>URL:</span> Click "Load Banner" to generate
+</div>
+
+<div class="preview-area">
+  <div class="fake-site">
+    <div class="fake-header">
+      <div class="logo">ExampleBlog</div>
+      <nav>
+        <a href="#">Home</a>
+        <a href="#">Articles</a>
+        <a href="#">About</a>
+        <a href="#">Contact</a>
+      </nav>
+    </div>
+
+    <div class="fake-content">
+      <div class="fake-article">
+        <h1>How to Monetize Your Website with Banner Ads</h1>
+        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
+        <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.</p>
+
+        <!-- Inline ad slot (leaderboard) -->
+        <div class="inline-ad" id="inlineSlot" style="min-height:90px; padding: 16px 0;">
+          <span style="color:#ccc; font-size:13px;">Inline ad slot</span>
+        </div>
+
+        <p>Sunt in culpa qui officia deserunt mollit anim id est laborum. Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.</p>
+        <p>Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.</p>
+        <p>Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit. At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum.</p>
+      </div>
+
+      <div class="fake-sidebar">
+        <div class="ad-label">Advertisement</div>
+        <div class="ad-slot" id="sidebarSlot" style="min-height:250px; width:300px;">
+          <span style="color:#ccc; font-size:13px;">Sidebar ad slot</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function loadBanner() {
+  var size = document.getElementById('size').value;
+  var parts = size.split('x');
+  var w = parseInt(parts[0]), h = parseInt(parts[1]);
+  var cat = document.getElementById('cat').value.trim();
+  var kw = document.getElementById('kw').value.trim();
+  var src = document.getElementById('src').value.trim();
+  var aid = document.getElementById('aid').value.trim();
+
+  var params = new URLSearchParams();
+  params.set('size', size);
+  if (cat) params.set('cat', cat);
+  if (kw) params.set('kw', kw);
+  if (src) params.set('src', src);
+  if (aid) params.set('aid', aid);
+
+  var url = '/b/serve?' + params.toString();
+  var ts = Date.now();
+
+  document.getElementById('urlInfo').innerHTML = '<span>URL:</span> ' + url;
+
+  var iframeHtml = '<iframe src="' + url + '&_t=' + ts + '" width="' + w + '" height="' + h + '" frameborder="0" scrolling="no" style="border:none;overflow:hidden;display:block"></iframe>';
+
+  // Place in sidebar for 300-wide sizes
+  if (w <= 320) {
+    var sidebar = document.getElementById('sidebarSlot');
+    sidebar.innerHTML = iframeHtml;
+    sidebar.style.width = w + 'px';
+    sidebar.style.minHeight = h + 'px';
+    sidebar.classList.add('has-banner');
+
+    // Clear inline
+    document.getElementById('inlineSlot').innerHTML = '<span style="color:#ccc;font-size:13px;">Inline ad slot</span>';
+    document.getElementById('inlineSlot').classList.remove('has-banner');
+  } else {
+    // Place inline for wider sizes
+    var inline = document.getElementById('inlineSlot');
+    inline.innerHTML = iframeHtml;
+    inline.style.minHeight = h + 'px';
+    inline.classList.add('has-banner');
+
+    // Clear sidebar
+    document.getElementById('sidebarSlot').innerHTML = '<span style="color:#ccc;font-size:13px;">Sidebar ad slot</span>';
+    document.getElementById('sidebarSlot').classList.remove('has-banner');
+    document.getElementById('sidebarSlot').style.width = '300px';
+    document.getElementById('sidebarSlot').style.minHeight = '250px';
+  }
+}
+</script>
+</body>
+</html>
