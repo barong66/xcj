@@ -222,6 +222,8 @@ def _render_html_banner(
                     "--disable-gpu",
                     "--disable-software-rasterizer",
                     "--hide-scrollbars",
+                    "--disable-remote-fonts",
+                    "--run-all-compositor-stages-before-draw",
                 ],
             )
             paths = hti.screenshot(
