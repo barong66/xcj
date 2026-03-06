@@ -43,12 +43,16 @@ function ensureFlushLoop(): void {
 function pushEvent(event: AnalyticsEvent): void {
   ensureFlushLoop();
 
-  // Enrich with ad source from sessionStorage if available.
+  // Enrich with ad source and click_id from sessionStorage if available.
   const enriched = { ...event, timestamp: Date.now() };
   if (typeof sessionStorage !== "undefined") {
     const adSource = sessionStorage.getItem("ad_source");
     if (adSource && !enriched.source) {
       enriched.source = adSource;
+    }
+    const clickId = sessionStorage.getItem("ad_click_id");
+    if (clickId && !enriched.extra) {
+      enriched.extra = JSON.stringify({ click_id: clickId });
     }
   }
 
@@ -151,5 +155,21 @@ export function trackAdLanding(source: string, anchor?: string): void {
     type: "ad_landing",
     source,
     source_page: anchor ? `anchor:${anchor}` : "feed",
+  });
+}
+
+// Track the first content click per session (e.g., Instagram link on model page).
+export function trackContentClick(
+  accountId: number,
+  targetUrl: string,
+): void {
+  if (typeof sessionStorage === "undefined") return;
+  if (sessionStorage.getItem("content_click_sent")) return;
+  sessionStorage.setItem("content_click_sent", "1");
+  pushEvent({
+    type: "content_click",
+    account_id: accountId,
+    target_url: targetUrl,
+    source_page: "profile",
   });
 }

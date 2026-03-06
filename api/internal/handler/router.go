@@ -112,6 +112,17 @@ func NewRouter(
 		r.Get("/sites/{id}", adminHandler.GetSite)
 		r.Put("/sites/{id}", adminHandler.UpdateSite)
 		r.Post("/sites/{id}/refresh", adminHandler.RefreshSiteContent)
+
+		// Ad Sources.
+		r.Get("/ad-sources", adminHandler.ListAdSources)
+		r.Post("/ad-sources", adminHandler.CreateAdSource)
+		r.Put("/ad-sources/{id}", adminHandler.UpdateAdSource)
+
+		// Banner Funnel Analytics.
+		r.Get("/banner-funnel", adminHandler.GetBannerFunnel)
+
+		// Conversion Postbacks.
+		r.Get("/postbacks", adminHandler.ListPostbacks)
 	})
 
 	// Public banner serving — no auth, no site detection.
@@ -119,6 +130,7 @@ func NewRouter(
 	r.Get("/b/serve", bannerHandler.ServeDynamic)
 	r.Get("/b/{id}", bannerHandler.ServeBanner)
 	r.Get("/b/{id}/click", bannerHandler.ClickBanner)
+	r.Get("/b/{id}/hover", bannerHandler.HoverBanner)
 
 	// API v1 routes — all require site detection.
 	r.Route("/api/v1", func(r chi.Router) {
@@ -127,7 +139,7 @@ func NewRouter(
 		videoHandler := NewVideoHandler(videoStore, accountStore, categoryStore, c, ranker)
 		categoryHandler := NewCategoryHandler(categoryStore, c)
 		accountHandler := NewAccountHandler(accountStore, c)
-		eventHandler := NewEventHandler(eventBuffer)
+		eventHandler := NewEventHandler(eventBuffer, adminStore)
 
 		// Videos.
 		r.Get("/videos", videoHandler.List)

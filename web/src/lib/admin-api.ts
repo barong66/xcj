@@ -544,6 +544,7 @@ export interface AdminBanner {
   video_title: string;
   username: string;
   impressions: number;
+  hovers: number;
   clicks: number;
   ctr: number;
 }
@@ -614,4 +615,92 @@ export async function getAllBanners(params?: {
   if (params?.per_page) sp.set("per_page", String(params.per_page));
   const qs = sp.toString();
   return adminFetch<AdminBannerList>(`/banners${qs ? `?${qs}` : ""}`);
+}
+
+// ─── Ad Sources ──────────────────────────────────────────────────────────────
+
+export interface AdSource {
+  id: number;
+  name: string;
+  postback_url: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export async function getAdSources(): Promise<AdSource[]> {
+  const res = await adminFetch<{ ad_sources: AdSource[] }>("/ad-sources");
+  return res.ad_sources;
+}
+
+export async function createAdSource(data: {
+  name: string;
+  postback_url: string;
+}): Promise<AdSource> {
+  return adminFetch<AdSource>("/ad-sources", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateAdSource(
+  id: number,
+  data: { name?: string; postback_url?: string; is_active?: boolean },
+): Promise<AdSource> {
+  return adminFetch<AdSource>(`/ad-sources/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+// ─── Banner Funnel Analytics ─────────────────────────────────────────────────
+
+export interface BannerFunnelStat {
+  source: string;
+  impressions: number;
+  hovers: number;
+  clicks: number;
+  landings: number;
+  conversions: number;
+  ctr: number;
+  conv_rate: number;
+}
+
+export async function getBannerFunnel(
+  days?: number,
+): Promise<{ funnel: BannerFunnelStat[]; days: number }> {
+  const sp = new URLSearchParams();
+  if (days) sp.set("days", String(days));
+  const qs = sp.toString();
+  return adminFetch<{ funnel: BannerFunnelStat[]; days: number }>(
+    `/banner-funnel${qs ? `?${qs}` : ""}`,
+  );
+}
+
+// ─── Conversion Postbacks ────────────────────────────────────────────────────
+
+export interface ConversionPostback {
+  id: number;
+  ad_source_id: number;
+  ad_source_name: string;
+  click_id: string;
+  event_type: string;
+  account_id: number;
+  video_id: number;
+  status: string;
+  response_code: number;
+  response_body?: string;
+  created_at: string;
+  sent_at?: string;
+}
+
+export async function getPostbacks(
+  limit?: number,
+): Promise<ConversionPostback[]> {
+  const sp = new URLSearchParams();
+  if (limit) sp.set("limit", String(limit));
+  const qs = sp.toString();
+  const res = await adminFetch<{ postbacks: ConversionPostback[] }>(
+    `/postbacks${qs ? `?${qs}` : ""}`,
+  );
+  return res.postbacks;
 }

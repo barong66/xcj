@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import type { Account } from "@/types";
-import { trackSocialClick } from "@/lib/analytics";
+import { trackSocialClick, trackContentClick } from "@/lib/analytics";
 
 interface FanSiteButtonsProps {
   account: Account;
@@ -31,6 +31,10 @@ export function FanSiteButtons({ account }: FanSiteButtonsProps) {
 
   const handleClick = (p: string, url: string) => {
     trackSocialClick(account.id, url, p);
+    // Track first content click for conversion attribution (Instagram/Twitter content links).
+    if (p === platform) {
+      trackContentClick(account.id, url);
+    }
     window.open(url, "_blank", "noopener,noreferrer");
   };
 

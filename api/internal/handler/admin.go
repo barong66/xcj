@@ -734,8 +734,106 @@ func (h *AdminHandler) enrichBannerStats(ctx context.Context, banners []store.Ad
 	for i := range banners {
 		if s, ok := stats[banners[i].VideoID]; ok {
 			banners[i].Impressions = s.Impressions
+			banners[i].Hovers = s.Hovers
 			banners[i].Clicks = s.Clicks
 			banners[i].CTR = s.CTR
 		}
 	}
+}
+
+// ─── Ad Sources ───────────────────────────────────────────────────────────────
+
+// ListAdSources handles GET /api/v1/admin/ad-sources
+func (h *AdminHandler) ListAdSources(w http.ResponseWriter, r *http.Request) {
+	sources, err := h.admin.ListAdSources(r.Context())
+	if err != nil {
+		slog.Error("admin: list ad sources", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list ad sources")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ad_sources": sources})
+}
+
+// CreateAdSource handles POST /api/v1/admin/ad-sources
+func (h *AdminHandler) CreateAdSource(w http.ResponseWriter, r *http.Request) {
+	var input store.CreateAdSourceInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if input.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	source, err := h.admin.CreateAdSource(r.Context(), input)
+	if err != nil {
+		slog.Error("admin: create ad source", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create ad source")
+		return
+	}
+	writeJSON(w, http.StatusCreated, source)
+}
+
+// UpdateAdSource handles PUT /api/v1/admin/ad-sources/{id}
+func (h *AdminHandler) UpdateAdSource(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid ad source id")
+		return
+	}
+
+	var input store.UpdateAdSourceInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	source, err := h.admin.UpdateAdSource(r.Context(), id, input)
+	if err != nil {
+		if err.Error() == "ad source not found" {
+			writeError(w, http.StatusNotFound, "ad source not found")
+			return
+		}
+		slog.Error("admin: update ad source", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to update ad source")
+		return
+	}
+	writeJSON(w, http.StatusOK, source)
+}
+
+// ─── Banner Funnel Analytics ──────────────────────────────────────────────────
+
+// GetBannerFunnel handles GET /api/v1/admin/banner-funnel
+func (h *AdminHandler) GetBannerFunnel(w http.ResponseWriter, r *http.Request) {
+	days := intParam(r, "days", 30)
+	if days < 1 || days > 365 {
+		days = 30
+	}
+
+	stats, err := h.ch.GetBannerFunnelStats(r.Context(), days)
+	if err != nil {
+		slog.Error("admin: banner funnel stats", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get banner funnel stats")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"funnel": stats, "days": days})
+}
+
+// ─── Conversion Postbacks ─────────────────────────────────────────────────────
+
+// ListPostbacks handles GET /api/v1/admin/postbacks
+func (h *AdminHandler) ListPostbacks(w http.ResponseWriter, r *http.Request) {
+	limit := intParam(r, "limit", 50)
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+
+	postbacks, err := h.admin.ListRecentPostbacks(r.Context(), limit)
+	if err != nil {
+		slog.Error("admin: list postbacks", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list postbacks")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"postbacks": postbacks})
 }

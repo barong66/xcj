@@ -7,19 +7,40 @@ import {
   getBannerSizes,
   createBannerSize,
   getAdminCategories,
+  getAdSources,
+  createAdSource,
+  updateAdSource,
+  getBannerFunnel,
+  getPostbacks,
 } from "@/lib/admin-api";
-import type { AdminBanner, AdminCategory, BannerSize } from "@/lib/admin-api";
+import type {
+  AdminBanner,
+  AdminCategory,
+  BannerSize,
+  AdSource,
+  BannerFunnelStat,
+  ConversionPostback,
+} from "@/lib/admin-api";
 import { ToastProvider, useToast } from "../Toast";
+
+// ─── Tab types ───────────────────────────────────────────────────────────────
+
+type PromoTab = "banners" | "statistics" | "settings";
+
+// ─── Banners Tab ─────────────────────────────────────────────────────────────
 
 function EmbedCodeSection({
   sizes,
+  sources,
   toast,
 }: {
   sizes: BannerSize[];
+  sources: AdSource[];
   toast: (msg: string, type?: "error" | "success" | "info") => void;
 }) {
   const [categories, setCategories] = useState<AdminCategory[]>([]);
   const [selectedCat, setSelectedCat] = useState("");
+  const [selectedSource, setSelectedSource] = useState("");
   const [keywords, setKeywords] = useState("");
   const [previewSizeId, setPreviewSizeId] = useState<number | null>(null);
   const [iframeKey, setIframeKey] = useState(0);
@@ -33,6 +54,7 @@ function EmbedCodeSection({
     params.set("size", `${size.width}x${size.height}`);
     if (selectedCat) params.set("cat", selectedCat);
     if (keywords.trim()) params.set("kw", keywords.trim());
+    if (selectedSource) params.set("src", selectedSource);
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     return `${origin}/b/serve?${params.toString()}`;
   };
@@ -51,7 +73,19 @@ function EmbedCodeSection({
     <div className="mb-6">
       <h2 className="text-sm font-semibold text-white mb-3">Embed Code</h2>
 
-      <div className="flex items-center gap-3 mb-3">
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
+        <select
+          value={selectedSource}
+          onChange={(e) => setSelectedSource(e.target.value)}
+          className="px-3 py-1.5 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white focus:outline-none focus:border-accent"
+        >
+          <option value="">No source</option>
+          {sources.map((s) => (
+            <option key={s.id} value={s.name}>
+              {s.name}
+            </option>
+          ))}
+        </select>
         <select
           value={selectedCat}
           onChange={(e) => setSelectedCat(e.target.value)}
@@ -141,13 +175,20 @@ function EmbedCodeSection({
   );
 }
 
-function PromoContent() {
+function BannersTab({
+  sizes,
+  sources,
+  onSizesChange,
+}: {
+  sizes: BannerSize[];
+  sources: AdSource[];
+  onSizesChange: () => void;
+}) {
   const [banners, setBanners] = useState<AdminBanner[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [sizes, setSizes] = useState<BannerSize[]>([]);
   const [showAddSize, setShowAddSize] = useState(false);
   const [newWidth, setNewWidth] = useState("");
   const [newHeight, setNewHeight] = useState("");
@@ -171,19 +212,9 @@ function PromoContent() {
     }
   }, [toast]);
 
-  const loadSizes = useCallback(async () => {
-    try {
-      const s = await getBannerSizes();
-      setSizes(s);
-    } catch {
-      // silent
-    }
-  }, []);
-
   useEffect(() => {
     loadBanners(1);
-    loadSizes();
-  }, [loadBanners, loadSizes]);
+  }, [loadBanners]);
 
   const handleAddSize = async () => {
     const w = parseInt(newWidth);
@@ -201,7 +232,7 @@ function PromoContent() {
       setNewLabel("");
       setNewType("image");
       setShowAddSize(false);
-      loadSizes();
+      onSizesChange();
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to create size", "error");
     } finally {
@@ -218,8 +249,7 @@ function PromoContent() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-lg font-bold text-white">Promo Banners</h1>
-          <p className="text-sm text-[#6b6b6b] mt-0.5">{total} banners total</p>
+          <p className="text-sm text-[#6b6b6b]">{total} banners total</p>
         </div>
         <button
           onClick={() => setShowAddSize(!showAddSize)}
@@ -307,7 +337,11 @@ function PromoContent() {
 
       {/* Embed Code */}
       {sizes.filter((s) => s.is_active).length > 0 && (
-        <EmbedCodeSection sizes={sizes.filter((s) => s.is_active)} toast={toast} />
+        <EmbedCodeSection
+          sizes={sizes.filter((s) => s.is_active)}
+          sources={sources}
+          toast={toast}
+        />
       )}
 
       {/* Banner list */}
@@ -349,7 +383,7 @@ function PromoContent() {
                     @{b.username}
                   </Link>
                   <div className="text-[10px] text-[#6b6b6b] mt-1">
-                    Imprs: {b.impressions || 0} &nbsp;|&nbsp; Clicks: {b.clicks || 0} &nbsp;|&nbsp; CTR: {b.ctr || 0}%
+                    Imprs: {b.impressions || 0} &nbsp;|&nbsp; Hovers: {b.hovers || 0} &nbsp;|&nbsp; Clicks: {b.clicks || 0} &nbsp;|&nbsp; CTR: {b.ctr || 0}%
                   </div>
                   <div className="flex items-center justify-between mt-1.5">
                     <span className="text-[10px] text-[#6b6b6b]">
@@ -390,6 +424,434 @@ function PromoContent() {
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+// ─── Statistics Tab ──────────────────────────────────────────────────────────
+
+function StatisticsTab() {
+  const [days, setDays] = useState(30);
+  const [funnel, setFunnel] = useState<BannerFunnelStat[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [postbacks, setPostbacks] = useState<ConversionPostback[]>([]);
+  const { toast } = useToast();
+
+  const loadData = useCallback(async (d: number) => {
+    setLoading(true);
+    try {
+      const [funnelRes, pbRes] = await Promise.all([
+        getBannerFunnel(d),
+        getPostbacks(30),
+      ]);
+      setFunnel(funnelRes.funnel);
+      setPostbacks(pbRes);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to load stats", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    loadData(days);
+  }, [days, loadData]);
+
+  // Compute totals for funnel summary.
+  const totals = funnel.reduce(
+    (acc, s) => ({
+      impressions: acc.impressions + s.impressions,
+      hovers: acc.hovers + s.hovers,
+      clicks: acc.clicks + s.clicks,
+      landings: acc.landings + s.landings,
+      conversions: acc.conversions + s.conversions,
+    }),
+    { impressions: 0, hovers: 0, clicks: 0, landings: 0, conversions: 0 },
+  );
+
+  const totalCTR = totals.impressions > 0
+    ? ((totals.clicks / totals.impressions) * 100).toFixed(2)
+    : "0";
+  const totalConvRate = totals.clicks > 0
+    ? ((totals.conversions / totals.clicks) * 100).toFixed(2)
+    : "0";
+
+  return (
+    <div>
+      {/* Period selector */}
+      <div className="flex items-center gap-2 mb-6">
+        {[7, 30, 90].map((d) => (
+          <button
+            key={d}
+            onClick={() => setDays(d)}
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              days === d
+                ? "bg-accent text-white"
+                : "bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525]"
+            }`}
+          >
+            {d}d
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <span className="text-[#6b6b6b] text-sm">Loading...</span>
+        </div>
+      ) : (
+        <>
+          {/* Funnel summary */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 mb-6">
+            {[
+              { label: "Impressions", value: totals.impressions },
+              { label: "Hovers", value: totals.hovers },
+              { label: "Clicks", value: totals.clicks },
+              { label: "Landings", value: totals.landings },
+              { label: "Conversions", value: totals.conversions },
+              { label: "CTR", value: `${totalCTR}%` },
+              { label: "Conv Rate", value: `${totalConvRate}%` },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="bg-[#141414] rounded-lg border border-[#1e1e1e] p-3"
+              >
+                <div className="text-[10px] text-[#6b6b6b] mb-0.5">{item.label}</div>
+                <div className="text-lg font-bold text-white">
+                  {typeof item.value === "number" ? item.value.toLocaleString() : item.value}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Funnel by source table */}
+          {funnel.length > 0 ? (
+            <div className="bg-[#141414] rounded-lg border border-[#1e1e1e] overflow-hidden mb-6">
+              <div className="px-4 py-3 border-b border-[#1e1e1e]">
+                <h3 className="text-sm font-semibold text-white">By Source</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-[#6b6b6b] text-xs border-b border-[#1e1e1e]">
+                      <th className="text-left px-4 py-2 font-medium">Source</th>
+                      <th className="text-right px-4 py-2 font-medium">Impressions</th>
+                      <th className="text-right px-4 py-2 font-medium">Hovers</th>
+                      <th className="text-right px-4 py-2 font-medium">Clicks</th>
+                      <th className="text-right px-4 py-2 font-medium">Landings</th>
+                      <th className="text-right px-4 py-2 font-medium">Conversions</th>
+                      <th className="text-right px-4 py-2 font-medium">CTR</th>
+                      <th className="text-right px-4 py-2 font-medium">Conv%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {funnel.map((row) => (
+                      <tr
+                        key={row.source}
+                        className="border-b border-[#1e1e1e] last:border-b-0 hover:bg-[#1a1a1a] transition-colors"
+                      >
+                        <td className="px-4 py-2.5 text-white font-medium">{row.source}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.impressions.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.hovers.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.clicks.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.landings.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right text-white font-medium">{row.conversions.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.ctr}%</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.conv_rate}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-10 mb-6">
+              <span className="text-[#6b6b6b] text-sm">No funnel data for this period</span>
+            </div>
+          )}
+
+          {/* Recent postbacks */}
+          {postbacks.length > 0 && (
+            <div className="bg-[#141414] rounded-lg border border-[#1e1e1e] overflow-hidden">
+              <div className="px-4 py-3 border-b border-[#1e1e1e]">
+                <h3 className="text-sm font-semibold text-white">Recent Postbacks</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-[#6b6b6b] text-xs border-b border-[#1e1e1e]">
+                      <th className="text-left px-4 py-2 font-medium">Source</th>
+                      <th className="text-left px-4 py-2 font-medium">Click ID</th>
+                      <th className="text-left px-4 py-2 font-medium">Event</th>
+                      <th className="text-left px-4 py-2 font-medium">Status</th>
+                      <th className="text-right px-4 py-2 font-medium">Code</th>
+                      <th className="text-left px-4 py-2 font-medium">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {postbacks.map((pb) => (
+                      <tr
+                        key={pb.id}
+                        className="border-b border-[#1e1e1e] last:border-b-0 hover:bg-[#1a1a1a] transition-colors"
+                      >
+                        <td className="px-4 py-2 text-white">{pb.ad_source_name}</td>
+                        <td className="px-4 py-2 text-[#a0a0a0] font-mono text-xs truncate max-w-[150px]">{pb.click_id}</td>
+                        <td className="px-4 py-2 text-[#a0a0a0]">{pb.event_type}</td>
+                        <td className="px-4 py-2">
+                          <span
+                            className={`inline-block px-1.5 py-0.5 text-[10px] rounded ${
+                              pb.status === "sent"
+                                ? "bg-green-900/50 text-green-400"
+                                : pb.status === "failed"
+                                  ? "bg-red-900/50 text-red-400"
+                                  : "bg-yellow-900/50 text-yellow-400"
+                            }`}
+                          >
+                            {pb.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-right text-[#a0a0a0]">{pb.response_code || "-"}</td>
+                        <td className="px-4 py-2 text-[#6b6b6b] text-xs">
+                          {new Date(pb.created_at).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Settings Tab ────────────────────────────────────────────────────────────
+
+function SettingsTab({
+  sources,
+  onSourcesChange,
+}: {
+  sources: AdSource[];
+  onSourcesChange: () => void;
+}) {
+  const [showAddSource, setShowAddSource] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newUrl, setNewUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  const handleAdd = async () => {
+    if (!newName.trim()) {
+      toast("Name is required", "error");
+      return;
+    }
+    setSaving(true);
+    try {
+      await createAdSource({ name: newName.trim(), postback_url: newUrl.trim() });
+      toast(`Ad source "${newName}" created`);
+      setNewName("");
+      setNewUrl("");
+      setShowAddSource(false);
+      onSourcesChange();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to create source", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggle = async (source: AdSource) => {
+    try {
+      await updateAdSource(source.id, { is_active: !source.is_active });
+      toast(`${source.name} ${source.is_active ? "disabled" : "enabled"}`);
+      onSourcesChange();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to update", "error");
+    }
+  };
+
+  return (
+    <div>
+      {/* Ad Sources section */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-sm font-semibold text-white">Ad Sources</h2>
+            <p className="text-xs text-[#6b6b6b] mt-0.5">
+              Traffic sources for banner campaigns. Postback URL uses {"{click_id}"} and {"{event}"} placeholders.
+            </p>
+          </div>
+          <button
+            onClick={() => setShowAddSource(!showAddSource)}
+            className="px-3 py-1.5 text-sm rounded-lg bg-accent text-white hover:bg-accent-hover transition-colors"
+          >
+            {showAddSource ? "Cancel" : "Add Source"}
+          </button>
+        </div>
+
+        {/* Add form */}
+        {showAddSource && (
+          <div className="bg-[#141414] rounded-lg border border-[#1e1e1e] p-4 mb-4">
+            <div className="flex items-end gap-3">
+              <div className="w-48">
+                <label className="block text-xs text-[#6b6b6b] mb-1">Name (unique)</label>
+                <input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="adnet1"
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white placeholder-[#4a4a4a] focus:outline-none focus:border-accent"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs text-[#6b6b6b] mb-1">Postback URL</label>
+                <input
+                  value={newUrl}
+                  onChange={(e) => setNewUrl(e.target.value)}
+                  placeholder="https://adnetwork.com/postback?click_id={click_id}&event={event}"
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white placeholder-[#4a4a4a] focus:outline-none focus:border-accent"
+                />
+              </div>
+              <button
+                onClick={handleAdd}
+                disabled={saving}
+                className="px-4 py-2 text-sm rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+              >
+                {saving ? "Saving..." : "Add"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Sources list */}
+        {sources.length === 0 ? (
+          <div className="flex items-center justify-center py-10">
+            <span className="text-[#6b6b6b] text-sm">No ad sources configured</span>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {sources.map((s) => (
+              <div
+                key={s.id}
+                className={`bg-[#141414] rounded-lg border border-[#1e1e1e] p-4 ${
+                  s.is_active ? "" : "opacity-60"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-white">{s.name}</span>
+                      <span
+                        className={`inline-block px-1.5 py-0.5 text-[10px] rounded ${
+                          s.is_active
+                            ? "bg-green-900/50 text-green-400"
+                            : "bg-[#1e1e1e] text-[#6b6b6b]"
+                        }`}
+                      >
+                        {s.is_active ? "active" : "inactive"}
+                      </span>
+                    </div>
+                    {s.postback_url && (
+                      <div className="text-xs text-[#6b6b6b] mt-1 truncate">
+                        {s.postback_url}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleToggle(s)}
+                    className="ml-4 px-3 py-1 text-xs rounded-lg bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525] transition-colors"
+                  >
+                    {s.is_active ? "Disable" : "Enable"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Conversion tracker info */}
+      <div>
+        <h2 className="text-sm font-semibold text-white mb-2">Conversion Tracking</h2>
+        <div className="bg-[#141414] rounded-lg border border-[#1e1e1e] p-4">
+          <p className="text-xs text-[#a0a0a0] mb-3">
+            When a visitor clicks a fansite link (OnlyFans, Fansly) or content link (Instagram, Twitter),
+            the system fires a GET postback to the matching ad source using the stored click_id.
+          </p>
+          <div className="text-xs text-[#6b6b6b] space-y-1.5">
+            <div><span className="text-white">Trigger events:</span> social_click (fansite), content_click (first content click per session)</div>
+            <div><span className="text-white">URL placeholders:</span> {"{click_id}"} — ad network click ID, {"{event}"} — event type</div>
+            <div><span className="text-white">Retry:</span> Failed postbacks are retried every 5 minutes, up to 3 attempts</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main PromoContent ───────────────────────────────────────────────────────
+
+function PromoContent() {
+  const [tab, setTab] = useState<PromoTab>("banners");
+  const [sizes, setSizes] = useState<BannerSize[]>([]);
+  const [sources, setSources] = useState<AdSource[]>([]);
+
+  const loadSizes = useCallback(async () => {
+    try {
+      setSizes(await getBannerSizes());
+    } catch {
+      // silent
+    }
+  }, []);
+
+  const loadSources = useCallback(async () => {
+    try {
+      setSources(await getAdSources());
+    } catch {
+      // silent
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSizes();
+    loadSources();
+  }, [loadSizes, loadSources]);
+
+  const tabs: { key: PromoTab; label: string }[] = [
+    { key: "banners", label: "Banners" },
+    { key: "statistics", label: "Statistics" },
+    { key: "settings", label: "Settings" },
+  ];
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-lg font-bold text-white">Promo</h1>
+        <div className="flex items-center gap-1 bg-[#141414] rounded-lg border border-[#1e1e1e] p-0.5">
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                tab === t.key
+                  ? "bg-[#252525] text-white"
+                  : "text-[#6b6b6b] hover:text-[#a0a0a0]"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {tab === "banners" && (
+        <BannersTab sizes={sizes} sources={sources} onSizesChange={loadSizes} />
+      )}
+      {tab === "statistics" && <StatisticsTab />}
+      {tab === "settings" && (
+        <SettingsTab sources={sources} onSourcesChange={loadSources} />
       )}
     </div>
   );

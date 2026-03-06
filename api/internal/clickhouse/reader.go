@@ -192,15 +192,16 @@ func (r *Reader) GetFeedCTRStats(ctx context.Context) ([]FeedCTRStat, error) {
 	return stats, nil
 }
 
-// BannerStat holds per-video banner impression/click stats.
+// BannerStat holds per-video banner impression/hover/click stats.
 type BannerStat struct {
 	VideoID     int64   `json:"video_id"`
 	Impressions uint64  `json:"impressions"`
+	Hovers      uint64  `json:"hovers"`
 	Clicks      uint64  `json:"clicks"`
 	CTR         float64 `json:"ctr"`
 }
 
-// GetBannerStats queries ClickHouse for banner_impression/banner_click stats grouped by video_id.
+// GetBannerStats queries ClickHouse for banner stats grouped by video_id.
 func (r *Reader) GetBannerStats(ctx context.Context, videoIDs []int64) (map[int64]BannerStat, error) {
 	result := make(map[int64]BannerStat, len(videoIDs))
 	if len(videoIDs) == 0 {
@@ -211,10 +212,11 @@ func (r *Reader) GetBannerStats(ctx context.Context, videoIDs []int64) (map[int6
 		SELECT
 			video_id,
 			countIf(event_type = 'banner_impression') AS impressions,
+			countIf(event_type = 'banner_hover') AS hovers,
 			countIf(event_type = 'banner_click') AS clicks,
 			if(impressions > 0, round(clicks * 100.0 / impressions, 2), 0) AS ctr
 		FROM events
-		WHERE event_type IN ('banner_impression', 'banner_click')
+		WHERE event_type IN ('banner_impression', 'banner_hover', 'banner_click')
 			AND video_id IN (?)
 		GROUP BY video_id
 	`, videoIDs)
@@ -225,12 +227,62 @@ func (r *Reader) GetBannerStats(ctx context.Context, videoIDs []int64) (map[int6
 
 	for rows.Next() {
 		var s BannerStat
-		if err := rows.Scan(&s.VideoID, &s.Impressions, &s.Clicks, &s.CTR); err != nil {
+		if err := rows.Scan(&s.VideoID, &s.Impressions, &s.Hovers, &s.Clicks, &s.CTR); err != nil {
 			continue
 		}
 		result[s.VideoID] = s
 	}
 	return result, nil
+}
+
+// BannerFunnelStat holds the full funnel for a traffic source.
+type BannerFunnelStat struct {
+	Source      string  `json:"source"`
+	Impressions uint64  `json:"impressions"`
+	Hovers      uint64  `json:"hovers"`
+	Clicks      uint64  `json:"clicks"`
+	Landings    uint64  `json:"landings"`
+	Conversions uint64  `json:"conversions"`
+	CTR         float64 `json:"ctr"`
+	ConvRate    float64 `json:"conv_rate"`
+}
+
+// GetBannerFunnelStats returns full funnel stats grouped by traffic source for the last N days.
+func (r *Reader) GetBannerFunnelStats(ctx context.Context, days int) ([]BannerFunnelStat, error) {
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			source,
+			countIf(event_type = 'banner_impression') AS impressions,
+			countIf(event_type = 'banner_hover') AS hovers,
+			countIf(event_type = 'banner_click') AS clicks,
+			countIf(event_type = 'ad_landing') AS landings,
+			countIf(event_type IN ('social_click', 'content_click')) AS conversions,
+			if(impressions > 0, round(clicks * 100.0 / impressions, 2), 0) AS ctr,
+			if(clicks > 0, round(conversions * 100.0 / clicks, 2), 0) AS conv_rate
+		FROM events
+		WHERE source != ''
+			AND event_type IN ('banner_impression', 'banner_hover', 'banner_click', 'ad_landing', 'social_click', 'content_click')
+			AND created_at > now() - toIntervalDay(?)
+		GROUP BY source
+		ORDER BY impressions DESC
+	`, days)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse reader: banner funnel stats: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []BannerFunnelStat
+	for rows.Next() {
+		var s BannerFunnelStat
+		if err := rows.Scan(&s.Source, &s.Impressions, &s.Hovers, &s.Clicks, &s.Landings, &s.Conversions, &s.CTR, &s.ConvRate); err != nil {
+			return nil, fmt.Errorf("clickhouse reader: scan funnel stat: %w", err)
+		}
+		stats = append(stats, s)
+	}
+	if stats == nil {
+		stats = []BannerFunnelStat{}
+	}
+	return stats, rows.Err()
 }
 
 // GetTotalStats returns overall site stats: total impressions, clicks, and CTR.

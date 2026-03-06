@@ -1,22 +1,28 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/xcj/videosite-api/internal/clickhouse"
 	"github.com/xcj/videosite-api/internal/middleware"
 	"github.com/xcj/videosite-api/internal/model"
+	"github.com/xcj/videosite-api/internal/store"
 )
 
 type EventHandler struct {
 	buffer *clickhouse.EventBuffer
+	admin  *store.AdminStore
 }
 
-func NewEventHandler(buffer *clickhouse.EventBuffer) *EventHandler {
-	return &EventHandler{buffer: buffer}
+func NewEventHandler(buffer *clickhouse.EventBuffer, admin *store.AdminStore) *EventHandler {
+	return &EventHandler{buffer: buffer, admin: admin}
 }
 
 // validEventTypes defines the allowed event type values.
@@ -35,6 +41,14 @@ var validEventTypes = map[string]bool{
 	"ad_landing":               true,
 	"banner_impression":        true,
 	"banner_click":             true,
+	"banner_hover":             true,
+	"content_click":            true,
+}
+
+// conversionEventTypes are events that trigger ad network postbacks.
+var conversionEventTypes = map[string]bool{
+	"social_click":  true,
+	"content_click": true,
 }
 
 // Create handles POST /api/v1/events
@@ -86,6 +100,11 @@ func (h *EventHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.buffer.Push(event)
+
+	// Fire conversion postback if applicable.
+	if conversionEventTypes[event.Type] && event.Source != "" {
+		go h.firePostbackIfConfigured(event)
+	}
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
@@ -145,6 +164,11 @@ func (h *EventHandler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		h.buffer.Push(event)
 		accepted++
+
+		// Fire conversion postback if applicable.
+		if conversionEventTypes[event.Type] && event.Source != "" {
+			go h.firePostbackIfConfigured(event)
+		}
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
@@ -152,4 +176,72 @@ func (h *EventHandler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 		"accepted": accepted,
 		"total":    len(inputs),
 	})
+}
+
+// extractClickID extracts the click_id from the event's Extra JSON field.
+func extractClickID(extra string) string {
+	if extra == "" {
+		return ""
+	}
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(extra), &data); err != nil {
+		return ""
+	}
+	if clickID, ok := data["click_id"].(string); ok {
+		return clickID
+	}
+	return ""
+}
+
+// firePostbackIfConfigured checks if the event's source has a configured postback URL
+// and fires it asynchronously.
+func (h *EventHandler) firePostbackIfConfigured(event model.Event) {
+	clickID := extractClickID(event.Extra)
+	if clickID == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	adSource, err := h.admin.GetAdSourceByName(ctx, event.Source)
+	if err != nil || adSource == nil || adSource.PostbackURL == "" {
+		return
+	}
+
+	// Build postback URL from template.
+	postbackURL := strings.ReplaceAll(adSource.PostbackURL, "{click_id}", url.QueryEscape(clickID))
+	postbackURL = strings.ReplaceAll(postbackURL, "{event}", url.QueryEscape(event.Type))
+
+	// Create postback record.
+	pb := &store.ConversionPostback{
+		AdSourceID: adSource.ID,
+		ClickID:    clickID,
+		EventType:  event.Type,
+		AccountID:  event.AccountID,
+		VideoID:    event.VideoID,
+		Status:     "pending",
+	}
+	if err := h.admin.CreateConversionPostback(ctx, pb); err != nil {
+		slog.Error("postback: create record", "error", err)
+		return
+	}
+
+	// Fire HTTP request.
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(postbackURL)
+	if err != nil {
+		h.admin.UpdatePostbackStatus(ctx, pb.ID, "failed", 0, err.Error())
+		slog.Error("postback: request failed", "error", err, "url", postbackURL)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	status := "sent"
+	if resp.StatusCode >= 400 {
+		status = "failed"
+	}
+	h.admin.UpdatePostbackStatus(ctx, pb.ID, status, resp.StatusCode, string(body))
+	slog.Info("postback: fired", "source", event.Source, "click_id", clickID, "event", event.Type, "status", status, "code", resp.StatusCode)
 }

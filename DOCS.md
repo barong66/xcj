@@ -1,6 +1,6 @@
 # xxxaccounter — Документация
 
-> Последнее обновление: 2026-03-05
+> Последнее обновление: 2026-03-06
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
 ---
@@ -21,16 +21,24 @@
 - Скачивает список видео с аккаунта
 - Генерирует превью-картинку (тумбу) и 5-секундный превью-клип
 - Загружает файлы в облачное хранилище (S3)
-- AI (Claude) автоматически назначает категории каждому видео
+- AI (OpenAI GPT-4o Vision) автоматически назначает категории каждому видео
 
 ### 2. Витрина
 
-Посетитель заходит на сайт → видит сетку видео-карточек:
-- Тумба (картинка), при наведении — превью-видео
-- Название, автор, длительность
-- Клик → переход на оригинал (Twitter/Instagram) в новой вкладке
+**Главная страница:**
+- **Profile Stories** — горизонтальная лента аватаров моделей в стиле Instagram Stories (56px круги с gradient ring). Прокручивается горизонтально. Клик ведёт на профиль модели (/model/{slug}). Данные из API: GET /api/v1/accounts (аккаунты отсортированы по количеству видео)
+- Сетка видео-карточек: тумба (картинка), при наведении — превью-видео. Название, автор, длительность. Клик → переход на оригинал (Twitter/Instagram) в новой вкладке
 
-Фильтрация: по категориям, по странам. Сортировка: новые, популярные, случайные. Поиск по названию.
+**Explore/Поиск (/search):**
+- При отсутствии поискового запроса — режим Explore:
+  - Строка поиска
+  - Сетка категорий-pills (4x3 компактная раскладка, кнопка "More..." раскрывает все 32 категории)
+  - Random video grid — 3-колоночная сетка тумб с infinite scroll
+- При наличии запроса — результаты поиска
+
+**Нижняя навигация:** 3 вкладки — Home, Search, Shuffle
+
+Фильтрация: по категориям, по странам. Сортировка: новые, популярные, случайные.
 
 ### 2.1 Профиль модели
 
@@ -68,9 +76,10 @@
 - Аналитика: banner_impression (показ) и banner_click (клик) в ClickHouse; Imprs/Clicks/CTR отображаются в админке
 
 **Качество баннеров:**
-- **Gemini AI crop + enhance** — Gemini Image Editing API (`gemini-2.5-flash-image`) выполняет smart crop под нужный aspect ratio с одновременным улучшением цвета и контраста (~$0.04 за изображение). Fallback при недоступности Gemini — center-crop
+- **Gemini AI smart crop** — Gemini Image Editing API (`gemini-2.5-flash-image`) выполняет только smart crop (composition/framing) под нужный aspect ratio (напр. "6:5"). Gemini НЕ делает color enhancement — только кадрирование (~$0.04 за изображение). Fallback при недоступности Gemini — center-crop
+- **Pillow ImageEnhance** — программное улучшение цвета после resize: contrast +35%, color saturation +40%, sharpness +50%, brightness +5%
 - **Text overlay** — градиент внизу + @username + "Watch Now →" делает баннер кликабельным и узнаваемым
-- Ресайз Lanczos, JPEG q=90
+- Полный пайплайн: Gemini crop → Pillow Lanczos resize → Pillow enhance → overlay → JPEG q=90
 
 **Размеры (настраиваемые):**
 - 300x250 (Medium Rectangle) — дефолтный
@@ -90,6 +99,41 @@
 - Вкладка "Promo" на странице аккаунта — просмотр баннеров в оригинальном размере, ручная генерация
 - Раздел "Promo" в sidebar — все баннеры по всем платным аккаунтам, добавление размеров, статистика (Imprs/Clicks/CTR), embed-код для внешних сайтов
 
+### 5.1 Воронка конверсий баннеров (Banner Conversion Funnel)
+
+Расширение баннерной системы: полная воронка от показа до конверсии с привязкой источника трафика и S2S постбеками в рекламные сети.
+
+**Как работает воронка:**
+1. **Показ** — iframe с баннером загружается на стороннем сайте. Параметры `src` (источник) и `click_id` (ID клика) передаются в URL: `/b/serve?size=300x250&src=exoclick&click_id=abc123`
+2. **Наведение** — JavaScript в iframe отслеживает mouseenter и отправляет пиксель `/b/{id}/hover`
+3. **Клик** — переход на `/b/{id}/click`, который редиректит на `/model/{slug}` с параметрами src и click_id
+4. **Лендинг** — на странице модели компонент `AdLandingTracker` сохраняет src + click_id в sessionStorage
+5. **Конверсия (social_click)** — посетитель кликает на ссылку фансайта (OnlyFans). Событие обогащается click_id из sessionStorage
+6. **Конверсия (content_click)** — посетитель впервые за сессию кликает на контент (Instagram). Трекается один раз через sessionStorage flag
+
+При каждой конверсии с привязанным source + click_id бэкенд автоматически отстукивает S2S постбек в рекламную сеть.
+
+**Как настроить рекламную сеть (Ad Source):**
+1. Перейти в админку: /admin/ad-sources (или Promo → Настройки → Ad Sources)
+2. Создать новый источник:
+   - **Name** — slug рекламной сети (напр. `exoclick`, `trafficstars`)
+   - **Postback URL** — шаблон URL с плейсхолдерами: `https://adnetwork.com/postback?click_id={click_id}&event={event}`
+   - **Active** — включить/выключить постбеки
+3. В шаблоне доступны плейсхолдеры: `{click_id}` (ID клика от сети), `{event}` (тип конверсии: social_click / content_click)
+
+**Как использовать embed-код с трекингом источника:**
+- Стандартный iframe: `<iframe src="https://temptguide.com/b/serve?size=300x250">`
+- С привязкой источника: `<iframe src="https://temptguide.com/b/serve?size=300x250&src=exoclick&click_id={CLICK_ID}">`
+- Рекламные сети подставляют свой макрос вместо `{CLICK_ID}` (например, ExoClick: `{clickid}`, TrafficStars: `{click_id}`)
+- В embed-коде генераторе (Promo → Настройки) можно выбрать рекламную сеть — click_id макрос подставится автоматически
+
+**Статистика воронки:**
+- Раздел Promo → Статистика показывает полную воронку по каждому источнику:
+  - Показы → Наведения → Клики → Конверсии
+  - CTR (клики/показы), Conversion Rate (конверсии/клики)
+  - Фильтр по дате (7/30/90 дней)
+- Список баннеров дополнен колонкой Hovers и breakdown по источникам
+
 ### 6. Админка (xcj)
 
 Веб-панель для управления платформой:
@@ -98,7 +142,8 @@
 - **Videos** — просматривать, удалять, пере-категоризировать видео
 - **Stats** — аналитика сайта: тумбы с показами, кликами, CTR
 - **Queue** — статус очереди парсинга (pending/running/done/failed)
-- **Promo** — все баннеры по всем paid-аккаунтам, управление размерами баннеров, embed-код для внешних сайтов
+- **Promo** — все баннеры по всем paid-аккаунтам, управление размерами баннеров, embed-код для внешних сайтов. Три вкладки: Баннеры (список с hovers + source breakdown), Настройки (embed-коды + conversion tracker + ad sources), Статистика (воронка по источникам)
+- **Ad Sources** — управление рекламными сетями (name, postback URL шаблон, active/inactive)
 - **Categories** — управление категориями
 
 ## Монетизация
@@ -136,12 +181,12 @@
 ┌─────────────┐                         └───────────────┘
 │  Python     │────▶ PostgreSQL (напрямую)
 │  Парсер     │────▶ S3 (файлы)
-└─────────────┘────▶ Claude API (AI)
+└─────────────┘────▶ OpenAI API (AI)
 ```
 
 ### Go API (бэкенд)
 - HTTP сервер на Chi router
-- Публичные эндпоинты: видео (с фильтрами: category slug, exclude_account_id), категории, поиск, аналитические события
+- Публичные эндпоинты: видео (с фильтрами: category slug, exclude_account_id), аккаунты (AccountSummary), категории, поиск, аналитические события
 - Админские эндпоинты: управление аккаунтами, видео, очередью, статистика
 - Middleware: определение сайта по домену, rate limiting, CORS, логирование
 - Буфер аналитических событий → batch insert в ClickHouse
@@ -151,15 +196,16 @@
 - Парсит Twitter (через yt-dlp) и Instagram (через API)
 - Генерирует тумбы (ffmpeg resize) и превью-клипы (5 сек)
 - Загружает в S3
-- AI категоризация через Claude Sonnet Vision API (пачками по 50 видео)
+- AI категоризация через OpenAI GPT-4o Vision API (пачками по 50 видео)
 - Работает как фоновый воркер, опрашивая очередь в PostgreSQL
 - **Worker loop** запускает 3 корутины через `asyncio.gather`: parse_worker, banner_worker, categorizer_worker
-- **Banner Worker** — генерирует баннеры из тумб видео для платных аккаунтов: Gemini AI crop + color/contrast enhance (fallback: center-crop) + gradient/text overlay → JPEG → R2
-- **Categorizer Worker** — фоновый цикл, берёт uncategorized видео, отправляет thumbnail в Claude Vision, сохраняет категории с confidence
+- **Banner Worker** — генерирует баннеры из тумб видео для платных аккаунтов: Gemini AI smart crop (aspect ratio only, fallback: center-crop) → Lanczos resize → Pillow ImageEnhance (contrast/color/sharpness/brightness) → gradient/text overlay → JPEG → R2
+- **Categorizer Worker** — фоновый цикл, берёт uncategorized видео, отправляет thumbnail в OpenAI GPT-4o Vision, сохраняет категории с confidence
 
 ### Next.js Frontend
 - Server-side rendering для SEO
-- Публичная часть: витрина видео, поиск, категории, профили моделей
+- Публичная часть: витрина видео с Profile Stories, Explore-страница (категории + random grid с infinite scroll), профили моделей
+- Компоненты: ProfileStories (лента аватаров), ExploreGrid (random thumbnails), CategoryGrid (pills), BottomNav (3 вкладки)
 - Админка (xcj): dashboard, управление аккаунтами/видео/очередью/аналитикой
 - Трекинг: impression (IntersectionObserver), click → sendBeacon
 
@@ -171,7 +217,7 @@
 → Задача в очередь (parse_queue, status=pending)
 → Python Worker подхватывает → Парсит платформу
 → Для каждого видео: тумба + превью → S3 → запись в PostgreSQL
-→ AI категоризатор → Claude → назначает категории
+→ AI категоризатор → OpenAI GPT-4o → назначает категории
 → Видео появляется на витрине
 ```
 
@@ -229,15 +275,15 @@ Go API → EventBuffer (in-memory)
 
 # Операционные заметки
 
-## AI Categorizer (Claude Vision)
+## AI Categorizer (OpenAI GPT-4o Vision)
 
 ### Как работает
-Categorizer — часть parser-worker. Автоматически берёт видео без `ai_processed_at`, отправляет thumbnail в Claude Sonnet Vision, получает 1-5 категорий с confidence score, сохраняет в БД.
+Categorizer — часть parser-worker. Автоматически берёт видео без `ai_processed_at`, отправляет thumbnail в OpenAI GPT-4o Vision, получает 1-5 категорий с confidence score, сохраняет в БД.
 
 ### Env-переменные
 | Переменная | Описание |
 |------------|----------|
-| `ANTHROPIC_API_KEY` | API ключ Anthropic (обязателен для работы categorizer) |
+| `OPENAI_API_KEY` | API ключ OpenAI (обязателен для работы categorizer) |
 | `CATEGORIZER_BATCH_SIZE` | Размер батча (default: 50) |
 | `CATEGORIZER_CONCURRENCY` | Параллельность запросов к API (default: 5) |
 
@@ -277,19 +323,23 @@ curl -X POST http://localhost:8080/api/v1/admin/videos/recategorize \
 Это сбросит `ai_processed_at` у всех видео, и categorizer worker подхватит их при следующем цикле.
 
 ### Текущий статус (2026-03-05)
-- Код: готов и задеплоен (commit ef00ee4 добавил categorizer в worker loop)
-- Блокер: баланс Anthropic API = $0. Нужно пополнить на console.anthropic.com
-- Таблицы categories, video_categories, site_categories — пусты
+- Код: готов и задеплоен. Switched from Anthropic Claude Sonnet to OpenAI GPT-4o Vision
+- Результаты первого прогона: 370 видео обработано, 41 категория создана, 1649 связей video_categories
+- Мониторинг: ClickUp task https://app.clickup.com/t/869ccek1u
 
 ## Banner Worker (Gemini Image Editing)
 
 ### Как работает
-Banner Worker генерирует рекламные баннеры из thumbnail видео для платных аккаунтов. Использует Gemini Image Editing API для интеллектуального кропа и улучшения изображений.
+Banner Worker генерирует рекламные баннеры из thumbnail видео для платных аккаунтов. Использует Gemini Image Editing API для интеллектуального кропа (composition/framing) и Pillow ImageEnhance для программного улучшения цвета.
 
 ### Пайплайн
 ```
-thumbnail_lg_url → скачать → Gemini crop + enhance → resize → overlay (@username + "Watch Now →") → JPEG q=90 → R2
+thumbnail_lg_url → скачать → Gemini smart crop (aspect ratio, напр. "6:5") → Pillow Lanczos resize → Pillow ImageEnhance (contrast 1.35, color 1.4, sharpness 1.5, brightness 1.05) → overlay (@username + "Watch Now →") → JPEG q=90 → R2
 ```
+
+**Разделение ответственности:**
+- **Gemini** — только smart crop (composition, framing, rule of thirds). Промпт запрашивает aspect ratio, не пиксели, чтобы избежать сквоша
+- **Pillow** — resize (Lanczos) + color enhancement (ImageEnhance). Программные значения — стабильные и предсказуемые
 
 ### Env-переменные
 | Переменная | Описание |

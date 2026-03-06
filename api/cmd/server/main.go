@@ -86,6 +86,12 @@ func main() {
 		Interval: 1 * time.Hour,
 		Fn:       feedRefresher.Run,
 	})
+	postbackRetrier := cron.NewPostbackRetrier(adminStore)
+	scheduler.Add(cron.Job{
+		Name:     "postback-retry",
+		Interval: 5 * time.Minute,
+		Fn:       postbackRetrier.Run,
+	})
 	scheduler.Start()
 
 	// Build router.

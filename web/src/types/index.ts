@@ -99,7 +99,9 @@ export type AnalyticsEventType =
   | "profile_thumb_click"
   | "social_click"
   | "share_click"
-  | "ad_landing";
+  | "ad_landing"
+  | "banner_hover"
+  | "content_click";
 
 export interface AnalyticsEvent {
   type: AnalyticsEventType;
@@ -108,5 +110,6 @@ export interface AnalyticsEvent {
   target_url?: string;
   source_page?: string;
   source?: string;
+  extra?: string;
   timestamp?: number;
 }

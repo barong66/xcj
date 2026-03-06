@@ -10,10 +10,11 @@ import { ProfileViewTracker } from "./ProfileViewTracker";
 import { BreadcrumbJsonLd, ProfileJsonLd } from "@/components/JsonLd";
 import { ErrorState } from "@/components/ErrorState";
 import { SimilarModels } from "./SimilarModels";
+import { AdLandingTracker } from "@/components/AdLandingTracker";
 
 interface ModelPageProps {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ page?: string; v?: string; u?: string }>;
+  searchParams: Promise<{ page?: string; v?: string; u?: string; src?: string; click_id?: string }>;
 }
 
 export async function generateMetadata({
@@ -98,6 +99,7 @@ export default async function ModelPage({
         />
         <ProfileJsonLd account={account} />
         <ProfileViewTracker accountId={account.id} />
+        {sp.src && <AdLandingTracker source={sp.src} clickId={sp.click_id} />}
 
         <ProfileHeader account={account} />
 

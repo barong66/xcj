@@ -1163,6 +1163,7 @@ type AdminBanner struct {
 	VideoTitle   string    `json:"video_title"`
 	Username     string    `json:"username"`
 	Impressions  uint64    `json:"impressions"`
+	Hovers       uint64    `json:"hovers"`
 	Clicks       uint64    `json:"clicks"`
 	CTR          float64   `json:"ctr"`
 }
@@ -1543,4 +1544,213 @@ func (s *AdminStore) GetVideoMetaBatch(ctx context.Context, videoIDs []int64) (m
 	}
 
 	return result, nil
+}
+
+// ─── Ad Sources ───────────────────────────────────────────────────────────────
+
+type AdSource struct {
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	PostbackURL string    `json:"postback_url"`
+	IsActive    bool      `json:"is_active"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type ConversionPostback struct {
+	ID           int64      `json:"id"`
+	AdSourceID   int64      `json:"ad_source_id"`
+	AdSourceName string     `json:"ad_source_name,omitempty"`
+	ClickID      string     `json:"click_id"`
+	EventType    string     `json:"event_type"`
+	AccountID    int64      `json:"account_id"`
+	VideoID      int64      `json:"video_id"`
+	Status       string     `json:"status"`
+	ResponseCode int        `json:"response_code"`
+	ResponseBody string     `json:"response_body,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	SentAt       *time.Time `json:"sent_at,omitempty"`
+}
+
+// GetAdSourceByName looks up an ad source by its unique name.
+func (s *AdminStore) GetAdSourceByName(ctx context.Context, name string) (*AdSource, error) {
+	var a AdSource
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, name, postback_url, is_active, created_at
+		FROM ad_sources WHERE name = $1 AND is_active = true
+	`, name).Scan(&a.ID, &a.Name, &a.PostbackURL, &a.IsActive, &a.CreatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("admin_store: get ad source by name: %w", err)
+	}
+	return &a, nil
+}
+
+// ListAdSources returns all ad sources.
+func (s *AdminStore) ListAdSources(ctx context.Context) ([]AdSource, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, name, postback_url, is_active, created_at
+		FROM ad_sources ORDER BY id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: list ad sources: %w", err)
+	}
+	defer rows.Close()
+
+	var sources []AdSource
+	for rows.Next() {
+		var a AdSource
+		if err := rows.Scan(&a.ID, &a.Name, &a.PostbackURL, &a.IsActive, &a.CreatedAt); err != nil {
+			return nil, fmt.Errorf("admin_store: scan ad source: %w", err)
+		}
+		sources = append(sources, a)
+	}
+	if sources == nil {
+		sources = []AdSource{}
+	}
+	return sources, rows.Err()
+}
+
+type CreateAdSourceInput struct {
+	Name        string `json:"name"`
+	PostbackURL string `json:"postback_url"`
+}
+
+// CreateAdSource creates a new ad source.
+func (s *AdminStore) CreateAdSource(ctx context.Context, input CreateAdSourceInput) (*AdSource, error) {
+	var a AdSource
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO ad_sources (name, postback_url) VALUES ($1, $2)
+		RETURNING id, name, postback_url, is_active, created_at
+	`, input.Name, input.PostbackURL).Scan(&a.ID, &a.Name, &a.PostbackURL, &a.IsActive, &a.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: create ad source: %w", err)
+	}
+	return &a, nil
+}
+
+type UpdateAdSourceInput struct {
+	Name        *string `json:"name,omitempty"`
+	PostbackURL *string `json:"postback_url,omitempty"`
+	IsActive    *bool   `json:"is_active,omitempty"`
+}
+
+// UpdateAdSource updates an existing ad source.
+func (s *AdminStore) UpdateAdSource(ctx context.Context, id int64, input UpdateAdSourceInput) (*AdSource, error) {
+	var a AdSource
+	err := s.pool.QueryRow(ctx, `
+		UPDATE ad_sources SET
+			name = COALESCE($2, name),
+			postback_url = COALESCE($3, postback_url),
+			is_active = COALESCE($4, is_active)
+		WHERE id = $1
+		RETURNING id, name, postback_url, is_active, created_at
+	`, id, input.Name, input.PostbackURL, input.IsActive).Scan(&a.ID, &a.Name, &a.PostbackURL, &a.IsActive, &a.CreatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("ad source not found")
+		}
+		return nil, fmt.Errorf("admin_store: update ad source: %w", err)
+	}
+	return &a, nil
+}
+
+// ─── Conversion Postbacks ─────────────────────────────────────────────────────
+
+// CreateConversionPostback inserts a conversion postback record.
+func (s *AdminStore) CreateConversionPostback(ctx context.Context, pb *ConversionPostback) error {
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO conversion_postbacks (ad_source_id, click_id, event_type, account_id, video_id, status)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, created_at
+	`, pb.AdSourceID, pb.ClickID, pb.EventType, pb.AccountID, pb.VideoID, pb.Status).Scan(&pb.ID, &pb.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("admin_store: create conversion postback: %w", err)
+	}
+	return nil
+}
+
+// UpdatePostbackStatus updates the status and response of a postback.
+func (s *AdminStore) UpdatePostbackStatus(ctx context.Context, id int64, status string, responseCode int, responseBody string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE conversion_postbacks
+		SET status = $2, response_code = $3, response_body = $4, sent_at = NOW()
+		WHERE id = $1
+	`, id, status, responseCode, responseBody)
+	if err != nil {
+		return fmt.Errorf("admin_store: update postback status: %w", err)
+	}
+	return nil
+}
+
+// ListPendingPostbacks returns pending postbacks older than 1 minute (for retry).
+func (s *AdminStore) ListPendingPostbacks(ctx context.Context, limit int) ([]ConversionPostback, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT cp.id, cp.ad_source_id, a.name, cp.click_id, cp.event_type,
+			cp.account_id, cp.video_id, cp.status, cp.response_code, COALESCE(cp.response_body,''),
+			cp.created_at, cp.sent_at
+		FROM conversion_postbacks cp
+		JOIN ad_sources a ON a.id = cp.ad_source_id
+		WHERE cp.status IN ('pending', 'failed')
+			AND cp.created_at > NOW() - INTERVAL '24 hours'
+			AND cp.created_at < NOW() - INTERVAL '1 minute'
+		ORDER BY cp.created_at
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: list pending postbacks: %w", err)
+	}
+	defer rows.Close()
+
+	var postbacks []ConversionPostback
+	for rows.Next() {
+		var pb ConversionPostback
+		if err := rows.Scan(
+			&pb.ID, &pb.AdSourceID, &pb.AdSourceName, &pb.ClickID, &pb.EventType,
+			&pb.AccountID, &pb.VideoID, &pb.Status, &pb.ResponseCode, &pb.ResponseBody,
+			&pb.CreatedAt, &pb.SentAt,
+		); err != nil {
+			return nil, fmt.Errorf("admin_store: scan postback: %w", err)
+		}
+		postbacks = append(postbacks, pb)
+	}
+	if postbacks == nil {
+		postbacks = []ConversionPostback{}
+	}
+	return postbacks, rows.Err()
+}
+
+// ListRecentPostbacks returns recent conversion postbacks for admin view.
+func (s *AdminStore) ListRecentPostbacks(ctx context.Context, limit int) ([]ConversionPostback, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT cp.id, cp.ad_source_id, a.name, cp.click_id, cp.event_type,
+			cp.account_id, cp.video_id, cp.status, cp.response_code, COALESCE(cp.response_body,''),
+			cp.created_at, cp.sent_at
+		FROM conversion_postbacks cp
+		JOIN ad_sources a ON a.id = cp.ad_source_id
+		ORDER BY cp.created_at DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: list recent postbacks: %w", err)
+	}
+	defer rows.Close()
+
+	var postbacks []ConversionPostback
+	for rows.Next() {
+		var pb ConversionPostback
+		if err := rows.Scan(
+			&pb.ID, &pb.AdSourceID, &pb.AdSourceName, &pb.ClickID, &pb.EventType,
+			&pb.AccountID, &pb.VideoID, &pb.Status, &pb.ResponseCode, &pb.ResponseBody,
+			&pb.CreatedAt, &pb.SentAt,
+		); err != nil {
+			return nil, fmt.Errorf("admin_store: scan postback: %w", err)
+		}
+		postbacks = append(postbacks, pb)
+	}
+	if postbacks == nil {
+		postbacks = []ConversionPostback{}
+	}
+	return postbacks, rows.Err()
 }

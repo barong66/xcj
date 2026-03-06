@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-05
+> Last updated: 2026-03-06
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -8,11 +8,11 @@
 
 ## 1. Overview
 
-xxxaccounter — сайт для раскрутки аккаунтов социальных сетей. Собирает видео с Twitter/X и Instagram, категоризирует через AI (Claude), раздаёт через мульти-теннантную архитектуру с разными брендированными доменами. Продаёт листинги для тех, кто хочет раскрутить свои каналы.
+xxxaccounter — сайт для раскрутки аккаунтов социальных сетей. Собирает видео с Twitter/X и Instagram, категоризирует через AI (OpenAI GPT-4o Vision), раздаёт через мульти-теннантную архитектуру с разными брендированными доменами. Продаёт листинги для тех, кто хочет раскрутить свои каналы.
 
 **Стек:**
 - **Backend:** Go 1.22, Chi router, PostgreSQL 16, Redis 7, ClickHouse
-- **Parser:** Python 3.9+, async/await, yt-dlp, Anthropic Claude AI, Google Gemini (banner images)
+- **Parser:** Python 3.9+, async/await, yt-dlp, OpenAI GPT-4o Vision (categorization), Google Gemini (banner images)
 - **Frontend:** Next.js 14, React 18, TypeScript, Tailwind CSS
 - **Инфраструктура:** Docker Compose, S3/R2
 
@@ -37,7 +37,7 @@ xcj/
 │   ├── config/settings.py  # Настройки из .env
 │   ├── parsers/            # Twitter + Instagram парсеры
 │   ├── tasks/              # Фоновый воркер
-│   ├── categorizer/        # AI-категоризация через Claude
+│   ├── categorizer/        # AI-категоризация через OpenAI GPT-4o
 │   └── storage/            # PostgreSQL + S3 клиенты
 ├── web/                    # Next.js фронтенд
 │   ├── src/app/            # App Router (страницы)
@@ -311,6 +311,7 @@ WHERE event_type IN ('impression', 'click')
 | GET | /api/v1/search?q= | Полнотекстовый поиск |
 | GET | /api/v1/categories | Категории сайта |
 | GET | /api/v1/categories/{slug} | Детали категории |
+| GET | /api/v1/accounts | Список аккаунтов с аватарами (AccountSummary, sorted by video count) |
 | GET | /api/v1/accounts/{id} | Аккаунт с видео |
 | POST | /api/v1/events | Одно аналитическое событие |
 | POST | /api/v1/events/batch | Пакет событий (до 100) |
@@ -391,6 +392,7 @@ Headers: `Cache-Control: no-cache, no-store`, без `X-Frame-Options` (разр
 | cat:{site_id} | 60s | Категории сайта |
 | catd:{site}:{slug} | 300s | Детали категории |
 | acc:{account_id} | 300s | Аккаунт с видео |
+| acl:{site_id} | 60s | Список аккаунтов (AccountSummary) |
 | src:{site}:{query}:{page} | 60s | Результаты поиска |
 | bp:{w}x{h} | 60s | Пул баннеров по размеру ([]ServableBanner) |
 | bp:{w}x{h}:{cat} | 60s | Пул баннеров по размеру + категории |
@@ -429,18 +431,19 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 
 ### 6.3 AI категоризация (parser/categorizer/)
 
-**Архитектура:** Модуль `parser/categorizer/` содержит полный пайплайн AI-категоризации видео через Claude Sonnet Vision.
+**Архитектура:** Модуль `parser/categorizer/` содержит полный пайплайн AI-категоризации видео через OpenAI GPT-4o Vision.
 
 **Компоненты:**
 - `parser/categorizer/categories.py` — 67 категорий, захардкожены (slug + name)
-- `parser/categorizer/categorizer.py` — основная логика: формирование промпта, вызов Claude API, парсинг ответа
+- `parser/categorizer/vision.py` — основная логика: формирование промпта, вызов OpenAI GPT-4o Vision API, парсинг ответа
+- `parser/categorizer/pipeline.py` — PipelineConfig с openai_api_key
 - `parser/categorizer/worker.py` — `categorizer_worker_loop` — фоновый цикл, опрашивает БД
 
 **Пайплайн:**
 1. Забирает видео без `ai_processed_at` (WHERE ai_processed_at IS NULL AND is_active = true)
-2. Батчами по N видео (CATEGORIZER_BATCH_SIZE, default 50) отправляет в Claude Sonnet API
-3. Claude анализирует metadata (title, description) + thumbnail (vision) — изображение скачивается и передаётся как base64
-4. Промпт содержит список из 67 допустимых категорий; Claude выбирает 1-5 наиболее подходящих
+2. Батчами по N видео (CATEGORIZER_BATCH_SIZE, default 50) отправляет в OpenAI GPT-4o API
+3. GPT-4o анализирует metadata (title, description) + thumbnail (vision) — изображение скачивается и передаётся как base64
+4. Промпт содержит список из 67 допустимых категорий; GPT-4o выбирает 1-5 наиболее подходящих
 5. Возвращает категории с confidence (0.0..1.0)
 6. Категории автоматически создаются в таблице `categories` если ещё не существуют (INSERT ON CONFLICT DO NOTHING)
 7. Записывает результат в `video_categories` (video_id, category_id, confidence)
@@ -451,18 +454,18 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 - `video_categories` — связь видео↔категории с confidence (PK: video_id + category_id)
 - `site_categories` — видимость категорий на конкретных сайтах (PK: site_id + category_id)
 
-**Запуск:** Работает как часть parser-worker — `categorizer_worker_loop` запускается в `asyncio.gather` вместе с `parse_worker_loop` и `banner_worker_loop`. При отсутствии ANTHROPIC_API_KEY — логирует предупреждение и не запускается (graceful skip).
+**Запуск:** Работает как часть parser-worker — `categorizer_worker_loop` запускается в `asyncio.gather` вместе с `parse_worker_loop` и `banner_worker_loop`. При отсутствии OPENAI_API_KEY — логирует предупреждение и не запускается (graceful skip).
 
 **Ручной запуск:** `python -m parser categorize`
 
 **Конфиг:**
 | Параметр | Default | Описание |
 |----------|---------|----------|
-| ANTHROPIC_API_KEY | — | Ключ API Anthropic (обязателен) |
+| OPENAI_API_KEY | — | Ключ API OpenAI (обязателен) |
 | CATEGORIZER_BATCH_SIZE | 50 | Размер батча видео |
 | CATEGORIZER_CONCURRENCY | 5 | Параллельные запросы к API |
 
-**Статус (2026-03-05):** Код полностью готов и задеплоен. Categorizer добавлен в worker loop (commit ef00ee4). Блокер: баланс Anthropic API = $0, нужно пополнить. Все таблицы (categories, video_categories, site_categories) пока пусты.
+**Статус (2026-03-05):** Код полностью готов и задеплоен. Switched from Anthropic Claude Sonnet to OpenAI GPT-4o. Результаты первого прогона: 370 видео обработано, 41 категория создана, 1649 связей video_categories.
 
 ### 6.4 Настройки парсера
 
@@ -486,16 +489,23 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 **Зависимости:** google-genai (Gemini API), numpy, Pillow, fonts-dejavu-core (Docker)
 
 **Пайплайн:**
-1. **gemini_crop_and_enhance(img, width, height)** — AI-кроп и улучшение через Gemini Image Editing API:
-   - Отправляет thumbnail в Gemini (модель `gemini-2.5-flash-image`) с промптом для smart crop + color/contrast enhancement
-   - Gemini возвращает обработанное изображение: оптимальный кроп под целевой aspect ratio + улучшение цвета/контраста
+1. **gemini_crop_and_enhance(img, width, height)** — AI smart crop через Gemini Image Editing API:
+   - Отправляет thumbnail в Gemini (модель `gemini-2.5-flash-image`) с промптом для smart crop
+   - Gemini ТОЛЬКО кропает (composition/framing): промпт запрашивает aspect ratio (напр. "6:5"), а не пиксельные размеры, чтобы избежать сквоша
+   - Промпт: профессиональное кадрирование, правило третей, фокус на лице/теле, без текста/водяных знаков
    - Стоимость: ~$0.04 за изображение
    - Fallback при ошибке или отсутствии GEMINI_API_KEY → center-crop (стандартный кроп по центру)
-2. **add_overlay(img, username)** — gradient + текст:
+2. **Pillow Lanczos resize** — ресайз до целевого размера в пикселях после Gemini crop
+3. **enhance_image(img)** — программное улучшение цвета через Pillow ImageEnhance:
+   - Contrast: 1.35 (+35%)
+   - Color saturation: 1.4 (+40%)
+   - Sharpness: 1.5 (+50%)
+   - Brightness: 1.05 (+5%)
+4. **add_overlay(img, username)** — gradient + текст:
    - Нижние 35% — чёрный градиент (0→70% opacity, numpy vectorized)
    - @username — белый, слева (DejaVu Sans Bold, 7% высоты)
    - "Watch Now →" — accent red (#EA384C), справа
-3. **generate_banner(src, dest, w, h, quality, username)** — полный пайплайн
+5. **generate_banner(src, dest, w, h, quality, username)** — полный пайплайн: Gemini crop → Pillow resize (Lanczos) → Pillow enhance → overlay → JPEG
 
 ---
 
@@ -505,8 +515,8 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 
 | URL | Файл | Описание |
 |-----|------|----------|
-| / | app/page.tsx | Главная — сетка видео |
-| /search?q= | app/search/page.tsx | Поиск |
+| / | app/page.tsx | Главная — ProfileStories + сетка видео |
+| /search?q= | app/search/page.tsx | Explore/Поиск (без запроса: категории + random grid; с запросом: результаты поиска) |
 | /video/[id] | app/video/[id]/page.tsx | Страница видео |
 | /category/[slug] | app/category/[slug]/page.tsx | Категория |
 | /model/[slug] | app/model/[slug]/page.tsx | Профиль модели (видео + similar models) |
@@ -535,6 +545,10 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 - **CategoryNav** — навигация по категориям (client component)
 - **SortControls** — переключатель сортировки
 - **SearchBar** — поиск
+- **ProfileStories** — Instagram-style горизонтальная лента аватаров (56px круги с gradient ring); данные из GET /api/v1/accounts; ссылки на /model/{slug}
+- **ExploreGrid** — 3-колоночная сетка тумб с infinite scroll (useInfiniteScroll хук); показывает random видео на странице поиска при отсутствии запроса
+- **CategoryGrid** — сетка категорий-pills (4x3); expandable с кнопкой "More..." (11 → 32 категории)
+- **BottomNav** — нижняя навигация: Home, Search, Shuffle (3 вкладки)
 - **ProfileGrid** — сетка тумб на странице модели; клик открывает оригинальный URL (Instagram/Twitter) напрямую + трекает `profile_thumb_click`
 - **SimilarModels** — секция «Similar Models» на странице профиля; 3-колоночная сетка с аватарами; показывается только для free (не paid) аккаунтов; загружает популярные видео из той же категории, исключая текущий аккаунт
 - **AdminShell** — layout админки (sidebar + header)
@@ -554,6 +568,11 @@ interface Account {
 }
 
 interface Category { slug: string; name: string; video_count?: number; }
+
+interface AccountSummary {
+  id: string; username: string; slug: string;
+  display_name: string; avatar_url: string;
+}
 
 interface VideoQueryParams {
   sort?: string; page?: number; per_page?: number;
@@ -579,7 +598,7 @@ Admin → POST /admin/accounts (создаёт аккаунт в PG)
      → Парсер скачивает видео с платформы
      → Генерит тумбы + превью → S3
      → INSERT в videos + site_videos
-     → AI Categorizer → Claude → video_categories
+     → AI Categorizer → GPT-4o Vision → video_categories
 ```
 
 ### 8.2 Отображение на фронте
@@ -612,9 +631,10 @@ Banner Worker забирает задачу из banner_queue
 → Если video_id=NULL → все видео аккаунта, иначе конкретное видео
 → Для каждого (video, size):
    → Скачать thumbnail_lg_url (810x1440 портрет)
-   → Gemini Image Editing: AI crop + color/contrast enhance (gemini-2.5-flash-image, ~$0.04/img)
+   → Gemini smart crop: aspect ratio only (напр. "6:5"), composition/framing (gemini-2.5-flash-image, ~$0.04/img)
    → Fallback: center-crop (если Gemini недоступен или нет API key)
-   → Resize (Lanczos) → целевой размер
+   → Resize (Lanczos) → целевой размер в пикселях
+   → Pillow ImageEnhance: contrast 1.35, color 1.4, sharpness 1.5, brightness 1.05
    → Text overlay: gradient внизу (0→70% чёрный) + @username + "Watch Now →"
    → JPEG q=90 → загрузить в R2: banners/{account_id}/{video_id}_{w}x{h}.jpg
    → INSERT в таблицу banners
@@ -689,7 +709,7 @@ S3_ACCESS_KEY=...
 S3_SECRET_KEY=...
 S3_REGION=auto
 S3_PUBLIC_URL=https://cdn.example.com
-ANTHROPIC_API_KEY=...
+OPENAI_API_KEY=...                    # OpenAI API key (для AI-категоризации через GPT-4o Vision)
 GEMINI_API_KEY=...                    # Google Gemini API key (для banner crop + enhance)
 GEMINI_MODEL=gemini-2.5-flash-image   # Модель Gemini для обработки изображений
 PARSE_INTERVAL_SEC=30
@@ -735,7 +755,152 @@ cd web && npm run dev
 
 ---
 
-## 11. Известные ограничения
+## 11. Banner Analytics & Conversion Tracking
+
+### 11.1 Архитектура воронки конверсий
+
+Полная воронка для баннерной рекламы: от показа до конверсии, с привязкой источника трафика (src, click_id) через всю цепочку + S2S постбек в рекламную сеть.
+
+```
+Сторонний сайт (iframe): /b/serve?size=300x250&src=adnet1&click_id=abc123
+  │
+  ├─ 1. ПОКАЗ (banner_impression) → source=adnet1, click_id=abc123
+  ├─ 2. НАВЕДЕНИЕ (banner_hover) → JS mouseenter → пиксель /b/{id}/hover
+  └─ 3. КЛИК (banner_click) → /b/{id}/click?src=adnet1&click_id=abc123
+       │
+       └─ редирект → /model/{slug}?src=adnet1&click_id=abc123
+            │
+            ├─ 4. ЛЕНДИНГ → src + click_id → sessionStorage
+            ├─ 5. social_click (клик на фансайт) → S2S постбек
+            └─ 6. content_click (первый клик на контент за сессию) → S2S постбек
+```
+
+### 11.2 Типы событий (Event Types)
+
+| Event Type | Описание | Источник | Триггер |
+|------------|----------|----------|---------|
+| banner_impression | Показ баннера | Go API (/b/serve, /b/{id}) | Загрузка iframe / IMG |
+| banner_hover | Наведение мыши на баннер | Go API (/b/{id}/hover) | JS mouseenter в iframe → 1x1 GIF |
+| banner_click | Клик по баннеру | Go API (/b/{id}/click) | Клик → redirect на /model/{slug} |
+| social_click | Клик на внешний фансайт (OnlyFans и др.) | Frontend (analytics.ts) | Клик по ссылке на профиль |
+| content_click | Первый клик на контент (Instagram) за сессию | Frontend (analytics.ts) | Клик на тумбу — один раз за сессию (sessionStorage flag) |
+
+### 11.3 Source Attribution Flow
+
+Параметры `src` (имя рекламной сети) и `click_id` (уникальный ID клика от рекламной сети) прокидываются через всю цепочку:
+
+1. **Iframe embed** — `/b/serve?src=adnet1&click_id=abc123` → Go API записывает source в banner_impression
+2. **JS mouseenter** — hover-пиксель включает src/click_id: `/b/{id}/hover?src=adnet1&click_id=abc123`
+3. **Click redirect** — `/b/{id}/click?src=adnet1&click_id=abc123` → redirect с параметрами на `/model/{slug}?src=adnet1&click_id=abc123`
+4. **Landing page** — `AdLandingTracker` компонент сохраняет src + click_id в `sessionStorage`
+5. **Subsequent events** — `analytics.ts` обогащает все события click_id из sessionStorage
+6. **Conversion** — при social_click или content_click с source + click_id → S2S постбек
+
+### 11.4 S2S Postback Mechanism
+
+При конверсии (social_click, content_click) с привязанным source + click_id:
+
+1. Go API получает событие с click_id
+2. Lookup `ad_sources` по name → получает postback_url шаблон
+3. Подставляет click_id в URL шаблон: `https://adnetwork.com/postback?click_id={click_id}&event={event}`
+4. HTTP GET к рекламной сети
+5. Логирование результата в `conversion_postbacks`
+6. Cron job (каждые 5 мин) — retry неудавшихся постбеков
+
+### 11.5 ClickHouse Schema (расширения)
+
+#### Обновлённый mv_banner_daily (с source и hovers)
+```sql
+CREATE MATERIALIZED VIEW mv_banner_daily
+ENGINE = SummingMergeTree()
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (event_date, video_id, account_id, source)
+AS SELECT
+    toDate(created_at) AS event_date,
+    video_id, account_id,
+    JSONExtractString(extra, 'source') AS source,
+    countIf(event_type = 'banner_impression') AS impressions,
+    countIf(event_type = 'banner_hover') AS hovers,
+    countIf(event_type = 'banner_click') AS clicks
+FROM events
+WHERE event_type IN ('banner_impression', 'banner_hover', 'banner_click')
+GROUP BY event_date, video_id, account_id, source;
+```
+
+#### Новый mv_banner_conversions
+```sql
+CREATE MATERIALIZED VIEW mv_banner_conversions
+ENGINE = SummingMergeTree()
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (event_date, source, event_type)
+AS SELECT
+    toDate(created_at) AS event_date,
+    JSONExtractString(extra, 'source') AS source,
+    event_type,
+    count() AS conversions
+FROM events
+WHERE event_type IN ('social_click', 'content_click')
+  AND JSONExtractString(extra, 'source') != ''
+GROUP BY event_date, source, event_type;
+```
+
+### 11.6 PostgreSQL (новые таблицы)
+
+#### `ad_sources` — Рекламные сети
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | SERIAL PK | |
+| name | VARCHAR(64) UNIQUE | Имя сети (slug, напр. "exoclick") |
+| display_name | VARCHAR(128) | Отображаемое имя |
+| postback_url | TEXT | URL шаблон с плейсхолдерами: `{click_id}`, `{event}` |
+| is_active | BOOLEAN DEFAULT true | Активна ли |
+| created_at | TIMESTAMPTZ | |
+| updated_at | TIMESTAMPTZ | |
+
+#### `conversion_postbacks` — Лог постбеков
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | BIGSERIAL PK | |
+| ad_source_id | INT FK(ad_sources.id) | Рекламная сеть |
+| click_id | VARCHAR(256) | ID клика из рекламной сети |
+| event_type | VARCHAR(32) | social_click / content_click |
+| status | VARCHAR(16) DEFAULT 'pending' | pending / sent / failed |
+| response_code | INT NULL | HTTP код ответа |
+| response_body | TEXT NULL | Тело ответа (для дебага) |
+| attempts | INT DEFAULT 0 | Кол-во попыток |
+| last_attempt_at | TIMESTAMPTZ NULL | Время последней попытки |
+| created_at | TIMESTAMPTZ | |
+
+**INDEX:** idx_conversion_postbacks_retry (status, last_attempt_at) WHERE status = 'failed'
+
+### 11.7 Go API — Новые/обновлённые эндпоинты
+
+#### Публичные баннерные роуты
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | /b/serve | Обновлён: принимает src, click_id; добавлен JS mouseenter трекер в iframe HTML |
+| GET | /b/{id}/hover | Новый: возвращает 1x1 прозрачный GIF, пишет banner_hover в ClickHouse |
+| GET | /b/{id}/click | Обновлён: прокидывает src, click_id в redirect URL |
+
+#### Админские эндпоинты
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | /admin/ad-sources | Список рекламных сетей |
+| POST | /admin/ad-sources | Создать рекламную сеть |
+| PUT | /admin/ad-sources/{id} | Обновить рекламную сеть |
+| GET | /admin/banners/funnel | Статистика воронки по source (из ClickHouse) |
+
+### 11.8 Frontend — Новые компоненты
+
+- **AdLandingTracker** (`web/src/components/AdLandingTracker.tsx`) — сохраняет src + click_id из URL в sessionStorage
+- **analytics.ts** (`web/src/lib/analytics.ts`) — обогащает события click_id из sessionStorage; новый event type `content_click` (первый клик за сессию)
+- **Promo: Settings tab** (`web/src/app/admin/promo/page.tsx`) — embed-коды с выбором source, форма для conversion tracker
+- **Promo: Statistics tab** (`web/src/app/admin/promo/page.tsx`) — воронка по источникам, таблица с CTR/конверсией
+- **Ad Sources management** (`web/src/app/admin/ad-sources/page.tsx`) — CRUD для рекламных сетей
+
+---
+
+## 12. Известные ограничения
 
 1. Нет retry при сбое batch insert в ClickHouse — события теряются
 2. Admin token без ротации/expire
@@ -744,3 +909,5 @@ cd web && npm run dev
 5. view_count/click_count в PostgreSQL — кеш платформы (Twitter), НЕ наша статистика. Наша аналитика — в ClickHouse
 6. sendBeacon не ставит Content-Type: application/json, но Go json.NewDecoder работает с любым Content-Type
 7. Impression tracking: порог 50% видимости тумбы (IntersectionObserver threshold=0.5)
+8. content_click трекается только один раз за сессию через sessionStorage — при очистке sessionStorage (закрытие вкладки) счётчик сбрасывается
+9. Postback retry — максимальное число попыток и backoff стратегия зависят от реализации cron job
