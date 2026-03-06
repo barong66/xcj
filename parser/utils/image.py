@@ -1,19 +1,25 @@
 """Image utilities for banner generation.
 
 Uses OpenCV face detection for smart cropping that preserves faces,
-with center-crop fallback. Text overlay (gradient + username + CTA)
-is done via Pillow.
+with center-crop fallback. Banner overlay is rendered via HTML template
++ headless Chromium (html2image), with Pillow fallback.
 """
 from __future__ import annotations
 
+import base64
 import logging
 import os
+import tempfile
+from pathlib import Path
 
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 logger = logging.getLogger(__name__)
+
+# Path to HTML banner templates (relative to this file)
+_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 # Lazy-loaded OpenCV cascades (frontal face → profile face → upper body)
 _cascades: list[cv2.CascadeClassifier] | None = None
@@ -178,20 +184,70 @@ def _find_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
         return ImageFont.load_default()
 
 
-def add_overlay(img: Image.Image, username: str) -> Image.Image:
-    """Add bold-style overlay: dark tint, gradient, border glow, centered CTA.
+def _render_html_banner(
+    thumbnail_path: str, width: int, height: int,
+) -> Image.Image | None:
+    """Render HTML banner template to an image using headless Chromium.
 
-    Inspired by the 'Bold' banner template — neon-pink border accent,
-    heavy bottom gradient, and a centered "Watch Me Now" CTA pill.
+    Embeds the thumbnail as a base64 data URI in the HTML template,
+    then screenshots it with html2image. Returns None if rendering fails.
     """
+    template_file = _TEMPLATES_DIR / "banner_bold_prod.html"
+    if not template_file.exists():
+        logger.warning("Banner template not found: %s", template_file)
+        return None
+
+    try:
+        from html2image import Html2Image
+    except ImportError:
+        logger.warning("html2image not installed, skipping HTML rendering")
+        return None
+
+    # Embed thumbnail as base64 data URI to avoid network requests
+    with open(thumbnail_path, "rb") as f:
+        img_b64 = base64.b64encode(f.read()).decode()
+    data_uri = f"data:image/jpeg;base64,{img_b64}"
+
+    html = template_file.read_text()
+    html = html.replace("{{THUMBNAIL_URL}}", data_uri)
+    html = html.replace("{{WIDTH}}", str(width))
+    html = html.replace("{{HEIGHT}}", str(height))
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            hti = Html2Image(
+                output_path=tmp_dir,
+                custom_flags=[
+                    "--no-sandbox",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--hide-scrollbars",
+                ],
+            )
+            paths = hti.screenshot(
+                html_str=html,
+                save_as="banner.png",
+                size=(width, height),
+            )
+            if paths:
+                result = Image.open(paths[0]).convert("RGB")
+                return result
+    except Exception:
+        logger.warning("HTML banner rendering failed", exc_info=True)
+
+    return None
+
+
+def _pillow_overlay(img: Image.Image) -> Image.Image:
+    """Pillow fallback overlay when HTML rendering is unavailable."""
     w, h = img.size
     result = img.convert("RGBA")
 
-    # --- Dark tint over entire image ---
+    # Dark tint
     tint = Image.new("RGBA", (w, h), (0, 0, 0, 65))
     result = Image.alpha_composite(result, tint)
 
-    # --- Bottom gradient (stronger than before) ---
+    # Bottom gradient
     gradient_h = int(h * 0.55)
     if gradient_h > 0:
         alpha_col = np.linspace(0, 220, gradient_h, dtype=np.uint8)
@@ -200,52 +256,31 @@ def add_overlay(img: Image.Image, username: str) -> Image.Image:
         gradient = Image.fromarray(grad_arr, "RGBA")
         result.paste(gradient, (0, h - gradient_h), gradient)
 
-    # --- Pink border accent (3px) ---
+    # Pink border
     accent = (255, 45, 123)
-    border_w = 3
     draw = ImageDraw.Draw(result)
-    # Top
-    draw.rectangle([0, 0, w - 1, border_w - 1], fill=(*accent, 200))
-    # Bottom
-    draw.rectangle([0, h - border_w, w - 1, h - 1], fill=(*accent, 200))
-    # Left
-    draw.rectangle([0, 0, border_w - 1, h - 1], fill=(*accent, 200))
-    # Right
-    draw.rectangle([w - border_w, 0, w - 1, h - 1], fill=(*accent, 200))
+    for rect in [
+        [0, 0, w - 1, 2], [0, h - 3, w - 1, h - 1],
+        [0, 0, 2, h - 1], [w - 3, 0, w - 1, h - 1],
+    ]:
+        draw.rectangle(rect, fill=(*accent, 200))
 
-    # --- CTA pill button (centered at bottom) ---
+    # CTA pill
     cta = "WATCH ME NOW"
-    cta_font_size = max(11, int(h * 0.055))
-    cta_font = _find_font(cta_font_size)
-
-    cta_bbox = draw.textbbox((0, 0), cta, font=cta_font)
-    cta_text_w = cta_bbox[2] - cta_bbox[0]
-    cta_text_h = cta_bbox[3] - cta_bbox[1]
-
-    pill_pad_x = int(w * 0.08)
-    pill_pad_y = int(h * 0.025)
-    pill_w = cta_text_w + pill_pad_x * 2
-    pill_h = cta_text_h + pill_pad_y * 2
-    pill_x = (w - pill_w) // 2
-    pill_y = h - pill_h - int(h * 0.08)
-
-    # Pill background (gradient-like via solid pink)
+    font = _find_font(max(11, int(h * 0.055)))
+    bbox = draw.textbbox((0, 0), cta, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    px, py = int(w * 0.08), int(h * 0.025)
+    pw, ph = tw + px * 2, th + py * 2
+    pill_x, pill_y = (w - pw) // 2, h - ph - int(h * 0.08)
     draw.rounded_rectangle(
-        [pill_x, pill_y, pill_x + pill_w, pill_y + pill_h],
-        radius=pill_h // 2,
-        fill=(*accent, 230),
+        [pill_x, pill_y, pill_x + pw, pill_y + ph],
+        radius=ph // 2, fill=(*accent, 230),
     )
-
-    # CTA text centered in pill
-    text_x = pill_x + (pill_w - cta_text_w) // 2
-    text_y = pill_y + (pill_h - cta_text_h) // 2
     draw.text(
-        (text_x, text_y),
-        cta,
-        fill=(255, 255, 255, 255),
-        font=cta_font,
+        (pill_x + (pw - tw) // 2, pill_y + (ph - th) // 2),
+        cta, fill=(255, 255, 255, 255), font=font,
     )
-
     return result.convert("RGB")
 
 
@@ -262,9 +297,10 @@ def generate_banner(
     Pipeline:
     1. Open source image -> RGB
     2. Smart crop (face/body detection, or fallback center-crop)
-    3. Resize to exact target dimensions (Lanczos)
-    4. Add gradient + text overlay (if username provided)
-    5. Save as JPEG
+    3. Resize + enhance
+    4. Save processed thumbnail to temp file
+    5. Render HTML template with Chromium (or Pillow fallback)
+    6. Save as JPEG
 
     Returns True on success, False on failure.
     """
@@ -273,11 +309,28 @@ def generate_banner(
             img = img.convert("RGB")
             cropped = smart_crop(img, width, height)
             resized = cropped.resize((width, height), Image.LANCZOS)
-            resized = enhance_image(resized)
-            if username:
-                resized = add_overlay(resized, username)
-            resized.save(dest_path, "JPEG", quality=quality)
-            return True
+            enhanced = enhance_image(resized)
+
+            # Save processed thumbnail for HTML template
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                tmp_path = tmp.name
+                enhanced.save(tmp_path, "JPEG", quality=95)
+
+            try:
+                # Try HTML rendering first
+                result = _render_html_banner(tmp_path, width, height)
+                if result is not None:
+                    result.save(dest_path, "JPEG", quality=quality)
+                    return True
+
+                # Fallback to Pillow overlay
+                logger.info("Using Pillow fallback for banner overlay")
+                final = _pillow_overlay(enhanced)
+                final.save(dest_path, "JPEG", quality=quality)
+                return True
+            finally:
+                os.unlink(tmp_path)
+
     except Exception:
         logger.error("Failed to generate banner %dx%d from %s", width, height, src_path, exc_info=True)
         return False

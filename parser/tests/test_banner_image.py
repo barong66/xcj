@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 from parser.utils.image import (
     _center_crop,
     _face_crop,
-    add_overlay,
+    _pillow_overlay,
     crop_to_ratio,
     generate_banner,
     smart_crop,
@@ -20,20 +20,15 @@ from parser.utils.image import (
 # ── Helpers ──────────────────────────────────────────────────────
 
 def _make_image_with_face(width: int = 810, height: int = 1440) -> Image.Image:
-    """Create a test image with a simple 'face' (light oval on dark bg).
-
-    OpenCV's Haar cascade detects this as a face-like region.
-    """
+    """Create a test image with a simple 'face' (light oval on dark bg)."""
     img = Image.new("RGB", (width, height), (40, 40, 40))
     draw = ImageDraw.Draw(img)
-    # Draw a skin-toned oval in the upper portion (simulates a face)
     face_w, face_h = width // 4, height // 6
     cx, cy = width // 2, height // 4
     draw.ellipse(
         [cx - face_w, cy - face_h, cx + face_w, cy + face_h],
         fill=(200, 170, 140),
     )
-    # Add eye-like dark spots for better Haar detection
     eye_r = face_w // 5
     draw.ellipse(
         [cx - face_w // 2 - eye_r, cy - eye_r,
@@ -82,14 +77,12 @@ class TestCenterCrop:
 
 class TestFaceCrop:
     def test_no_faces_falls_back_to_center(self):
-        """Plain image with no face-like features → same as center crop."""
         img = Image.new("RGB", (810, 1440), (128, 128, 128))
         result = _face_crop(img, 300, 250)
         expected = _center_crop(img, 300, 250)
         assert result.size == expected.size
 
     def test_preserves_aspect_ratio_tall(self):
-        """Tall image cropped to landscape preserves correct ratio."""
         img = Image.new("RGB", (810, 1440), "gray")
         result = _face_crop(img, 300, 250)
         w, h = result.size
@@ -97,7 +90,6 @@ class TestFaceCrop:
         assert h == 675
 
     def test_preserves_aspect_ratio_wide(self):
-        """Wide image cropped to square preserves correct ratio."""
         img = Image.new("RGB", (800, 400), "gray")
         result = _face_crop(img, 100, 100)
         w, h = result.size
@@ -124,7 +116,6 @@ class TestSmartCrop:
         assert result.size == (810, 675)
 
     def test_falls_back_on_exception(self):
-        """If face detection raises, smart_crop still works."""
         img = Image.new("RGB", (810, 1440), "red")
         with patch("parser.utils.image._face_crop", side_effect=RuntimeError("boom")):
             result = smart_crop(img, 300, 250)
@@ -156,29 +147,29 @@ class TestCropToRatio:
         assert result.size == (expected_w, 200)
 
 
-# ── Overlay ─────────────────────────────────────────────────────
+# ── Pillow overlay (fallback) ──────────────────────────────────
 
-class TestAddOverlay:
+class TestPillowOverlay:
     def test_output_same_dimensions(self):
         img = Image.new("RGB", (300, 250), "blue")
-        result = add_overlay(img, "testuser")
+        result = _pillow_overlay(img)
         assert result.size == (300, 250)
         assert result.mode == "RGB"
 
     def test_overlay_modifies_pixels(self):
         img = Image.new("RGB", (300, 250), (100, 100, 100))
-        result = add_overlay(img, "testuser")
+        result = _pillow_overlay(img)
         orig_px = img.getpixel((5, 245))
         new_px = result.getpixel((5, 245))
         assert sum(new_px) <= sum(orig_px)
 
     def test_small_image(self):
         img = Image.new("RGB", (50, 50), "red")
-        result = add_overlay(img, "x")
+        result = _pillow_overlay(img)
         assert result.size == (50, 50)
 
 
-# ── generate_banner (end-to-end) ─────────────────────────────────
+# ── generate_banner (end-to-end, uses Pillow fallback in tests) ──
 
 class TestGenerateBanner:
     def test_generates_jpeg(self):
