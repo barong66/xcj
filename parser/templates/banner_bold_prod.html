@@ -8,16 +8,15 @@
   html, body {
     margin: 0; padding: 0; overflow: hidden;
     width: {{WIDTH}}px; height: {{HEIGHT}}px;
-    background: #000;
   }
 
   .banner {
+    position: absolute;
+    top: 0; left: 0;
     width: {{WIDTH}}px;
     height: {{HEIGHT}}px;
-    position: relative;
     overflow: hidden;
     font-family: 'Montserrat', 'Arial Black', sans-serif;
-    border: 3px solid #FF2D7B;
   }
 
   .banner img {
@@ -47,6 +46,15 @@
     height: 55%;
     background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 50%, transparent 100%);
     z-index: 1;
+  }
+
+  /* Pink border (inset so it doesn't affect layout) */
+  .border-overlay {
+    position: absolute;
+    inset: 0;
+    border: 3px solid #FF2D7B;
+    z-index: 4;
+    pointer-events: none;
   }
 
   /* Diagonal accent corner */
@@ -98,6 +106,7 @@
 
 <div class="banner">
   <img src="{{THUMBNAIL_URL}}" alt="">
+  <div class="border-overlay"></div>
   <div class="corner-accent"></div>
   <div class="content">
     <span class="tagline">Exclusive Content</span>
