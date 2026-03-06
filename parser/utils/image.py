@@ -15,17 +15,21 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 logger = logging.getLogger(__name__)
 
-# Lazy-loaded OpenCV face cascade
-_face_cascade = None
+# Lazy-loaded OpenCV cascades (frontal face → profile face → upper body)
+_cascades: list[cv2.CascadeClassifier] | None = None
 
 
-def _get_face_cascade() -> cv2.CascadeClassifier:
-    """Lazily load the OpenCV Haar cascade for frontal face detection."""
-    global _face_cascade
-    if _face_cascade is None:
-        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        _face_cascade = cv2.CascadeClassifier(cascade_path)
-    return _face_cascade
+def _get_cascades() -> list[cv2.CascadeClassifier]:
+    """Lazily load Haar cascades in priority order."""
+    global _cascades
+    if _cascades is None:
+        base = cv2.data.haarcascades
+        _cascades = [
+            cv2.CascadeClassifier(base + "haarcascade_frontalface_default.xml"),
+            cv2.CascadeClassifier(base + "haarcascade_profileface.xml"),
+            cv2.CascadeClassifier(base + "haarcascade_upperbody.xml"),
+        ]
+    return _cascades
 
 
 def _center_crop(img: Image.Image, width: int, height: int) -> Image.Image:
@@ -63,18 +67,22 @@ def _face_crop(img: Image.Image, width: int, height: int) -> Image.Image:
     if abs(src_ratio - target_ratio) < 0.01:
         return img
 
-    # Detect faces on a downscaled grayscale image for speed
+    # Detect faces/body on a downscaled grayscale image for speed
     scale = min(1.0, 640 / max(src_w, src_h))
     small = img.resize((int(src_w * scale), int(src_h * scale)), Image.BILINEAR)
     gray = cv2.cvtColor(np.array(small), cv2.COLOR_RGB2GRAY)
 
-    cascade = _get_face_cascade()
-    faces = cascade.detectMultiScale(
-        gray, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20),
-    )
+    # Try cascades in order: frontal face → profile face → upper body
+    faces = np.empty((0, 4), dtype=np.int32)
+    for cascade in _get_cascades():
+        faces = cascade.detectMultiScale(
+            gray, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20),
+        )
+        if len(faces) > 0:
+            break
 
     if len(faces) == 0:
-        logger.debug("No faces detected, using center crop")
+        logger.debug("No faces/body detected, using center crop")
         return _center_crop(img, width, height)
 
     # Scale face coordinates back to original image size
@@ -232,7 +240,7 @@ def generate_banner(
 
     Pipeline:
     1. Open source image -> RGB
-    2. Gemini crop + enhance (or fallback center-crop)
+    2. Smart crop (face/body detection, or fallback center-crop)
     3. Resize to exact target dimensions (Lanczos)
     4. Add gradient + text overlay (if username provided)
     5. Save as JPEG
