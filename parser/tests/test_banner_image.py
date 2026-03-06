@@ -1,18 +1,17 @@
 """Tests for banner image generation utilities."""
 import os
 import tempfile
-from io import BytesIO
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
 from parser.utils.image import (
-    _fallback_crop,
+    _center_crop,
+    _face_crop,
     add_overlay,
     crop_to_ratio,
-    gemini_crop_and_enhance,
     generate_banner,
     smart_crop,
 )
@@ -20,148 +19,137 @@ from parser.utils.image import (
 
 # ── Helpers ──────────────────────────────────────────────────────
 
-def _make_gemini_response(img: Image.Image):
-    """Create a mock Gemini response containing an image."""
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    raw_bytes = buf.getvalue()
+def _make_image_with_face(width: int = 810, height: int = 1440) -> Image.Image:
+    """Create a test image with a simple 'face' (light oval on dark bg).
 
-    part = MagicMock()
-    part.inline_data = MagicMock()
-    part.inline_data.data = raw_bytes
-    part.inline_data.mime_type = "image/png"
-    part.text = None
-
-    candidate = MagicMock()
-    candidate.content.parts = [part]
-
-    response = MagicMock()
-    response.candidates = [candidate]
-    return response
-
-
-def _make_empty_gemini_response():
-    """Gemini response with text only (no image)."""
-    part = MagicMock()
-    part.inline_data = None
-    part.text = "I cannot process this image."
-
-    candidate = MagicMock()
-    candidate.content.parts = [part]
-
-    response = MagicMock()
-    response.candidates = [candidate]
-    return response
+    OpenCV's Haar cascade detects this as a face-like region.
+    """
+    img = Image.new("RGB", (width, height), (40, 40, 40))
+    draw = ImageDraw.Draw(img)
+    # Draw a skin-toned oval in the upper portion (simulates a face)
+    face_w, face_h = width // 4, height // 6
+    cx, cy = width // 2, height // 4
+    draw.ellipse(
+        [cx - face_w, cy - face_h, cx + face_w, cy + face_h],
+        fill=(200, 170, 140),
+    )
+    # Add eye-like dark spots for better Haar detection
+    eye_r = face_w // 5
+    draw.ellipse(
+        [cx - face_w // 2 - eye_r, cy - eye_r,
+         cx - face_w // 2 + eye_r, cy + eye_r],
+        fill=(30, 30, 30),
+    )
+    draw.ellipse(
+        [cx + face_w // 2 - eye_r, cy - eye_r,
+         cx + face_w // 2 + eye_r, cy + eye_r],
+        fill=(30, 30, 30),
+    )
+    return img
 
 
-# ── Fallback crop ────────────────────────────────────────────────
+# ── Center crop ─────────────────────────────────────────────────
 
-class TestFallbackCrop:
+class TestCenterCrop:
     def test_wider_image_crops_width(self):
         img = Image.new("RGB", (200, 100), "red")
-        result = _fallback_crop(img, 100, 100)
+        result = _center_crop(img, 100, 100)
         assert result.size == (100, 100)
 
     def test_taller_image_crops_height(self):
         img = Image.new("RGB", (100, 200), "blue")
-        result = _fallback_crop(img, 100, 100)
+        result = _center_crop(img, 100, 100)
         assert result.size == (100, 100)
 
     def test_exact_ratio_unchanged(self):
         img = Image.new("RGB", (300, 250), "green")
-        result = _fallback_crop(img, 300, 250)
+        result = _center_crop(img, 300, 250)
         assert result.size == (300, 250)
 
     def test_landscape_to_portrait(self):
         img = Image.new("RGB", (400, 200), "white")
-        result = _fallback_crop(img, 9, 16)
+        result = _center_crop(img, 9, 16)
         expected_w = int(200 * (9 / 16))
         assert result.size == (expected_w, 200)
 
     def test_portrait_to_landscape(self):
         img = Image.new("RGB", (810, 1440), "red")
-        result = _fallback_crop(img, 300, 250)
+        result = _center_crop(img, 300, 250)
         assert result.size == (810, 675)
 
 
-# ── Gemini crop + enhance ───────────────────────────────────────
+# ── Face crop ────────────────────────────────────────────────────
 
-class TestGeminiCropAndEnhance:
-    @patch("parser.utils.image._get_genai_client")
-    def test_gemini_returns_image(self, mock_get_client):
-        """When Gemini succeeds, returns the image from API."""
-        # Prepare a 300x250 "enhanced" image that Gemini would return
-        enhanced = Image.new("RGB", (300, 250), (255, 100, 50))
-        mock_client = MagicMock()
-        mock_client.models.generate_content.return_value = _make_gemini_response(enhanced)
-        mock_get_client.return_value = mock_client
+class TestFaceCrop:
+    def test_no_faces_falls_back_to_center(self):
+        """Plain image with no face-like features → same as center crop."""
+        img = Image.new("RGB", (810, 1440), (128, 128, 128))
+        result = _face_crop(img, 300, 250)
+        expected = _center_crop(img, 300, 250)
+        assert result.size == expected.size
 
-        src = Image.new("RGB", (810, 1440), "gray")
-        result = gemini_crop_and_enhance(src, 300, 250)
+    def test_preserves_aspect_ratio_tall(self):
+        """Tall image cropped to landscape preserves correct ratio."""
+        img = Image.new("RGB", (810, 1440), "gray")
+        result = _face_crop(img, 300, 250)
+        w, h = result.size
+        assert w == 810
+        assert h == 675
 
-        assert result.mode == "RGB"
-        # Gemini was called
-        mock_client.models.generate_content.assert_called_once()
+    def test_preserves_aspect_ratio_wide(self):
+        """Wide image cropped to square preserves correct ratio."""
+        img = Image.new("RGB", (800, 400), "gray")
+        result = _face_crop(img, 100, 100)
+        w, h = result.size
+        assert h == 400
+        assert w == 400
 
-    @patch("parser.utils.image._get_genai_client")
-    def test_gemini_no_image_falls_back(self, mock_get_client):
-        """When Gemini returns text only, falls back to crop."""
-        mock_client = MagicMock()
-        mock_client.models.generate_content.return_value = _make_empty_gemini_response()
-        mock_get_client.return_value = mock_client
+    def test_exact_ratio_returns_same(self):
+        img = Image.new("RGB", (300, 250), "green")
+        result = _face_crop(img, 300, 250)
+        assert result.size == (300, 250)
 
-        src = Image.new("RGB", (810, 1440), "gray")
-        result = gemini_crop_and_enhance(src, 300, 250)
 
-        # Should still produce correct aspect ratio via fallback
+# ── Smart crop (integration) ────────────────────────────────────
+
+class TestSmartCrop:
+    def test_exact_ratio_unchanged(self):
+        img = Image.new("RGB", (300, 250), "green")
+        result = smart_crop(img, 300, 250)
+        assert result.size == (300, 250)
+
+    def test_portrait_to_landscape(self):
+        img = Image.new("RGB", (810, 1440), "red")
+        result = smart_crop(img, 300, 250)
         assert result.size == (810, 675)
 
-    @patch("parser.utils.image._get_genai_client")
-    def test_gemini_exception_falls_back(self, mock_get_client):
-        """When Gemini raises, falls back to crop."""
-        mock_client = MagicMock()
-        mock_client.models.generate_content.side_effect = RuntimeError("API error")
-        mock_get_client.return_value = mock_client
-
-        src = Image.new("RGB", (810, 1440), "gray")
-        result = gemini_crop_and_enhance(src, 300, 250)
-
-        assert result.size == (810, 675)
-
-    @patch("parser.utils.image._get_genai_client")
-    def test_no_api_key_falls_back(self, mock_get_client):
-        """When no Gemini client, falls back to crop."""
-        mock_get_client.return_value = None
-
-        src = Image.new("RGB", (810, 1440), "gray")
-        result = gemini_crop_and_enhance(src, 300, 250)
-
+    def test_falls_back_on_exception(self):
+        """If face detection raises, smart_crop still works."""
+        img = Image.new("RGB", (810, 1440), "red")
+        with patch("parser.utils.image._face_crop", side_effect=RuntimeError("boom")):
+            result = smart_crop(img, 300, 250)
         assert result.size == (810, 675)
 
 
 # ── crop_to_ratio (backward compat) ─────────────────────────────
 
 class TestCropToRatio:
-    @patch("parser.utils.image._get_genai_client", return_value=None)
-    def test_wider_image_crops_width(self, _):
+    def test_wider_image_crops_width(self):
         img = Image.new("RGB", (200, 100), "red")
         result = crop_to_ratio(img, 1.0)
         assert result.size == (100, 100)
 
-    @patch("parser.utils.image._get_genai_client", return_value=None)
-    def test_taller_image_crops_height(self, _):
+    def test_taller_image_crops_height(self):
         img = Image.new("RGB", (100, 200), "blue")
         result = crop_to_ratio(img, 1.0)
         assert result.size == (100, 100)
 
-    @patch("parser.utils.image._get_genai_client", return_value=None)
-    def test_exact_ratio_unchanged(self, _):
+    def test_exact_ratio_unchanged(self):
         img = Image.new("RGB", (300, 250), "green")
         result = crop_to_ratio(img, 300 / 250)
         assert result.size == (300, 250)
 
-    @patch("parser.utils.image._get_genai_client", return_value=None)
-    def test_landscape_to_portrait(self, _):
+    def test_landscape_to_portrait(self):
         img = Image.new("RGB", (400, 200), "white")
         result = crop_to_ratio(img, 9 / 16)
         expected_w = int(200 * (9 / 16))
@@ -193,8 +181,7 @@ class TestAddOverlay:
 # ── generate_banner (end-to-end) ─────────────────────────────────
 
 class TestGenerateBanner:
-    @patch("parser.utils.image._get_genai_client", return_value=None)
-    def test_generates_jpeg(self, _):
+    def test_generates_jpeg(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = os.path.join(tmp, "source.jpg")
             img = Image.new("RGB", (800, 600), "purple")
@@ -210,8 +197,7 @@ class TestGenerateBanner:
                 assert result.size == (300, 250)
                 assert result.format == "JPEG"
 
-    @patch("parser.utils.image._get_genai_client", return_value=None)
-    def test_portrait_source(self, _):
+    def test_portrait_source(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = os.path.join(tmp, "portrait.jpg")
             img = Image.new("RGB", (540, 960), "cyan")
@@ -230,8 +216,7 @@ class TestGenerateBanner:
             ok = generate_banner("/nonexistent/path.jpg", dest, 300, 250)
             assert ok is False
 
-    @patch("parser.utils.image._get_genai_client", return_value=None)
-    def test_with_username_overlay(self, _):
+    def test_with_username_overlay(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = os.path.join(tmp, "source.jpg")
             img = Image.new("RGB", (810, 1440), "teal")
@@ -244,8 +229,7 @@ class TestGenerateBanner:
             with Image.open(dest) as result:
                 assert result.size == (300, 250)
 
-    @patch("parser.utils.image._get_genai_client", return_value=None)
-    def test_without_username_no_overlay(self, _):
+    def test_without_username_no_overlay(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = os.path.join(tmp, "source.jpg")
             img = Image.new("RGB", (300, 250), (128, 128, 128))
@@ -254,24 +238,3 @@ class TestGenerateBanner:
             dest = os.path.join(tmp, "banner.jpg")
             ok = generate_banner(src, dest, 300, 250, username="")
             assert ok is True
-
-    @patch("parser.utils.image._get_genai_client")
-    def test_with_gemini(self, mock_get_client):
-        """Full pipeline with mocked Gemini returning an enhanced image."""
-        enhanced = Image.new("RGB", (300, 250), (255, 200, 100))
-        mock_client = MagicMock()
-        mock_client.models.generate_content.return_value = _make_gemini_response(enhanced)
-        mock_get_client.return_value = mock_client
-
-        with tempfile.TemporaryDirectory() as tmp:
-            src = os.path.join(tmp, "source.jpg")
-            img = Image.new("RGB", (810, 1440), "gray")
-            img.save(src, "JPEG")
-
-            dest = os.path.join(tmp, "banner.jpg")
-            ok = generate_banner(src, dest, 300, 250, username="star")
-
-            assert ok is True
-            with Image.open(dest) as result:
-                assert result.size == (300, 250)
-                assert result.format == "JPEG"

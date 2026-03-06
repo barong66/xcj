@@ -1,46 +1,34 @@
 """Image utilities for banner generation.
 
-Uses Gemini Image Editing API for content-aware cropping and enhancement,
-with Pillow fallback for when Gemini is unavailable. Text overlay (gradient +
-username + CTA) is always done via Pillow for reliability.
+Uses OpenCV face detection for smart cropping that preserves faces,
+with center-crop fallback. Text overlay (gradient + username + CTA)
+is done via Pillow.
 """
 from __future__ import annotations
 
 import logging
 import os
-from io import BytesIO
 
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
-from parser.config.settings import settings
-
 logger = logging.getLogger(__name__)
 
-# Lazy-initialized Gemini client
-_genai_client = None
+# Lazy-loaded OpenCV face cascade
+_face_cascade = None
 
 
-def _get_genai_client():
-    """Lazily init the Gemini client. Returns None if no API key."""
-    global _genai_client
-    if _genai_client is not None:
-        return _genai_client
-
-    api_key = settings.gemini_api_key
-    if not api_key:
-        return None
-
-    try:
-        from google import genai
-        _genai_client = genai.Client(api_key=api_key)
-        return _genai_client
-    except Exception:
-        logger.warning("Failed to initialize Gemini client", exc_info=True)
-        return None
+def _get_face_cascade() -> cv2.CascadeClassifier:
+    """Lazily load the OpenCV Haar cascade for frontal face detection."""
+    global _face_cascade
+    if _face_cascade is None:
+        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        _face_cascade = cv2.CascadeClassifier(cascade_path)
+    return _face_cascade
 
 
-def _fallback_crop(img: Image.Image, width: int, height: int) -> Image.Image:
+def _center_crop(img: Image.Image, width: int, height: int) -> Image.Image:
     """Simple center-crop with upper-third bias (no external deps)."""
     src_w, src_h = img.size
     target_ratio = width / height
@@ -61,65 +49,12 @@ def _fallback_crop(img: Image.Image, width: int, height: int) -> Image.Image:
         return img.crop((0, offset, src_w, offset + crop_h))
 
 
-def gemini_crop_and_enhance(
-    img: Image.Image, width: int, height: int,
-) -> Image.Image:
-    """Crop and enhance image using Gemini Image Editing API.
+def _face_crop(img: Image.Image, width: int, height: int) -> Image.Image:
+    """Crop image to target aspect ratio, keeping detected faces in frame.
 
-    Sends the source image to Gemini with a prompt to find the most
-    attractive composition and enhance colors/contrast. Falls back
-    to simple center-crop if Gemini is unavailable or fails.
-    """
-    client = _get_genai_client()
-    if client is None:
-        logger.debug("Gemini not configured, using fallback crop")
-        return _fallback_crop(img, width, height)
-
-    try:
-        from google.genai import types
-
-        # Express as ratio, not pixels — so Gemini crops instead of squashing
-        from math import gcd
-        g = gcd(width, height)
-        ratio_w, ratio_h = width // g, height // g
-
-        prompt = (
-            f"Crop this photo to {ratio_w}:{ratio_h} aspect ratio (landscape). "
-            "ONLY CROP — do not resize, stretch, squash, or change resolution. "
-            "You are a professional photographer choosing the best frame. "
-            "Apply rule of thirds, find the most flattering composition. "
-            "Focus on face and body, keep the subject well-framed. "
-            "Do not add any text, logos, or watermarks. "
-            "Do not change colors or contrast. "
-            "Return the cropped image at its original resolution."
-        )
-
-        response = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=[prompt, img],
-            config=types.GenerateContentConfig(
-                response_modalities=["IMAGE"],
-            ),
-        )
-
-        for part in response.candidates[0].content.parts:
-            if part.inline_data is not None:
-                result = Image.open(BytesIO(part.inline_data.data))
-                return result.convert("RGB")
-
-        logger.warning("Gemini returned no image data, using fallback crop")
-        return _fallback_crop(img, width, height)
-
-    except Exception:
-        logger.warning("Gemini image editing failed, using fallback crop", exc_info=True)
-        return _fallback_crop(img, width, height)
-
-
-# Keep smart_crop as the main entry point (backward compat)
-def smart_crop(img: Image.Image, width: int, height: int) -> Image.Image:
-    """Content-aware crop to target dimensions.
-
-    Routes to Gemini when available, otherwise uses fallback.
+    Uses OpenCV Haar cascade to find faces, then positions the crop
+    window to include as many faces as possible (weighted by size).
+    Falls back to center-crop if no faces are detected.
     """
     src_w, src_h = img.size
     target_ratio = width / height
@@ -128,10 +63,67 @@ def smart_crop(img: Image.Image, width: int, height: int) -> Image.Image:
     if abs(src_ratio - target_ratio) < 0.01:
         return img
 
-    return gemini_crop_and_enhance(img, width, height)
+    # Detect faces on a downscaled grayscale image for speed
+    scale = min(1.0, 640 / max(src_w, src_h))
+    small = img.resize((int(src_w * scale), int(src_h * scale)), Image.BILINEAR)
+    gray = cv2.cvtColor(np.array(small), cv2.COLOR_RGB2GRAY)
+
+    cascade = _get_face_cascade()
+    faces = cascade.detectMultiScale(
+        gray, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20),
+    )
+
+    if len(faces) == 0:
+        logger.debug("No faces detected, using center crop")
+        return _center_crop(img, width, height)
+
+    # Scale face coordinates back to original image size
+    faces_orig = faces / scale  # (x, y, w, h) arrays
+
+    # Compute the weighted center of all faces (bigger faces = more weight)
+    face_areas = faces_orig[:, 2] * faces_orig[:, 3]
+    total_area = face_areas.sum()
+    cx = (faces_orig[:, 0] + faces_orig[:, 2] / 2) @ face_areas / total_area
+    cy = (faces_orig[:, 1] + faces_orig[:, 3] / 2) @ face_areas / total_area
+
+    # Determine crop dimensions
+    if src_ratio > target_ratio:
+        # Image is wider than target — crop width
+        crop_w = int(src_h * target_ratio)
+        crop_h = src_h
+        # Position crop window horizontally centered on faces
+        x0 = int(cx - crop_w / 2)
+        x0 = max(0, min(x0, src_w - crop_w))
+        return img.crop((x0, 0, x0 + crop_w, src_h))
+    else:
+        # Image is taller than target — crop height
+        crop_w = src_w
+        crop_h = int(src_w / target_ratio)
+        # Position crop window vertically centered on faces
+        y0 = int(cy - crop_h / 2)
+        y0 = max(0, min(y0, src_h - crop_h))
+        return img.crop((0, y0, src_w, y0 + crop_h))
 
 
-# Backward-compatible alias used by tests
+def smart_crop(img: Image.Image, width: int, height: int) -> Image.Image:
+    """Content-aware crop to target aspect ratio, preserving faces.
+
+    Uses OpenCV face detection, falls back to center-crop.
+    """
+    src_w, src_h = img.size
+    target_ratio = width / height
+    src_ratio = src_w / src_h
+
+    if abs(src_ratio - target_ratio) < 0.01:
+        return img
+
+    try:
+        return _face_crop(img, width, height)
+    except Exception:
+        logger.warning("Face detection failed, using center crop", exc_info=True)
+        return _center_crop(img, width, height)
+
+
 def crop_to_ratio(img: Image.Image, target_ratio: float) -> Image.Image:
     """Crop image to match *target_ratio* (width/height)."""
     src_w, src_h = img.size
@@ -250,7 +242,7 @@ def generate_banner(
     try:
         with Image.open(src_path) as img:
             img = img.convert("RGB")
-            cropped = gemini_crop_and_enhance(img, width, height)
+            cropped = smart_crop(img, width, height)
             resized = cropped.resize((width, height), Image.LANCZOS)
             resized = enhance_image(resized)
             if username:
