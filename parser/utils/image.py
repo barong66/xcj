@@ -179,50 +179,71 @@ def _find_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 
 def add_overlay(img: Image.Image, username: str) -> Image.Image:
-    """Add gradient overlay with @username and CTA text to the banner.
+    """Add bold-style overlay: dark tint, gradient, border glow, centered CTA.
 
-    Bottom 35% gets a transparent->black gradient, with @username
-    on the left and "Watch Now" on the right.
+    Inspired by the 'Bold' banner template — neon-pink border accent,
+    heavy bottom gradient, and a centered "Watch Me Now" CTA pill.
     """
     w, h = img.size
     result = img.convert("RGBA")
 
-    # --- Gradient (efficient via numpy) ---
-    gradient_h = int(h * 0.35)
+    # --- Dark tint over entire image ---
+    tint = Image.new("RGBA", (w, h), (0, 0, 0, 65))
+    result = Image.alpha_composite(result, tint)
+
+    # --- Bottom gradient (stronger than before) ---
+    gradient_h = int(h * 0.55)
     if gradient_h > 0:
-        alpha_col = np.linspace(0, 180, gradient_h, dtype=np.uint8)
+        alpha_col = np.linspace(0, 220, gradient_h, dtype=np.uint8)
         grad_arr = np.zeros((gradient_h, w, 4), dtype=np.uint8)
         grad_arr[:, :, 3] = alpha_col[:, np.newaxis]
         gradient = Image.fromarray(grad_arr, "RGBA")
         result.paste(gradient, (0, h - gradient_h), gradient)
 
-    # --- Text ---
+    # --- Pink border accent (3px) ---
+    accent = (255, 45, 123)
+    border_w = 3
     draw = ImageDraw.Draw(result)
-    font_size = max(12, int(h * 0.07))
-    font = _find_font(font_size)
-    small_font_size = max(10, int(h * 0.055))
-    small_font = _find_font(small_font_size)
+    # Top
+    draw.rectangle([0, 0, w - 1, border_w - 1], fill=(*accent, 200))
+    # Bottom
+    draw.rectangle([0, h - border_w, w - 1, h - 1], fill=(*accent, 200))
+    # Left
+    draw.rectangle([0, 0, border_w - 1, h - 1], fill=(*accent, 200))
+    # Right
+    draw.rectangle([w - border_w, 0, w - 1, h - 1], fill=(*accent, 200))
 
-    pad = int(w * 0.04)
-    text_y = h - pad - font_size
+    # --- CTA pill button (centered at bottom) ---
+    cta = "WATCH ME NOW"
+    cta_font_size = max(11, int(h * 0.055))
+    cta_font = _find_font(cta_font_size)
 
-    # @username — white, left
-    draw.text(
-        (pad, text_y),
-        f"@{username}",
-        fill=(255, 255, 255, 230),
-        font=font,
+    cta_bbox = draw.textbbox((0, 0), cta, font=cta_font)
+    cta_text_w = cta_bbox[2] - cta_bbox[0]
+    cta_text_h = cta_bbox[3] - cta_bbox[1]
+
+    pill_pad_x = int(w * 0.08)
+    pill_pad_y = int(h * 0.025)
+    pill_w = cta_text_w + pill_pad_x * 2
+    pill_h = cta_text_h + pill_pad_y * 2
+    pill_x = (w - pill_w) // 2
+    pill_y = h - pill_h - int(h * 0.08)
+
+    # Pill background (gradient-like via solid pink)
+    draw.rounded_rectangle(
+        [pill_x, pill_y, pill_x + pill_w, pill_y + pill_h],
+        radius=pill_h // 2,
+        fill=(*accent, 230),
     )
 
-    # CTA — accent red, right
-    cta = "Watch Now \u2192"
-    cta_bbox = draw.textbbox((0, 0), cta, font=small_font)
-    cta_w = cta_bbox[2] - cta_bbox[0]
+    # CTA text centered in pill
+    text_x = pill_x + (pill_w - cta_text_w) // 2
+    text_y = pill_y + (pill_h - cta_text_h) // 2
     draw.text(
-        (w - pad - cta_w, text_y + (font_size - small_font_size) // 2),
+        (text_x, text_y),
         cta,
-        fill=(234, 56, 76, 255),
-        font=small_font,
+        fill=(255, 255, 255, 255),
+        font=cta_font,
     )
 
     return result.convert("RGB")
