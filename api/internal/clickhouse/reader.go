@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 
@@ -217,11 +218,12 @@ func (r *Reader) GetBannerStats(ctx context.Context, videoIDs []int64) (map[int6
 			if(impressions > 0, round(clicks * 100.0 / impressions, 2), 0) AS ctr
 		FROM events
 		WHERE event_type IN ('banner_impression', 'banner_hover', 'banner_click')
-			AND video_id IN (?)
+			AND video_id IN ?
 		GROUP BY video_id
 	`, videoIDs)
 	if err != nil {
-		return result, nil // gracefully return empty on error
+		slog.Error("clickhouse: get banner stats", "error", err, "video_count", len(videoIDs))
+		return result, nil
 	}
 	defer rows.Close()
 
