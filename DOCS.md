@@ -90,10 +90,11 @@
 - `GET /b/serve?size=300x250` — отдаёт интерактивный HTML-баннер с hover-эффектами (CTR-based selection), ротация при равном CTR
 - Таргетинг: `&cat=slug` (категория), `&kw=category_slug` (категория, аналог cat), `&aid=123` (конкретный аккаунт)
 - **Стили баннеров (`&style=`):** 4 HTML+CSS шаблона с hover-эффектами (scale, glow, opacity transitions). По умолчанию — случайный стиль:
-  - **bold** — яркий: розовая рамка, градиентная CTA-кнопка "Watch Now", "Exclusive Content"
-  - **elegant** — утончённый: золотые акценты, serif шрифт, backdrop-filter blur, diamond-орнамент
+  - **bold** — яркий: розовая рамка, градиентная CTA-кнопка "Watch Me Now", "Exclusive Content"
+  - **elegant** — утончённый: золотые акценты, serif шрифт, diamond-орнамент, нижний градиент
   - **minimalist** — чистый: лёгкий overlay, watermark "TemptGuide", стрелочный CTA
   - **card** — карточка: тёмная нижняя панель (25%) + фото (75%), кнопка play, красный акцент
+- Все шаблоны: CSS filters (contrast, saturate, brightness) для ярких, контрастных изображений; на hover ещё ярче. Минимальные градиенты (только снизу для читаемости)
 - Баннеры используют raw thumbnail (thumbnail_lg_url) вместо статического JPEG, показывают @username
 - **CTR-based selection:** вместо случайного выбора — система выбирает баннер с наивысшим CTR из ClickHouse; при равном CTR — случайный fallback
 - Redis-кеш пулов баннеров (TTL 60s): hot path < 2ms

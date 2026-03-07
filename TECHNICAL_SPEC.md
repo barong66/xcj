@@ -698,11 +698,13 @@ Banner Worker забирает задачу из banner_queue
   8. Ответ: интерактивный HTML с CSS hover-эффектами (scale, glow, opacity transitions)
 
 HTML-шаблоны (banner_templates.go):
-  - bold: pink border + gradient CTA pill "Watch Now" + "Exclusive Content" tagline
-  - elegant: gold accents + serif font + backdrop-filter blur + diamond ornament
+  - bold: pink border + gradient CTA pill "Watch Me Now" + "Exclusive Content" tagline
+  - elegant: gold accents + serif font + diamond ornament + bottom gradient only
   - minimalist: clean overlay + subtle "TemptGuide" watermark + arrow CTA
   - card: dark bottom bar (25%) + photo area (75%) + play button + red accent line
 
+Все шаблоны: CSS filters (contrast 1.15, saturate 1.2, brightness 1.05), на hover ярче.
+Минимальные тёмные градиенты (только снизу для читаемости текста).
 Каждый шаблон включает: mouseenter hover tracking (JS → 1x1 GIF pixel)
 
 Hot path (cache hit): < 2ms

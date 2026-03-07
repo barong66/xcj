@@ -44,12 +44,14 @@ Created `banner_templates.go` with 4 Go `html/template` templates, each with dis
 
 | Style | Visual Identity | Hover Effects |
 |-------|----------------|---------------|
-| **bold** | Pink 3px border, gradient CTA pill "Watch Now", "Exclusive Content" tagline, corner accent triangle | Image scale 1.05x, CTA glow intensifies + scale 1.05x |
-| **elegant** | Gold (#C9A96E) accents, serif font (Georgia), backdrop-filter blur, diamond ornament, gold separator line | Image scale 1.04x, CTA opacity 0.8 -> 1.0 |
-| **minimalist** | Clean bottom overlay, subtle "TemptGuide" watermark top-left, arrow CTA "View Profile ->" | Image scale 1.03x, CTA text brightens |
-| **card** | 75% photo + 25% dark bottom bar (#1A1A2E), play button circle, red accent line, "live" LED dot | Photo scale 1.04x, play button scale 1.08x + glow intensifies |
+| **bold** | Pink 3px border, gradient CTA pill "Watch Me Now", "Exclusive Content" tagline, corner accent triangle | Image scale 1.05x + brightness boost, CTA glow intensifies + scale 1.05x |
+| **elegant** | Gold (#C9A96E) accents, serif font (Georgia), diamond ornament, gold separator line | Image scale 1.04x + brightness boost, CTA opacity 0.8 -> 1.0 |
+| **minimalist** | Clean bottom overlay, subtle "TemptGuide" watermark top-left, arrow CTA "View Profile ->" | Image scale 1.03x + brightness boost, CTA text brightens |
+| **card** | 75% photo + 25% dark bottom bar (#1A1A2E), play button circle, red accent line, "live" LED dot | Photo scale 1.04x + brightness boost, play button scale 1.08x + glow intensifies |
 
 All templates share:
+- CSS image filters: `contrast(1.15) saturate(1.2) brightness(1.05)` for vivid, punchy images; on hover: `contrast(1.2) saturate(1.3) brightness(1.1)`
+- Minimal dark gradients (bottom only, for text readability) — no full-image darkening
 - Responsive `clamp()` font sizing
 - `object-position: center 20%` for face-focused cropping
 - Inline mouseenter JS for hover tracking (1x1 GIF pixel to `/b/{id}/hover`)
