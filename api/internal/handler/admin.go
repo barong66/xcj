@@ -11,7 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -37,28 +37,25 @@ func NewAdminHandler(admin *store.AdminStore, ch *clickhouse.Reader, workerMgr *
 	return &AdminHandler{admin: admin, ch: ch, workerMgr: workerMgr, cache: c, s3: s3}
 }
 
-// AdminAuth is middleware that checks the Bearer token against the ADMIN_TOKEN env var.
-func AdminAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := os.Getenv("ADMIN_TOKEN")
-		if token == "" {
-			token = "xcj-admin-2024"
-		}
+// AdminAuth returns middleware that checks the Bearer token against the provided admin token.
+func AdminAuth(adminToken string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			auth := r.Header.Get("Authorization")
+			if auth == "" {
+				writeError(w, http.StatusUnauthorized, "authorization header required")
+				return
+			}
 
-		auth := r.Header.Get("Authorization")
-		if auth == "" {
-			writeError(w, http.StatusUnauthorized, "authorization header required")
-			return
-		}
+			parts := strings.SplitN(auth, " ", 2)
+			if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" || parts[1] != adminToken {
+				writeError(w, http.StatusUnauthorized, "invalid token")
+				return
+			}
 
-		parts := strings.SplitN(auth, " ", 2)
-		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" || parts[1] != token {
-			writeError(w, http.StatusUnauthorized, "invalid token")
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // ─── Stats ───────────────────────────────────────────────────────────────────
@@ -1096,8 +1093,16 @@ func (h *AdminHandler) RecropBanner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Download source image.
-	resp, err := http.Get(info.SourceImageURL)
+	// Validate source URL — only allow our own media domain.
+	parsedURL, err := url.Parse(info.SourceImageURL)
+	if err != nil || (parsedURL.Host != "media.temptguide.com" && parsedURL.Host != "localhost") {
+		writeError(w, http.StatusBadRequest, "invalid source image URL")
+		return
+	}
+
+	// Download source image with timeout and size limit.
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	resp, err := httpClient.Get(info.SourceImageURL)
 	if err != nil {
 		slog.Error("admin: download source image", "error", err, "url", info.SourceImageURL)
 		writeError(w, http.StatusInternalServerError, "failed to download source image")
@@ -1105,10 +1110,16 @@ func (h *AdminHandler) RecropBanner(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	srcData, err := io.ReadAll(resp.Body)
+	const maxImageSize = 20 << 20 // 20 MB
+	limitedReader := io.LimitReader(resp.Body, maxImageSize+1)
+	srcData, err := io.ReadAll(limitedReader)
 	if err != nil {
 		slog.Error("admin: read source image", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to read source image")
+		return
+	}
+	if len(srcData) > maxImageSize {
+		writeError(w, http.StatusBadRequest, "source image too large (max 20MB)")
 		return
 	}
 
@@ -1120,8 +1131,12 @@ func (h *AdminHandler) RecropBanner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate crop bounds.
+	// Validate image dimensions.
 	bounds := srcImg.Bounds()
+	if bounds.Dx() > 10000 || bounds.Dy() > 10000 {
+		writeError(w, http.StatusBadRequest, "source image too large (max 10000x10000)")
+		return
+	}
 	if input.X < 0 || input.Y < 0 ||
 		input.X+input.Width > bounds.Dx() || input.Y+input.Height > bounds.Dy() {
 		writeError(w, http.StatusBadRequest, "crop area out of bounds")

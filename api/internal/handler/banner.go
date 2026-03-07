@@ -30,11 +30,10 @@ func NewBannerHandler(admin *store.AdminStore, buffer *clickhouse.EventBuffer, c
 	return &BannerHandler{admin: admin, buffer: buffer, chReader: chReader, cache: c, siteBaseURL: siteBaseURL}
 }
 
-// clientIP extracts the real client IP from X-Forwarded-For or RemoteAddr.
+// clientIP extracts the real client IP from X-Real-IP (set by nginx) or RemoteAddr.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.SplitN(xff, ",", 2)
-		return strings.TrimSpace(parts[0])
+	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+		return realIP
 	}
 	return r.RemoteAddr
 }

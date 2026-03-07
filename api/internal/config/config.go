@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -50,9 +52,9 @@ func Load() *Config {
 		EventFlushInterval: durationOrDefault("EVENT_FLUSH_INTERVAL", 1*time.Second),
 
 		RateLimitRPS: intOrDefault("RATE_LIMIT_RPS", 100),
-		CORSOrigins:  []string{"*"},
+		CORSOrigins:  corsOrigins(),
 
-		AdminToken: envOrDefault("ADMIN_TOKEN", "xcj-admin-2024"),
+		AdminToken: requiredEnv("ADMIN_TOKEN"),
 
 		ProjectDir: envOrDefault("PROJECT_DIR", ".."),
 
@@ -65,6 +67,26 @@ func Load() *Config {
 		S3Region:    envOrDefault("S3_REGION", "auto"),
 		S3PublicURL: envOrDefault("S3_PUBLIC_URL", ""),
 	}
+}
+
+func corsOrigins() []string {
+	v := os.Getenv("CORS_ORIGINS")
+	if v == "" {
+		return []string{"https://temptguide.com", "https://www.temptguide.com"}
+	}
+	origins := strings.Split(v, ",")
+	for i := range origins {
+		origins[i] = strings.TrimSpace(origins[i])
+	}
+	return origins
+}
+
+func requiredEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		panic(fmt.Sprintf("required environment variable %s is not set", key))
+	}
+	return v
 }
 
 func envOrDefault(key, fallback string) string {

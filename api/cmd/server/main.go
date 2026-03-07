@@ -125,6 +125,8 @@ func main() {
 		rankingService,
 		cfg.SiteBaseURL,
 		s3,
+		cfg.AdminToken,
+		cfg.CORSOrigins,
 	)
 
 	// Create HTTP server.

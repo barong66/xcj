@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "xcj2024";
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "xcj-admin-2024";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+
+if (!ADMIN_PASSWORD || !ADMIN_TOKEN) {
+  throw new Error(
+    "ADMIN_PASSWORD and ADMIN_TOKEN environment variables are required",
+  );
+}
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -11,16 +17,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid password" }, { status: 401 });
   }
 
-  const response = NextResponse.json({ success: true, token: ADMIN_TOKEN });
+  const response = NextResponse.json({ success: true });
 
   response.cookies.set("admin_token", ADMIN_TOKEN, {
-    httpOnly: false,
+    httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 24 * 7, // 7 days
   });
 
+  // Non-httpOnly flag so frontend can check if user is logged in (no secret).
   response.cookies.set("admin_authed", "1", {
     httpOnly: false,
     secure: process.env.NODE_ENV === "production",
@@ -36,7 +43,7 @@ export async function DELETE() {
   const response = NextResponse.json({ success: true });
 
   response.cookies.set("admin_token", "", {
-    httpOnly: false,
+    httpOnly: true,
     path: "/",
     maxAge: 0,
   });

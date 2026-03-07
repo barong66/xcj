@@ -7,25 +7,18 @@ function getApiUrl(): string {
   return process.env.API_URL || "http://localhost:8080";
 }
 
-function getToken(): string {
-  if (typeof window === "undefined") return "";
-  return document.cookie
-    .split("; ")
-    .find((c) => c.startsWith("admin_token="))
-    ?.split("=")[1] || "";
-}
-
 async function adminFetch<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
-  const token = getToken();
   const url = `${getApiUrl()}/api/v1/admin${path}`;
+  // Token is sent via httpOnly cookie — the Next.js API proxy reads
+  // it server-side and injects the Authorization header to Go API.
   const res = await fetch(url, {
     ...options,
+    credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
       ...options?.headers,
     },
   });
@@ -419,12 +412,11 @@ export async function runFinder(data: {
   platform: string;
 }): Promise<FinderResult> {
   // Finder route lives in Next.js (not Go API), so use relative URL.
-  const token = getToken();
   const res = await fetch("/api/v1/admin/finder", {
     method: "POST",
+    credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(data),
   });

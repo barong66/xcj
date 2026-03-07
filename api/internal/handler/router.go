@@ -32,6 +32,8 @@ func NewRouter(
 	ranker *ranking.Service,
 	siteBaseURL string,
 	s3 *s3client.Client,
+	adminToken string,
+	corsOrigins []string,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -43,7 +45,7 @@ func NewRouter(
 
 	// CORS.
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   corsOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Content-Type", "X-Site-Id", "X-Forwarded-Host", "Authorization"},
 		ExposedHeaders:   []string{"X-Request-Id"},
@@ -62,7 +64,14 @@ func NewRouter(
 
 	// Admin routes — no site detection, protected by bearer token.
 	r.Route("/api/v1/admin", func(r chi.Router) {
-		r.Use(AdminAuth)
+		r.Use(AdminAuth(adminToken))
+		// Limit request body size to 2 MB for admin endpoints.
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+				next.ServeHTTP(w, r)
+			})
+		})
 
 		adminHandler := NewAdminHandler(adminStore, chReader, workerMgr, c, s3)
 		healthHandler := NewHealthHandler(pool, c, eventBuffer, chReader, workerMgr)

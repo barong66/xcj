@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-07 (SEO audit + comprehensive fixes)
+> Last updated: 2026-03-07 (Traffic Explorer in admin stats)
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -30,6 +30,7 @@ xcj/
 │       ├── store/          # Data access layer (PostgreSQL)
 │       ├── model/          # Структуры данных
 │       ├── middleware/     # HTTP middleware
+│       ├── s3/             # S3/R2 client for Go API uploads
 │       ├── cache/          # Redis кеш
 │       └── clickhouse/     # Аналитика (EventBuffer)
 ├── parser/                 # Python парсер + AI категоризатор
@@ -439,6 +440,47 @@ ORDER BY event_date DESC
 - **Sessions** — уникальные сессии
 - **Avg Session Duration** — средняя длительность сессии
 
+### 4.7 Traffic Explorer (динамическая аналитика)
+
+Гибкий аналитический запрос с динамическим GROUP BY из whitelist-защищённых колонок.
+
+**Доступные измерения (allowedDimensions):**
+| Dimension | SQL Expression |
+|-----------|---------------|
+| date | `toString(toDate(created_at))` |
+| source | `source` |
+| referrer | `domain(referrer)` |
+| country | `country` |
+| device_type | `device_type` |
+| os | `os` |
+| browser | `browser` |
+| event_type | `event_type` |
+| utm_source | `utm_source` |
+| utm_medium | `utm_medium` |
+| utm_campaign | `utm_campaign` |
+
+**Метрики:**
+```sql
+count() AS total_events,
+countIf(event_type IN ('feed_impression', 'profile_thumb_impression', 'banner_impression')) AS impressions,
+countIf(event_type IN ('feed_click', 'click', 'profile_thumb_click', 'banner_click')) AS clicks,
+countIf(event_type = 'profile_view') AS profile_views,
+countIf(event_type IN ('social_click', 'content_click')) AS conversions,
+uniq(session_id) AS unique_sessions,
+if(impressions > 0, round(clicks * 100.0 / impressions, 2), 0) AS ctr,
+if(clicks > 0, round(conversions * 100.0 / clicks, 2), 0) AS conversion_rate
+```
+
+**Фильтры:** source, country, device_type, os, browser, event_type, utm_source, utm_medium, utm_campaign, referrer — каждый через whitelist `allowedFilterColumns`.
+
+**Сортировка (allowedTrafficSorts):** total_events, impressions, clicks, profile_views, conversions, unique_sessions, ctr, conversion_rate, dimension1, dimension2.
+
+**SQL injection protection:** Все динамические части SQL (GROUP BY, WHERE фильтры, ORDER BY) строятся исключительно из whitelist-maps. Значения фильтров передаются через параметризованные запросы ClickHouse.
+
+**API endpoints:**
+- `GET /admin/traffic-stats` — параметры: `group_by` (обязательный), `group_by2` (опциональный), `days` (7/30/90), `sort_by`, `sort_dir` (asc/desc), + фильтры как query params (source, country, etc.)
+- `GET /admin/traffic-stats/dimensions?days=N` — возвращает distinct значения для каждого фильтруемого измерения (для dropdown'ов в UI)
+
 ---
 
 ## 5. Go API — Эндпоинты
@@ -494,6 +536,7 @@ ORDER BY event_date DESC
 | GET | /admin/accounts/{id}/banners/summary | Кол-во баннеров по размерам |
 | GET | /admin/accounts/{id}/banners | Список баннеров аккаунта (?size_id=) |
 | POST | /admin/accounts/{id}/banners/generate | Ручной запуск генерации |
+| POST | /admin/banners/{id}/recrop | Ручной re-crop баннера (body: {x, y, width, height} → crop + resize + upload → {image_url}) |
 | DELETE | /admin/banners/{id} | Деактивация баннера (is_active=false) |
 | POST | /admin/banners/batch-deactivate | Массовая деактивация баннеров (body: {ids: [...]}) |
 | POST | /admin/banners/batch-regenerate | Массовая перегенерация баннеров (body: {ids: [...]}) |
@@ -501,6 +544,8 @@ ORDER BY event_date DESC
 | GET | /admin/perf-summary | Сводка производительности баннеров (avg load time, viewability, dwell) за период |
 | GET | /admin/device-breakdown | Разбивка по устройствам/браузерам/ОС за период |
 | GET | /admin/referrer-stats | Топ источников трафика (referrer) за период |
+| GET | /admin/traffic-stats | Traffic Explorer: гибкая аналитика с динамическим GROUP BY (group_by, group_by2, days, sort_by, sort_dir, фильтры) |
+| GET | /admin/traffic-stats/dimensions | Distinct значения для фильтров Traffic Explorer (source, country, device_type, etc.) |
 
 ### 5.3 Публичные баннерные роуты (без авторизации)
 
@@ -823,7 +868,7 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 | /admin/accounts | Управление аккаунтами |
 | /admin/queue | Очередь парсинга |
 | /admin/videos | Управление видео |
-| /admin/stats | Статистика по видео (тумбы + views/clicks/CTR) |
+| /admin/stats | Аналитика: табы Traffic Explorer (default) + Video Stats. Traffic Explorer — гибкая аналитика с group by, фильтрами, 8 метриками |
 | /admin/categories | Категории |
 | /admin/promo | Все баннеры + управление размерами |
 | /admin/accounts/[id] | Профиль аккаунта (табы: Stats (default), Fan Site Links, Promo). Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (iframe), re-grab |
@@ -1021,7 +1066,35 @@ Banner Worker забирает задачу из banner_queue
 → Обновить статус задачи (done/failed)
 ```
 
-### 8.5 Serving баннеров (статический, по ID)
+### 8.5 Ручной re-crop баннера (admin)
+```
+Админ → /admin/accounts/{id} → Promo tab → Crop icon на карточке баннера
+→ Frontend: react-easy-crop modal с aspect-ratio-locked кропом + zoom controls
+→ Пользователь выбирает область кропа → отправляет координаты
+→ POST /api/v1/admin/banners/{id}/recrop (body: {x, y, width, height})
+→ Go API RecropBanner handler:
+  1. Lookup banner по ID → получить source_image_url (frame image_url или video thumbnail_lg_url)
+  2. Скачать source image по URL (http.Get)
+  3. image.Decode → SubImage(crop rect) → resize до banner dimensions (draw.CatmullRom)
+  4. JPEG encode (quality 90)
+  5. Upload в R2 через S3 client (api/internal/s3/client.go): banners/{account_id}/{video_id}_{w}x{h}.jpg
+  6. UPDATE banners SET image_url = new_url WHERE id = {id}
+  7. Response: { image_url: "https://media.temptguide.com/banners/..." }
+→ Frontend обновляет карточку баннера с новым URL
+```
+
+**S3 client (api/internal/s3/client.go):**
+- Использует `aws-sdk-go-v2` для загрузки файлов в R2 (S3-совместимый API)
+- Инициализируется из ENV: S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_PUBLIC_URL
+- Метод `Upload(ctx, key, body, contentType)` → public URL
+- Используется RecropBanner handler для загрузки перекропленных баннеров
+
+**Source image resolution:**
+- Если `video_frame_id IS NOT NULL` → source = `video_frames.image_url` (extracted frame)
+- Если `video_frame_id IS NULL` → source = `videos.thumbnail_lg_url` (original thumbnail)
+- Поле `source_image_url` добавлено в `AdminBanner` модель и API ответ
+
+### 8.6 Serving баннеров (статический, по ID)
 ```
 Рекламная сеть показывает IMG → GET /b/{id}
 → Go API: lookup banner по ID
@@ -1034,7 +1107,7 @@ Banner Worker забирает задачу из banner_queue
 → 302 redirect на SITE_BASE_URL/model/{slug}
 ```
 
-### 8.6 Динамический сервинг баннеров (iframe embed)
+### 8.7 Динамический сервинг баннеров (iframe embed)
 ```
 Внешний сайт: <iframe src="temptguide.com/b/serve?size=300x250&cat=xxx&style=bold">
 → Next.js rewrite /b/* → Go API (http://api:8080)
@@ -1066,7 +1139,7 @@ Cold path (cache miss): ~20ms (SQL + Redis SET), раз в 60 сек на клю
 Пустой пул → пустая HTML-страница (graceful degradation)
 ```
 
-### 8.7 Контекстный таргетинг (loader.js)
+### 8.8 Контекстный таргетинг (loader.js)
 ```
 Сайт издателя: <script async src="api.temptguide.com/b/loader.js" data-size="300x250" data-style="bold">
 → GET /b/loader.js (24h кеш) → JS ~1.5KB
@@ -1079,7 +1152,7 @@ Cold path (cache miss): ~20ms (SQL + Redis SET), раз в 60 сек на клю
 → Дальше стандартный flow /b/serve (см. 8.6)
 ```
 
-### 8.8 Banner Performance Metrics Collection
+### 8.9 Banner Performance Metrics Collection
 ```
 Баннер загружается в iframe на стороннем сайте:
 → loader.js собирает клиентский контекст: screen, viewport, language, connection, UTM, referrer, page URL
@@ -1105,7 +1178,7 @@ Performance beacon (при уходе со страницы):
 → GET /admin/referrer-stats → top referrers
 ```
 
-### 8.9 Мульти-сайт
+### 8.10 Мульти-сайт
 ```
 Request Host: custom-domain.com
 → SiteDetection middleware → SELECT FROM sites WHERE domain = 'custom-domain.com'
@@ -1131,6 +1204,12 @@ EVENT_BUFFER_SIZE=1000
 EVENT_FLUSH_INTERVAL=1s
 RATE_LIMIT_RPS=100
 SITE_BASE_URL=https://temptguide.com    # Абсолютный URL для баннерных redirect'ов (пусто → relative path)
+S3_ENDPOINT=https://...                  # R2 endpoint (для Go API re-crop upload)
+S3_BUCKET=xcj-media                      # R2 bucket name
+S3_ACCESS_KEY=...                        # R2 access key
+S3_SECRET_KEY=...                        # R2 secret key
+S3_REGION=auto                           # R2 region
+S3_PUBLIC_URL=https://media.temptguide.com  # Public CDN URL prefix
 ```
 
 ### Python Parser

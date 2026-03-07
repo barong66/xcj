@@ -728,12 +728,12 @@ function AccountProfileContent() {
                     selectedBannerIds.has(b.id) ? "border-accent" : "border-[#1e1e1e]"
                   }`}
                 >
-                  <div className="bg-[#0a0a0a] p-2 relative">
+                  <div className="relative group">
                     <input
                       type="checkbox"
                       checked={selectedBannerIds.has(b.id)}
                       onChange={() => toggleBannerSelection(b.id)}
-                      className="absolute top-3 left-3 accent-accent w-3.5 h-3.5 z-10 cursor-pointer"
+                      className="absolute top-2 left-2 accent-accent w-4 h-4 z-20 cursor-pointer"
                     />
                     {bannerStyle === "static" ? (
                       <img
@@ -742,6 +742,7 @@ function AccountProfileContent() {
                         width={b.width}
                         height={b.height}
                         style={{ width: b.width, height: b.height }}
+                        className="block"
                       />
                     ) : (
                       <iframe
@@ -753,56 +754,59 @@ function AccountProfileContent() {
                         title={`Banner ${b.id} preview`}
                       />
                     )}
+                    {/* Overlay actions — visible on hover */}
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-all z-10 flex items-center justify-center gap-3 opacity-0 group-hover:opacity-100">
+                      <button
+                        onClick={() => handleCopyUrl(b.image_url)}
+                        className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/40 transition-colors"
+                        title="Copy URL"
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => openCropModal(b)}
+                        className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/40 transition-colors"
+                        title="Re-crop"
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M6 2v14a2 2 0 0 0 2 2h14" />
+                          <path d="M18 22V8a2 2 0 0 0-2-2H2" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => handleRegenerateBanner(b.id)}
+                        className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/40 transition-colors"
+                        title="Re-grab"
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="23 4 23 10 17 10" />
+                          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => handleDeactivateBanner(b.id)}
+                        className="w-10 h-10 rounded-full bg-red-500/30 backdrop-blur-sm flex items-center justify-center text-white hover:bg-red-500/50 transition-colors"
+                        title="Delete"
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                   <div className="p-3" style={{ width: Math.max(b.width + 16, 200) }}>
                     <div className="text-xs text-white truncate mb-1">
                       {b.video_title || `Video #${b.video_id}`}
                     </div>
-                    <div className="text-[10px] text-[#6b6b6b] mb-1.5">
+                    <div className="text-[10px] text-[#6b6b6b] mb-0.5">
                       Imprs: {b.impressions || 0} &nbsp;|&nbsp; Clicks: {b.clicks || 0} &nbsp;|&nbsp; CTR: {b.ctr || 0}%
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-[#6b6b6b]">
-                        {b.width}x{b.height}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleCopyUrl(b.image_url)}
-                          className="text-[10px] text-[#6b6b6b] hover:text-accent transition-colors"
-                        >
-                          Copy URL
-                        </button>
-                        <button
-                          onClick={() => openCropModal(b)}
-                          className="text-[10px] text-[#6b6b6b] hover:text-accent transition-colors"
-                          title="Re-crop banner"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M6 2v14a2 2 0 0 0 2 2h14" />
-                            <path d="M18 22V8a2 2 0 0 0-2-2H2" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => handleRegenerateBanner(b.id)}
-                          className="text-[10px] text-[#6b6b6b] hover:text-accent transition-colors"
-                          title="Re-grab banner"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="23 4 23 10 17 10" />
-                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => handleDeactivateBanner(b.id)}
-                          className="text-[10px] text-[#6b6b6b] hover:text-red-400 transition-colors"
-                          title="Deactivate banner"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                          </svg>
-                        </button>
-                      </div>
+                    <div className="text-[10px] text-[#6b6b6b]">
+                      {b.width}x{b.height}
                     </div>
                   </div>
                 </div>

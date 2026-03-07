@@ -41,15 +41,13 @@ func TestParseBannerSize(t *testing.T) {
 func TestClientIP(t *testing.T) {
 	tests := []struct {
 		name       string
-		xff        string
+		realIP     string
 		remoteAddr string
 		want       string
 	}{
-		{"xff single IP", "1.2.3.4", "5.6.7.8:1234", "1.2.3.4"},
-		{"xff multiple IPs", "1.2.3.4, 10.0.0.1, 192.168.1.1", "5.6.7.8:1234", "1.2.3.4"},
-		{"xff with spaces", "  1.2.3.4  , 10.0.0.1", "5.6.7.8:1234", "1.2.3.4"},
-		{"no xff", "", "5.6.7.8:1234", "5.6.7.8:1234"},
-		{"empty xff", "", "127.0.0.1:80", "127.0.0.1:80"},
+		{"x-real-ip set", "1.2.3.4", "5.6.7.8:1234", "1.2.3.4"},
+		{"no x-real-ip", "", "5.6.7.8:1234", "5.6.7.8:1234"},
+		{"empty x-real-ip", "", "127.0.0.1:80", "127.0.0.1:80"},
 	}
 
 	for _, tt := range tests {
@@ -58,8 +56,8 @@ func TestClientIP(t *testing.T) {
 				Header:     http.Header{},
 				RemoteAddr: tt.remoteAddr,
 			}
-			if tt.xff != "" {
-				r.Header.Set("X-Forwarded-For", tt.xff)
+			if tt.realIP != "" {
+				r.Header.Set("X-Real-IP", tt.realIP)
 			}
 			got := clientIP(r)
 			if got != tt.want {

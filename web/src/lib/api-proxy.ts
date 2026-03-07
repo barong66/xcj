@@ -16,8 +16,14 @@ export async function proxyToGoApi(
   const targetUrl = `${GO_API_URL}${path}${search}`;
 
   const headers: Record<string, string> = {};
+  // Prefer httpOnly cookie token over Authorization header.
+  const cookieToken = req.cookies.get("admin_token")?.value;
   const auth = req.headers.get("authorization");
-  if (auth) headers["Authorization"] = auth;
+  if (cookieToken) {
+    headers["Authorization"] = `Bearer ${cookieToken}`;
+  } else if (auth) {
+    headers["Authorization"] = auth;
+  }
   const ct = req.headers.get("content-type");
   if (ct) headers["Content-Type"] = ct;
   // Forward original Host so Go API can detect the site.

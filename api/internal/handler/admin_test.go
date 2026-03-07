@@ -57,13 +57,11 @@ func TestHandlePerfBeacon_NoBannerID(t *testing.T) {
 }
 
 func TestAdminAuth(t *testing.T) {
-	// Set up a known admin token.
-	t.Setenv("ADMIN_TOKEN", "test-secret-123")
-
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := AdminAuth(inner)
+	middleware := AdminAuth("test-secret-123")
+	handler := middleware(inner)
 
 	tests := []struct {
 		name       string
@@ -91,24 +89,6 @@ func TestAdminAuth(t *testing.T) {
 				t.Errorf("status = %d, want %d", rr.Code, tt.wantStatus)
 			}
 		})
-	}
-}
-
-func TestAdminAuth_DefaultToken(t *testing.T) {
-	// When ADMIN_TOKEN is not set, it falls back to default.
-	t.Setenv("ADMIN_TOKEN", "")
-
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	handler := AdminAuth(inner)
-
-	req := httptest.NewRequest(http.MethodGet, "/admin/test", nil)
-	req.Header.Set("Authorization", "Bearer xcj-admin-2024")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("default token: status = %d, want %d", rr.Code, http.StatusOK)
 	}
 }
 

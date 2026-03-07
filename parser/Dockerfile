@@ -14,10 +14,14 @@ RUN apt-get update && \
         fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 
+RUN groupadd -r app && useradd -r -g app app
+
 WORKDIR /app
 
 # Copy source code and install
 COPY . .
 RUN pip install --no-cache-dir .
+
+USER app
 
 ENTRYPOINT ["python", "-m", "parser"]

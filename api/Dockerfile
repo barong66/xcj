@@ -17,11 +17,14 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 # ── Stage 2: Runtime ─────────────────────────────────────────
 FROM alpine:3.19
 
-RUN apk add --no-cache ca-certificates wget tzdata
+RUN apk add --no-cache ca-certificates wget tzdata && \
+    addgroup -S app && adduser -S app -G app
 
 WORKDIR /app
 
 COPY --from=builder /build/server /app/server
+
+USER app
 
 EXPOSE 8080
 

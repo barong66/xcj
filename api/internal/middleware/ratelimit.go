@@ -79,10 +79,10 @@ func (rl *RateLimiter) allow(ip string) bool {
 // Middleware returns an HTTP middleware that rate limits requests by IP.
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Use X-Real-IP set by nginx (trusted proxy), fall back to RemoteAddr.
 		ip := r.RemoteAddr
-		// Use X-Forwarded-For if available.
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			ip = xff
+		if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+			ip = realIP
 		}
 
 		if !rl.allow(ip) {

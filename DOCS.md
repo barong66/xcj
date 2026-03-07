@@ -1,6 +1,6 @@
 # xxxaccounter — Документация
 
-> Последнее обновление: 2026-03-07 (SEO audit + comprehensive fixes)
+> Последнее обновление: 2026-03-07 (Traffic Explorer in admin stats)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
 ---
@@ -108,6 +108,27 @@
 
 Данные берутся из ClickHouse (таблица `events`), новых миграций не требуется.
 
+### 4.2 Traffic Explorer
+
+Гибкий аналитический инструмент на странице `/admin/stats` (вкладка **Traffic Explorer**, открывается по умолчанию). Позволяет анализировать весь трафик по любым измерениям.
+
+**Возможности:**
+- **Группировка** по 11 измерениям: дата, источник, реферер, страна, устройство, ОС, браузер, тип события, utm_source, utm_medium, utm_campaign
+- **Вторичная группировка** — например, дата + источник, страна + устройство
+- **Фильтры** — динамические dropdown'ы с реальными значениями из ClickHouse
+- **Период** — переключатель 7 / 30 / 90 дней
+- **8 метрик** — события, показы, клики, просмотры профилей, конверсии, сессии, CTR, Conversion Rate
+- **Сортировка** — по любой метрике или измерению (asc/desc)
+- **Summary cards** — итоговые значения за выбранный период
+
+**Безопасность:** Динамический SQL строится исключительно из whitelist-maps (allowedDimensions, allowedFilterColumns, allowedTrafficSorts). Значения фильтров передаются через параметризованные запросы ClickHouse. SQL injection невозможна.
+
+**API endpoints:**
+- `GET /api/v1/admin/traffic-stats` — основной запрос с параметрами group_by, group_by2, days, sort_by, sort_dir, + фильтры
+- `GET /api/v1/admin/traffic-stats/dimensions?days=N` — distinct значения для dropdown'ов
+
+**UI:** Вторая вкладка "Video Stats" сохраняет прежнюю функциональность — тумбы видео с показами, кликами, CTR.
+
 ### 5. Баннерная система (Promo)
 
 Для платных моделей (is_paid=true) автоматически генерируются рекламные баннеры из тумб видео. Баннеры используются для закупки трафика через внешние рекламные сети (ExoClick, TrafficStars и др.).
@@ -194,8 +215,16 @@
 - Позволяет админу сравнить, как баннер выглядит в разных стилях перед выбором стиля для embed-кода
 
 **Re-grab (перегенерация):**
-- Кнопка re-grab на каждой карточке баннера — перезапускает генерацию конкретного баннера (re-crop + re-upload)
+- Кнопка re-grab на каждой карточке баннера -- перезапускает генерацию конкретного баннера (re-crop + re-upload)
 - Массовый re-grab через batch regenerate для выбранных баннеров
+
+**Re-crop (ручной кроп):**
+- Кнопка crop на карточке баннера открывает модальное окно с визуальным кропом
+- Используется react-easy-crop: drag & zoom для выбора области, aspect ratio заблокирован под размер баннера
+- Координаты кропа (x, y, width, height в пикселях source-изображения) отправляются на сервер
+- Go API скачивает source-изображение (frame или thumbnail), кропит, ресайзит до размеров баннера, загружает в R2
+- Source-изображение определяется автоматически: из video_frames (если баннер из extracted frame) или из videos.thumbnail_lg_url (если из thumbnail)
+- Новый endpoint: `POST /api/v1/admin/banners/{id}/recrop`
 
 **Управление:**
 - Вкладка "Promo" на странице аккаунта — все баннеры без пагинации, mass selection (Select All), style preview, re-grab, batch deactivate/regenerate
@@ -280,9 +309,9 @@
 
 Веб-панель для управления платформой:
 - **Dashboard** -- общая статистика (видео, аккаунты, очередь парсинга)
-- **Accounts** -- добавлять/удалять источники контента, запускать парсинг, фильтр по оплате (paid/free), включение/отключение промоушена. Страница аккаунта: табы Stats (по умолчанию), Fan Site Links, Promo. Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (Static JPEG / Bold / Elegant / Minimalist / Card), re-grab. Удаление аккаунта -- **необратимое** (hard DELETE, каскадно удаляет все видео, баннеры, записи очередей)
+- **Accounts** -- добавлять/удалять источники контента, запускать парсинг, фильтр по оплате (paid/free), включение/отключение промоушена. Страница аккаунта: табы Stats (по умолчанию), Fan Site Links, Promo. Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (Static JPEG / Bold / Elegant / Minimalist / Card), re-grab, re-crop (ручной кроп через визуальный редактор). Удаление аккаунта -- **необратимое** (hard DELETE, каскадно удаляет все видео, баннеры, записи очередей)
 - **Videos** -- просматривать, удалять, пере-категоризировать видео
-- **Stats** — аналитика сайта: тумбы с показами, кликами, CTR
+- **Stats** — аналитика сайта с двумя вкладками: **Traffic Explorer** (по умолчанию) и **Video Stats** (тумбы с показами, кликами, CTR)
 - **Queue** — статус очереди парсинга (pending/running/done/failed)
 - **Promo** — все баннеры по всем paid-аккаунтам, управление размерами баннеров, embed-код для внешних сайтов. Четыре вкладки: Баннеры (список с hovers + source breakdown + embed-код через loader.js `<script>` тег с выбором стиля), Настройки (conversion tracker + ad sources), Статистика (воронка по источникам), Performance (overview cards, device breakdown, top referrers)
 - **Ad Sources** — управление рекламными сетями (name, postback URL шаблон, active/inactive)
@@ -333,7 +362,8 @@
 - Middleware: определение сайта по домену, rate limiting, CORS, логирование
 - Буфер аналитических событий → batch insert в ClickHouse
 - Динамический сервинг баннеров (`/b/serve`) с Redis-кешем пулов и ротацией
-- Embed-скрипт для контекстного таргетинга (`/b/loader.js`) — извлекает ключевые слова со страницы издателя
+- Embed-скрипт для контекстного таргетинга (`/b/loader.js`) -- извлекает ключевые слова со страницы издателя
+- S3/R2 client (`api/internal/s3/client.go`) -- загрузка файлов из Go API (используется для re-crop баннеров)
 
 ### Python Parser
 - Парсит Twitter (через yt-dlp) и Instagram (через API)

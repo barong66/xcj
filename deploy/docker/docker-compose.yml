@@ -43,7 +43,7 @@ services:
 
   # ── ClickHouse ──────────────────────────────────────────────
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:24.3-alpine
     container_name: traforama-clickhouse
     restart: unless-stopped
     ports:
@@ -83,7 +83,7 @@ services:
       EVENT_BUFFER_SIZE: "${EVENT_BUFFER_SIZE:-1000}"
       EVENT_FLUSH_INTERVAL: "${EVENT_FLUSH_INTERVAL:-1s}"
       RATE_LIMIT_RPS: "${RATE_LIMIT_RPS:-100}"
-      ADMIN_TOKEN: "${ADMIN_TOKEN:-xcj-admin-2024}"
+      ADMIN_TOKEN: "${ADMIN_TOKEN}"
       SITE_BASE_URL: "${SITE_BASE_URL:-}"
       S3_ENDPOINT: "${S3_ENDPOINT:-}"
       S3_BUCKET: "${S3_BUCKET:-}"
@@ -151,8 +151,8 @@ services:
     environment:
       API_URL: "http://api:8080"
       NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:8080}"
-      ADMIN_TOKEN: "${ADMIN_TOKEN:-xcj-admin-2024}"
-      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-xcj2024}"
+      ADMIN_TOKEN: "${ADMIN_TOKEN}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD}"
     depends_on:
       api:
         condition: service_healthy
