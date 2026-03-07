@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -325,7 +326,8 @@ func (s *VideoStore) loadAccounts(ctx context.Context, videos []model.Video) err
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, platform, username, COALESCE(slug,''), COALESCE(display_name,''), COALESCE(avatar_url,''), is_paid, created_at
+		SELECT id, platform, username, COALESCE(slug,''), COALESCE(display_name,''), COALESCE(avatar_url,''),
+			COALESCE(social_links, '{}')::text::bytea, is_paid, created_at
 		FROM accounts WHERE id = ANY($1)
 	`, accountIDs)
 	if err != nil {
@@ -336,8 +338,12 @@ func (s *VideoStore) loadAccounts(ctx context.Context, videos []model.Video) err
 	accountMap := make(map[int64]*model.Account)
 	for rows.Next() {
 		var a model.Account
-		if err := rows.Scan(&a.ID, &a.Platform, &a.Username, &a.Slug, &a.DisplayName, &a.AvatarURL, &a.IsPaid, &a.CreatedAt); err != nil {
+		var socialLinksJSON []byte
+		if err := rows.Scan(&a.ID, &a.Platform, &a.Username, &a.Slug, &a.DisplayName, &a.AvatarURL, &socialLinksJSON, &a.IsPaid, &a.CreatedAt); err != nil {
 			return fmt.Errorf("video_store: scan account: %w", err)
+		}
+		if len(socialLinksJSON) > 0 {
+			_ = json.Unmarshal(socialLinksJSON, &a.SocialLinks)
 		}
 		accountMap[a.ID] = &a
 	}
@@ -356,18 +362,23 @@ func (s *VideoStore) loadAccounts(ctx context.Context, videos []model.Video) err
 
 func (s *VideoStore) loadAccount(ctx context.Context, accountID int64) (*model.Account, error) {
 	var a model.Account
+	var socialLinksJSON []byte
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, platform, username, COALESCE(slug,''), COALESCE(display_name,''), COALESCE(avatar_url,''), is_paid, created_at
+		SELECT id, platform, username, COALESCE(slug,''), COALESCE(display_name,''), COALESCE(avatar_url,''),
+			COALESCE(social_links, '{}')::text::bytea, is_paid, created_at
 		FROM accounts WHERE id = $1
 	`, accountID).Scan(
 		&a.ID, &a.Platform, &a.Username, &a.Slug, &a.DisplayName,
-		&a.AvatarURL, &a.IsPaid, &a.CreatedAt,
+		&a.AvatarURL, &socialLinksJSON, &a.IsPaid, &a.CreatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("video_store: load account: %w", err)
+	}
+	if len(socialLinksJSON) > 0 {
+		_ = json.Unmarshal(socialLinksJSON, &a.SocialLinks)
 	}
 	return &a, nil
 }

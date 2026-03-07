@@ -11,6 +11,7 @@ import { BreadcrumbJsonLd, ProfileJsonLd } from "@/components/JsonLd";
 import { ErrorState } from "@/components/ErrorState";
 import { SimilarModels } from "./SimilarModels";
 import { AdLandingTracker } from "@/components/AdLandingTracker";
+import { OnlyFansHeaderSetter } from "@/contexts/OnlyFansContext";
 
 interface ModelPageProps {
   params: Promise<{ slug: string }>;
@@ -67,6 +68,11 @@ export default async function ModelPage({
     const videos = account.videos || [];
     const showSocialButtons = account.site_config?.show_social_buttons !== false;
 
+    const ofRaw = account.social_links?.onlyfans;
+    const onlyfansUrl = ofRaw
+      ? ofRaw.startsWith("http") ? ofRaw : `https://onlyfans.com/${ofRaw}`
+      : null;
+
     // For free accounts, fetch similar models from the same category.
     let similarVideos: import("@/types").Video[] = [];
     if (!account.is_paid && videos.length > 0) {
@@ -99,6 +105,7 @@ export default async function ModelPage({
         />
         <ProfileJsonLd account={account} />
         <ProfileViewTracker accountId={account.id} />
+        <OnlyFansHeaderSetter url={onlyfansUrl} username={account.username} />
         {sp.src && <AdLandingTracker source={sp.src} clickId={sp.click_id} />}
 
         <ProfileHeader account={account} />

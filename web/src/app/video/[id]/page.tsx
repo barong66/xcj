@@ -10,6 +10,7 @@ import { PlatformIcon } from "@/components/PlatformIcon";
 import { ViewTracker } from "@/components/ViewTracker";
 import { VideoClickButton } from "./VideoClickButton";
 import { ErrorState } from "@/components/ErrorState";
+import { OnlyFansHeaderSetter } from "@/contexts/OnlyFansContext";
 
 interface VideoPageProps {
   params: Promise<{ id: string }>;
@@ -84,6 +85,11 @@ export default async function VideoPage({ params }: VideoPageProps) {
 
   const platformLabel = video.platform === "twitter" ? "Twitter/X" : "Instagram";
 
+  const ofRaw = video.account?.social_links?.onlyfans;
+  const onlyfansUrl = ofRaw
+    ? ofRaw.startsWith("http") ? ofRaw : `https://onlyfans.com/${ofRaw}`
+    : null;
+
   // Fetch related videos (from same category if available)
   let relatedVideos;
   try {
@@ -116,6 +122,7 @@ export default async function VideoPage({ params }: VideoPageProps) {
         ]}
       />
       <ViewTracker videoId={video.id} />
+      <OnlyFansHeaderSetter url={onlyfansUrl} username={video.account?.username} />
 
       {/* Post header */}
       <div className="flex items-center gap-3 px-4 py-2.5">
