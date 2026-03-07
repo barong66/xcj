@@ -15,39 +15,15 @@ export function Header() {
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
-  const isProfile = !!displayName;
-
   return (
-    <header className="sticky top-0 z-50 bg-bg/95 backdrop-blur-md border-b border-border">
+    <header className="sticky top-0 z-50 bg-bg/95 backdrop-blur-md">
+      {/* Main header row */}
       <div className="max-w-[430px] mx-auto flex items-center justify-between h-11 px-4">
-        {isProfile ? (
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-full overflow-hidden bg-bg-elevated shrink-0">
-              {avatarUrl ? (
-                <Image
-                  src={avatarUrl}
-                  alt={displayName}
-                  width={28}
-                  height={28}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-txt-muted text-xs font-bold">
-                  {displayName.charAt(0).toUpperCase()}
-                </div>
-              )}
-            </div>
-            <span className="text-[15px] font-semibold text-txt truncate">
-              {displayName}
-            </span>
-          </div>
-        ) : (
-          <Link href="/" className="flex items-center">
-            <span className="text-[22px] font-bold text-txt italic tracking-tight">
-              {SITE_NAME}
-            </span>
-          </Link>
-        )}
+        <Link href="/" className="flex items-center">
+          <span className="text-[22px] font-bold text-txt italic tracking-tight">
+            {SITE_NAME}
+          </span>
+        </Link>
 
         {url && (
           <button
@@ -61,6 +37,34 @@ export function Header() {
           </button>
         )}
       </div>
+
+      {/* Profile sub-bar: avatar + model name */}
+      {displayName && (
+        <div className="border-t border-border">
+          <div className="max-w-[430px] mx-auto flex items-center gap-2 h-9 px-4">
+            <div className="w-6 h-6 rounded-full overflow-hidden bg-bg-elevated shrink-0">
+              {avatarUrl ? (
+                <Image
+                  src={avatarUrl}
+                  alt={displayName}
+                  width={24}
+                  height={24}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-txt-muted text-[10px] font-bold">
+                  {displayName.charAt(0).toUpperCase()}
+                </div>
+              )}
+            </div>
+            <span className="text-[13px] font-semibold text-txt truncate">
+              {displayName}
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="border-b border-border" />
     </header>
   );
 }
