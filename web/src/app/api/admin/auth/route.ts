@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-
-if (!ADMIN_PASSWORD || !ADMIN_TOKEN) {
-  throw new Error(
-    "ADMIN_PASSWORD and ADMIN_TOKEN environment variables are required",
-  );
+function requireEnv(key: string): string {
+  const val = process.env[key];
+  if (!val) throw new Error(`${key} environment variable is required`);
+  return val;
 }
+
+const ADMIN_PASSWORD = requireEnv("ADMIN_PASSWORD");
+const ADMIN_TOKEN = requireEnv("ADMIN_TOKEN");
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
