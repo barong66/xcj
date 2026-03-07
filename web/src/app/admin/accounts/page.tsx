@@ -9,8 +9,17 @@ import {
   deleteAdminAccount,
   reparseAccount,
   reparseAllAccounts,
+  runFinder,
+  bulkCreateAccounts,
 } from "@/lib/admin-api";
-import type { AdminAccount, AdminAccountList } from "@/lib/admin-api";
+import type {
+  AdminAccount,
+  AdminAccountList,
+  FinderAccount,
+  FinderResult,
+  BulkCreateAccountResult,
+  BulkCreateResult,
+} from "@/lib/admin-api";
 import { ToastProvider, useToast } from "../Toast";
 
 function AccountsContent() {
@@ -22,6 +31,7 @@ function AccountsContent() {
   const [paid, setPaid] = useState("");
   const [page, setPage] = useState(1);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
   const { toast } = useToast();
 
   const loadAccounts = useCallback(async () => {
@@ -100,6 +110,12 @@ function AccountsContent() {
             className="px-3 py-2 text-sm rounded-lg bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525] transition-colors"
           >
             Reparse All
+          </button>
+          <button
+            onClick={() => setShowBulkModal(true)}
+            className="px-3 py-2 text-sm rounded-lg bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525] transition-colors"
+          >
+            Bulk Import
           </button>
           <button
             onClick={() => setShowAddModal(true)}
@@ -221,6 +237,14 @@ function AccountsContent() {
         <AddAccountModal
           onClose={() => setShowAddModal(false)}
           onCreated={handleAccountCreated}
+        />
+      )}
+
+      {/* Bulk Import Modal */}
+      {showBulkModal && (
+        <BulkImportModal
+          onClose={() => setShowBulkModal(false)}
+          onDone={() => { setShowBulkModal(false); loadAccounts(); }}
         />
       )}
     </div>
@@ -457,6 +481,320 @@ function AddAccountModal({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Bulk Import Modal ────────────────────────────────────────────────────────
+
+type BulkTab = "twitter" | "instagram";
+
+function parseUsernames(raw: string): string[] {
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      line = line
+        .replace(/^https?:\/\/(www\.)?instagram\.com\//, "")
+        .replace(/\/$/, "")
+        .replace(/\?.*$/, "");
+      line = line.replace(/^@/, "");
+      return line.trim();
+    })
+    .filter(Boolean)
+    .filter((v, i, arr) => arr.findIndex((x) => x.toLowerCase() === v.toLowerCase()) === i);
+}
+
+function Spinner({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={`animate-spin ${className}`} viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  );
+}
+
+function formatNumber(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
+
+function BulkImportModal({
+  onClose,
+  onDone,
+}: {
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [tab, setTab] = useState<BulkTab>("instagram");
+  const { toast } = useToast();
+
+  // Twitter state
+  const [keyword, setKeyword] = useState("");
+  const [count, setCount] = useState(5);
+  const [twitterLoading, setTwitterLoading] = useState(false);
+  const [twitterResult, setTwitterResult] = useState<FinderResult | null>(null);
+
+  // Instagram state
+  const [text, setText] = useState("");
+  const [igLoading, setIgLoading] = useState(false);
+  const [igResult, setIgResult] = useState<BulkCreateResult | null>(null);
+
+  const usernames = parseUsernames(text);
+
+  const handleTwitterSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!keyword.trim() || twitterLoading) return;
+    setTwitterLoading(true);
+    setTwitterResult(null);
+    try {
+      const data = await runFinder({ keyword: keyword.trim(), count, platform: "twitter" });
+      setTwitterResult(data);
+      const created = data.accounts.filter((a) => a.status === "created").length;
+      const existing = data.accounts.filter((a) => a.status === "existing").length;
+      const errors = data.accounts.filter((a) => a.status === "error").length;
+      let msg = `Found ${data.accounts_found} accounts.`;
+      if (created > 0) msg += ` ${created} new created.`;
+      if (existing > 0) msg += ` ${existing} already existed.`;
+      if (errors > 0) msg += ` ${errors} failed.`;
+      toast(msg, errors > 0 ? "info" : "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Search failed", "error");
+    } finally {
+      setTwitterLoading(false);
+    }
+  };
+
+  const handleIgImport = async () => {
+    if (usernames.length === 0 || igLoading) return;
+    setIgLoading(true);
+    setIgResult(null);
+    try {
+      const data = await bulkCreateAccounts({ platform: "instagram", usernames });
+      setIgResult(data);
+      let msg = `${data.total} accounts processed.`;
+      if (data.created > 0) msg += ` ${data.created} created.`;
+      if (data.existing > 0) msg += ` ${data.existing} already existed.`;
+      if (data.errors > 0) msg += ` ${data.errors} failed.`;
+      toast(msg, data.errors > 0 ? "info" : "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Import failed", "error");
+    } finally {
+      setIgLoading(false);
+    }
+  };
+
+  const isLoading = twitterLoading || igLoading;
+  const hasResults = twitterResult || igResult;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="bg-[#141414] border border-[#2a2a2a] rounded-lg w-full max-w-2xl max-h-[85vh] flex flex-col">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-[#1e1e1e] flex items-center justify-between shrink-0">
+          <h2 className="text-base font-semibold text-white">Bulk Import</h2>
+          <button onClick={onClose} className="text-[#6b6b6b] hover:text-white transition-colors">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex items-center gap-1 px-5 border-b border-[#1e1e1e] shrink-0">
+          <button
+            onClick={() => setTab("instagram")}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors relative ${
+              tab === "instagram" ? "text-accent" : "text-[#6b6b6b] hover:text-[#a0a0a0]"
+            }`}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+              <circle cx="12" cy="12" r="5" />
+              <circle cx="17.5" cy="6.5" r="1.5" fill="currentColor" stroke="none" />
+            </svg>
+            Instagram
+            {tab === "instagram" && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent rounded-full" />}
+          </button>
+          <button
+            onClick={() => setTab("twitter")}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors relative ${
+              tab === "twitter" ? "text-accent" : "text-[#6b6b6b] hover:text-[#a0a0a0]"
+            }`}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+            </svg>
+            Twitter
+            {tab === "twitter" && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent rounded-full" />}
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-5 overflow-y-auto flex-1">
+          {tab === "instagram" && (
+            <div>
+              <label className="block text-sm font-medium text-[#a0a0a0] mb-2">
+                Enter Instagram usernames (one per line)
+              </label>
+              <textarea
+                value={text}
+                onChange={(e) => { setText(e.target.value); setIgResult(null); }}
+                placeholder={"username1\n@username2\nhttps://instagram.com/username3"}
+                rows={6}
+                autoFocus
+                className="w-full px-3 py-2.5 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white placeholder-[#6b6b6b] focus:outline-none focus:border-accent font-mono resize-y min-h-[120px]"
+              />
+              <div className="flex items-center justify-between mt-3">
+                <span className="text-sm text-[#6b6b6b]">
+                  {usernames.length > 0 ? (
+                    <><span className="text-white font-medium">{usernames.length}</span> {usernames.length === 1 ? "account" : "accounts"}</>
+                  ) : "No accounts entered"}
+                </span>
+                <button
+                  onClick={handleIgImport}
+                  disabled={igLoading || usernames.length === 0}
+                  className="px-5 py-2 text-sm rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                >
+                  {igLoading ? <><Spinner />Processing...</> : "Import"}
+                </button>
+              </div>
+
+              {/* IG Results */}
+              {igResult && !igLoading && (
+                <div className="mt-4">
+                  <div className="flex items-center gap-2 mb-2 text-xs">
+                    {igResult.created > 0 && <span className="px-2 py-0.5 rounded bg-green-500/10 text-green-400">{igResult.created} created</span>}
+                    {igResult.existing > 0 && <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400">{igResult.existing} existing</span>}
+                    {igResult.errors > 0 && <span className="px-2 py-0.5 rounded bg-red-500/10 text-red-400">{igResult.errors} errors</span>}
+                  </div>
+                  <div className="bg-[#1a1a1a] rounded-lg border border-[#2a2a2a] overflow-hidden max-h-48 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {igResult.accounts.map((a, i) => (
+                          <tr key={i} className="border-b border-[#2a2a2a] last:border-0">
+                            <td className="px-3 py-2 text-white">@{a.username}</td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                a.status === "created" ? "bg-green-500/10 text-green-400" :
+                                a.status === "existing" ? "bg-blue-500/10 text-blue-400" :
+                                "bg-red-500/10 text-red-400"
+                              }`}>{a.status === "created" ? "Created" : a.status === "existing" ? "Existing" : "Error"}</span>
+                            </td>
+                            <td className="px-3 py-2 text-[#6b6b6b] text-xs">
+                              {a.status === "error" && (a.error || "Unknown error")}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === "twitter" && (
+            <div>
+              <form onSubmit={handleTwitterSearch} className="flex items-end gap-3">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-[#a0a0a0] mb-1.5">Keyword</label>
+                  <input
+                    type="text"
+                    value={keyword}
+                    onChange={(e) => setKeyword(e.target.value)}
+                    placeholder='e.g. "flowers", "cooking", "cars"'
+                    autoFocus
+                    className="w-full px-3 py-2.5 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white placeholder-[#6b6b6b] focus:outline-none focus:border-accent"
+                  />
+                </div>
+                <div className="w-24">
+                  <label className="block text-sm font-medium text-[#a0a0a0] mb-1.5">Count</label>
+                  <input
+                    type="number"
+                    value={count}
+                    onChange={(e) => setCount(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                    min={1}
+                    max={20}
+                    className="w-full px-3 py-2.5 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white focus:outline-none focus:border-accent"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={twitterLoading || !keyword.trim()}
+                  className="px-5 py-2.5 text-sm rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shrink-0"
+                >
+                  {twitterLoading ? <><Spinner />Searching...</> : "Search"}
+                </button>
+              </form>
+
+              {/* Twitter loading */}
+              {twitterLoading && (
+                <div className="flex flex-col items-center justify-center text-center py-10">
+                  <Spinner className="h-8 w-8 text-accent mb-4" />
+                  <p className="text-white text-sm font-medium">Searching Twitter for &quot;{keyword}&quot;...</p>
+                  <p className="text-[#6b6b6b] text-xs mt-1">This may take up to 2 minutes</p>
+                </div>
+              )}
+
+              {/* Twitter results */}
+              {twitterResult && !twitterLoading && (
+                <div className="mt-4">
+                  <p className="text-sm text-[#a0a0a0] mb-2">
+                    Found {twitterResult.accounts_found} accounts for &quot;{twitterResult.keyword}&quot;
+                  </p>
+                  <div className="bg-[#1a1a1a] rounded-lg border border-[#2a2a2a] overflow-hidden max-h-64 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-[#2a2a2a]">
+                          <th className="text-left px-3 py-2 text-[#6b6b6b] font-medium">Account</th>
+                          <th className="text-right px-3 py-2 text-[#6b6b6b] font-medium">Followers</th>
+                          <th className="text-right px-3 py-2 text-[#6b6b6b] font-medium">Videos</th>
+                          <th className="text-center px-3 py-2 text-[#6b6b6b] font-medium">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {twitterResult.accounts.map((a, i) => (
+                          <tr key={i} className="border-b border-[#2a2a2a] last:border-0">
+                            <td className="px-3 py-2">
+                              <span className="text-white font-medium">@{a.username}</span>
+                              {a.display_name && <span className="text-[#6b6b6b] ml-1.5">{a.display_name}</span>}
+                            </td>
+                            <td className="px-3 py-2 text-right text-white tabular-nums">{formatNumber(a.follower_count)}</td>
+                            <td className="px-3 py-2 text-right text-white tabular-nums">{a.video_tweet_count}</td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                a.status === "created" ? "bg-green-500/10 text-green-400" :
+                                a.status === "existing" ? "bg-blue-500/10 text-blue-400" :
+                                "bg-red-500/10 text-red-400"
+                              }`}>{a.status === "created" ? "Created" : a.status === "existing" ? "Existing" : "Error"}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {hasResults && (
+          <div className="px-5 py-3 border-t border-[#1e1e1e] flex justify-end shrink-0">
+            <button
+              onClick={onDone}
+              className="px-4 py-2 text-sm rounded-lg bg-accent text-white hover:bg-accent-hover transition-colors"
+            >
+              Done
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
