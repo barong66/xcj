@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"log/slog"
@@ -21,12 +22,13 @@ import (
 type BannerHandler struct {
 	admin       *store.AdminStore
 	buffer      *clickhouse.EventBuffer
+	chReader    *clickhouse.Reader
 	cache       *cache.Cache
 	siteBaseURL string
 }
 
-func NewBannerHandler(admin *store.AdminStore, buffer *clickhouse.EventBuffer, c *cache.Cache, siteBaseURL string) *BannerHandler {
-	return &BannerHandler{admin: admin, buffer: buffer, cache: c, siteBaseURL: siteBaseURL}
+func NewBannerHandler(admin *store.AdminStore, buffer *clickhouse.EventBuffer, chReader *clickhouse.Reader, c *cache.Cache, siteBaseURL string) *BannerHandler {
+	return &BannerHandler{admin: admin, buffer: buffer, chReader: chReader, cache: c, siteBaseURL: siteBaseURL}
 }
 
 // clientIP extracts the real client IP from X-Forwarded-For or RemoteAddr.
@@ -228,7 +230,7 @@ func (h *BannerHandler) ServeDynamic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	banner := pool[rand.Intn(len(pool))]
+	banner := h.selectBestBanner(r.Context(), pool)
 
 	// Determine source: use explicit src param, fallback to "serve".
 	eventSource := src
@@ -304,14 +306,9 @@ func (h *BannerHandler) ServeDynamic(w http.ResponseWriter, r *http.Request) {
 func (h *BannerHandler) getBannerPool(r *http.Request, width, height int, cat, kw string, aid int64) []store.ServableBanner {
 	ctx := r.Context()
 
-	// Keyword queries are not cached (too many variations).
-	if kw != "" {
-		pool, err := h.admin.ListServableBannersByKeyword(ctx, width, height, kw)
-		if err != nil {
-			slog.Error("banner: serve kw query", "error", err)
-			return nil
-		}
-		return pool
+	// Keyword = category slug, use it as cat filter.
+	if kw != "" && cat == "" {
+		cat = kw
 	}
 
 	// Determine cache key.
@@ -343,6 +340,44 @@ func (h *BannerHandler) getBannerPool(r *http.Request, width, height int, cat, k
 	slog.Info("banner: cache miss", "key", cacheKey, "count", len(pool))
 	h.cache.SetList(ctx, cacheKey, pool)
 	return pool
+}
+
+// selectBestBanner picks the banner with the highest CTR from the pool.
+// If multiple banners share the max CTR (or all have zero), picks randomly among them.
+func (h *BannerHandler) selectBestBanner(ctx context.Context, pool []store.ServableBanner) store.ServableBanner {
+	if len(pool) == 1 {
+		return pool[0]
+	}
+
+	videoIDs := make([]int64, len(pool))
+	for i, b := range pool {
+		videoIDs[i] = b.VideoID
+	}
+
+	stats, err := h.chReader.GetBannerStats(ctx, videoIDs)
+	if err != nil || len(stats) == 0 {
+		return pool[rand.Intn(len(pool))]
+	}
+
+	var maxCTR float64
+	for _, b := range pool {
+		if s, ok := stats[b.VideoID]; ok && s.CTR > maxCTR {
+			maxCTR = s.CTR
+		}
+	}
+
+	var best []store.ServableBanner
+	for _, b := range pool {
+		ctr := 0.0
+		if s, ok := stats[b.VideoID]; ok {
+			ctr = s.CTR
+		}
+		if ctr == maxCTR {
+			best = append(best, b)
+		}
+	}
+
+	return best[rand.Intn(len(best))]
 }
 
 // parseBannerSize extracts width and height from "size=WxH" or "w=W&h=H" query params.

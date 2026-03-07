@@ -1467,32 +1467,6 @@ func (s *AdminStore) ListServableBanners(ctx context.Context, width, height int,
 	return banners, rows.Err()
 }
 
-// ListServableBannersByKeyword returns banners matching a keyword in video title/description.
-func (s *AdminStore) ListServableBannersByKeyword(ctx context.Context, width, height int, keyword string) ([]ServableBanner, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT b.id, b.account_id, b.video_id, b.image_url, b.width, b.height
-		FROM banners b
-		JOIN videos v ON v.id = b.video_id AND v.is_active = true
-		JOIN accounts a ON a.id = b.account_id AND a.is_paid = true AND a.is_active = true
-		WHERE b.is_active = true AND b.width = $1 AND b.height = $2
-			AND (v.title ILIKE '%' || $3 || '%' OR COALESCE(v.description,'') ILIKE '%' || $3 || '%')
-	`, width, height, keyword)
-	if err != nil {
-		return nil, fmt.Errorf("admin_store: list servable banners by keyword: %w", err)
-	}
-	defer rows.Close()
-
-	var banners []ServableBanner
-	for rows.Next() {
-		var b ServableBanner
-		if err := rows.Scan(&b.ID, &b.AccountID, &b.VideoID, &b.ImageURL, &b.Width, &b.Height); err != nil {
-			return nil, fmt.Errorf("admin_store: scan servable banner kw: %w", err)
-		}
-		banners = append(banners, b)
-	}
-	return banners, rows.Err()
-}
-
 // ─── Video Metadata for ClickHouse stats ─────────────────────────────────────
 
 // VideoMeta holds basic video info for enriching ClickHouse stats.

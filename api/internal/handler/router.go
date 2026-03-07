@@ -126,7 +126,7 @@ func NewRouter(
 	})
 
 	// Public banner serving — no auth, no site detection.
-	bannerHandler := NewBannerHandler(adminStore, eventBuffer, c, siteBaseURL)
+	bannerHandler := NewBannerHandler(adminStore, eventBuffer, chReader, c, siteBaseURL)
 	r.Get("/b/serve", bannerHandler.ServeDynamic)
 	r.Get("/b/{id}", bannerHandler.ServeBanner)
 	r.Get("/b/{id}/click", bannerHandler.ClickBanner)
