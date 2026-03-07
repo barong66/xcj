@@ -125,6 +125,10 @@ func TestBannerTemplateRender(t *testing.T) {
 		HoverURL:     "/b/42/hover?src=test",
 		Width:        300,
 		Height:       250,
+		BannerID:     42,
+		VideoID:      100,
+		AccountID:    5,
+		PerfURL:      "/b/perf?bid=42&vid=100&aid=5",
 	}
 
 	for _, style := range bannerStyles {

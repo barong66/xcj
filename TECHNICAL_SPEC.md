@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-07 (banner mass actions, style preview, re-grab)
+> Last updated: 2026-03-07 (SEO audit + comprehensive fixes)
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -276,7 +276,22 @@ CREATE TABLE events (
     ip          String,
     referrer    String,
     extra       String,
-    created_at  DateTime
+    created_at  DateTime,
+    -- Added in migration 012: device/browser/geo/UTM columns
+    browser        LowCardinality(String) DEFAULT '',
+    os             LowCardinality(String) DEFAULT '',
+    device_type    LowCardinality(String) DEFAULT '',   -- 'desktop', 'mobile', 'tablet', 'bot'
+    screen_width   UInt16 DEFAULT 0,
+    screen_height  UInt16 DEFAULT 0,
+    viewport_width  UInt16 DEFAULT 0,
+    viewport_height UInt16 DEFAULT 0,
+    language       LowCardinality(String) DEFAULT '',
+    connection_type LowCardinality(String) DEFAULT '',  -- '4g', '3g', 'wifi', etc.
+    page_url       String DEFAULT '',
+    country        LowCardinality(String) DEFAULT '',
+    utm_source     String DEFAULT '',
+    utm_medium     String DEFAULT '',
+    utm_campaign   String DEFAULT ''
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(created_at)
@@ -285,6 +300,8 @@ TTL created_at + INTERVAL 12 MONTH;
 ```
 
 Данные пишутся через Go EventBuffer (batch INSERT каждые 1 сек или по 1000 событий).
+
+Новые колонки заполняются через `enrichEvent()` в `banner.go` — серверный парсинг User-Agent (browser, OS, device_type) + клиентские данные из query params (screen, viewport, language, connection, UTM, page URL).
 
 ### 4.2 Materialized View: mv_banner_daily
 ```sql
@@ -302,7 +319,78 @@ WHERE event_type IN ('banner_impression', 'banner_click')
 GROUP BY event_date, video_id, account_id;
 ```
 
-### 4.3 Запросы для админ-статистики
+### 4.3 Таблица banner_perf (performance metrics)
+
+```sql
+CREATE TABLE banner_perf (
+    banner_id UInt64,
+    video_id UInt64,
+    account_id UInt64,
+    site_id UInt16,
+    -- Performance timings
+    image_load_ms UInt16,           -- Время загрузки изображения баннера
+    render_ms UInt16,               -- Время рендеринга (DOMContentLoaded)
+    time_to_visible_ms UInt32,      -- Время до видимости (IntersectionObserver)
+    dwell_time_ms UInt32,           -- Общее время видимости баннера
+    hover_duration_ms UInt16,       -- Длительность наведения мыши
+    is_viewable UInt8,              -- IAB viewability: 50%+ видимо >= 1 сек
+    -- User context
+    browser LowCardinality(String),
+    os LowCardinality(String),
+    device_type LowCardinality(String),
+    screen_width UInt16,
+    screen_height UInt16,
+    connection_type LowCardinality(String),
+    country LowCardinality(String),
+    -- Meta
+    created_at DateTime DEFAULT now()
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (site_id, banner_id, created_at)
+TTL created_at + INTERVAL 6 MONTH;
+```
+
+Данные отправляются с клиента через `sendBeacon` на `/b/perf` при уходе посетителя со страницы (`beforeunload`/`visibilitychange`). Go API парсит JSON и записывает через `InsertPerfEvent()`.
+
+### 4.4 Materialized View: mv_banner_perf_daily
+
+```sql
+CREATE MATERIALIZED VIEW mv_banner_perf_daily
+ENGINE = AggregatingMergeTree()
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (event_date, banner_id, device_type)
+TTL event_date + INTERVAL 12 MONTH
+AS SELECT
+    toDate(created_at) AS event_date,
+    banner_id, device_type,
+    countState() AS total_events,
+    avgState(image_load_ms) AS avg_image_load_ms,
+    avgState(render_ms) AS avg_render_ms,
+    avgState(dwell_time_ms) AS avg_dwell_time_ms,
+    quantileState(0.95)(image_load_ms) AS p95_image_load_ms,
+    quantileState(0.95)(render_ms) AS p95_render_ms,
+    sumState(toUInt64(is_viewable)) AS viewable_count
+FROM banner_perf
+GROUP BY event_date, banner_id, device_type;
+```
+
+### 4.5 Materialized View: mv_events_device_daily
+
+```sql
+CREATE MATERIALIZED VIEW mv_events_device_daily
+ENGINE = SummingMergeTree()
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (event_date, event_type, device_type, browser, os)
+TTL event_date + INTERVAL 12 MONTH
+AS SELECT
+    toDate(created_at) AS event_date,
+    event_type, device_type, browser, os,
+    count() AS total_events
+FROM events
+GROUP BY event_date, event_type, device_type, browser, os;
+```
+
+### 4.6 Запросы для админ-статистики
 
 Агрегация по видео:
 ```sql
@@ -410,6 +498,9 @@ ORDER BY event_date DESC
 | POST | /admin/banners/batch-deactivate | Массовая деактивация баннеров (body: {ids: [...]}) |
 | POST | /admin/banners/batch-regenerate | Массовая перегенерация баннеров (body: {ids: [...]}) |
 | GET | /admin/banners | Все баннеры (Promo раздел) |
+| GET | /admin/perf-summary | Сводка производительности баннеров (avg load time, viewability, dwell) за период |
+| GET | /admin/device-breakdown | Разбивка по устройствам/браузерам/ОС за период |
+| GET | /admin/referrer-stats | Топ источников трафика (referrer) за период |
 
 ### 5.3 Публичные баннерные роуты (без авторизации)
 
@@ -420,6 +511,7 @@ ORDER BY event_date DESC
 | GET | /b/{id} | 302 redirect на R2 URL + banner_impression в ClickHouse |
 | GET | /b/{id}/preview | Admin preview: рендерит баннер в выбранном HTML-стиле (?style=bold/elegant/minimalist/card) |
 | GET | /b/{id}/click | 302 redirect на /model/{slug} + banner_click в ClickHouse |
+| POST | /b/perf | Performance beacon — принимает JSON с метриками производительности баннера (sendBeacon) |
 
 **GET /b/serve** — параметры:
 | Параметр | Тип | Описание |
@@ -491,6 +583,101 @@ Headers: `Cache-Control: public, max-age=86400` (24h кеш), CORS `Access-Contr
 | bp:{w}x{h}:a{aid} | 60s | Пул баннеров по размеру + аккаунту |
 
 Кеш обходится для random сортировки и при `exclude_account_id`.
+
+### 5.6 Banner Metrics & Analytics System
+
+Комплексная система метрик и аналитики баннеров, включающая серверный парсинг User-Agent, клиентский сбор контекста, performance beacons и административный дашборд.
+
+#### 5.6.1 User-Agent Parsing (ua.go)
+
+Серверный парсинг User-Agent через библиотеку `mssola/useragent`. Модуль `api/internal/handler/ua.go`:
+
+| Функция | Возвращает | Описание |
+|---------|-----------|----------|
+| `parseBrowser(ua)` | string | Название браузера: Chrome, Firefox, Safari, Edge, Opera, Samsung Browser, UC Browser, Other |
+| `parseOS(ua)` | string | ОС: Windows, macOS, Linux, Android, iOS, Chrome OS, Other |
+| `parseDeviceType(ua)` | string | Тип устройства: mobile, tablet, desktop, bot |
+
+Определение типа устройства основано на:
+- `ua.Mobile()` → mobile (если не tablet)
+- Keywords в UA-строке: "iPad", "Tablet", "Tab" → tablet
+- `ua.Bot()` → bot
+- Fallback → desktop
+
+#### 5.6.2 Event Enrichment (enrichEvent)
+
+Функция `enrichEvent(e *model.Event, r *http.Request)` в `banner.go` обогащает каждое banner-событие:
+
+**Серверная сторона (из HTTP request):**
+- `browser`, `os`, `device_type` — из User-Agent (ua.go)
+- `referrer` — из `Referer` header
+- `ip` — из `X-Real-IP` / `X-Forwarded-For`
+
+**Клиентская сторона (из query params, прокидываются через JS в loader.js):**
+- `sw`, `sh` — screen width/height (`screen.width`, `screen.height`)
+- `vw`, `vh` — viewport width/height (`innerWidth`, `innerHeight`)
+- `lang` — navigator.language
+- `conn` — navigator.connection.effectiveType (4g, 3g, wifi)
+- `page` — page URL (encodeURIComponent)
+- `utm_source`, `utm_medium`, `utm_campaign` — UTM параметры
+- `ref` — referrer
+
+#### 5.6.3 Performance Beacon (POST /b/perf)
+
+Эндпоинт для сбора метрик производительности баннера. Вызывается клиентским JS через `navigator.sendBeacon` при `beforeunload` / `visibilitychange`.
+
+**Структура PerfEvent (model/event.go):**
+```go
+type PerfEvent struct {
+    BannerID        int64   `json:"banner_id"`
+    VideoID         int64   `json:"video_id"`
+    AccountID       int64   `json:"account_id"`
+    ImageLoadMs     int     `json:"image_load_ms"`     // Время загрузки изображения
+    RenderMs        int     `json:"render_ms"`         // Время рендеринга (DOMContentLoaded)
+    TimeToVisibleMs int     `json:"ttv_ms"`            // IntersectionObserver: время до видимости
+    DwellTimeMs     int     `json:"dwell_ms"`          // Общее время видимости
+    HoverDurationMs int     `json:"hover_ms"`          // Длительность наведения мыши
+    IsViewable      bool    `json:"viewable"`          // IAB viewability: >=50% видимо >= 1 сек
+}
+```
+
+**Клиентский JS в banner templates:**
+- IntersectionObserver с threshold 0.5 для IAB viewability (50%+ видимо >= 1 сек)
+- `performance.now()` для render time
+- Image `onload` событие для image load time
+- `mouseenter`/`mouseleave` для hover duration
+- `beforeunload` + `visibilitychange` → `sendBeacon` на `/b/perf`
+
+#### 5.6.4 Admin Dashboard: Performance Tab
+
+Вкладка **Performance** в разделе Promo (`web/src/app/admin/promo/page.tsx`):
+
+**Overview Cards:**
+- Avg Image Load Time (ms)
+- Avg Render Time (ms)
+- Viewability Rate (%)
+- Avg Dwell Time (sec)
+
+**Device/Browser Breakdown:**
+- Таблица с разбивкой по device_type, browser, OS
+- Показывает total events, avg load time, viewability
+
+**Top Referrers:**
+- Таблица с топ-источниками трафика (referrer URL → кол-во событий)
+
+**Период:** переключатель 7 / 30 / 90 дней.
+
+**API endpoints:**
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | /admin/perf-summary?days=N | Сводка: avg image_load_ms, avg render_ms, viewability %, avg dwell_time |
+| GET | /admin/device-breakdown?days=N | Разбивка: [{device_type, browser, os, total_events}] |
+| GET | /admin/referrer-stats?days=N | Топ referrers: [{referrer, total_events}] |
+
+**ClickHouse queries (reader.go):**
+- `GetPerfSummary(days)` — агрегация из `banner_perf`: AVG(image_load_ms), AVG(render_ms), AVG(dwell_time_ms), SUM(is_viewable)/COUNT(*)
+- `GetDeviceBreakdown(days)` — агрегация из `events`: GROUP BY device_type, browser, os
+- `GetReferrerStats(days)` — агрегация из `events`: GROUP BY referrer, TOP N
 
 ---
 
@@ -695,6 +882,84 @@ interface VideosResponse {
 }
 ```
 
+### 7.5 SEO
+
+#### Open Graph & Twitter Card Images
+
+Динамическая генерация OG-изображений для ссылок в соцсетях:
+- `web/src/app/opengraph-image.tsx` — генерирует 1200x630 PNG с тёмным градиентом и брендингом TemptGuide
+- `web/src/app/twitter-image.tsx` — аналогичное изображение для Twitter Cards
+
+#### Metadata Pattern (generateMetadata)
+
+Все динамические страницы реализуют `generateMetadata()` с полным набором meta-тегов:
+
+| Страница | Файл | Особенности metadata |
+|----------|------|---------------------|
+| / (homepage) | app/page.tsx | canonical URL |
+| /video/[id] | app/video/[id]/page.tsx | Fallback для emoji-only заголовков → "Video by @username on Platform" |
+| /model/[slug] | app/model/[slug]/page.tsx | Twitter card (summary_large_image), sanitized bio (strip newlines, max 155 chars) |
+| /category/[slug] | app/category/[slug]/page.tsx | Twitter card metadata |
+| /country/[code] | app/country/[code]/page.tsx | Twitter card metadata |
+| /account/[platform]/[username] | app/account/[platform]/[username]/page.tsx | Twitter card metadata |
+| /categories | app/categories/page.tsx | Improved description, canonical URL |
+
+#### Sitemap (app/sitemap.ts)
+
+Динамическая генерация sitemap.xml с покрытием:
+- Homepage (`/`)
+- `/categories` page
+- Model profile pages (`/model/{slug}`) — через `getAccounts()` API
+- Account pages (`/account/{platform}/{username}`) — через `getAccounts()` API
+- 15 country pages (`/country/{code}`)
+- Paginated videos — до 500 видео (5 страниц по 100)
+
+#### robots.txt (app/robots.ts)
+
+Disallow list:
+- `/api/` — API эндпоинты
+- `/search` — поисковая страница (дублирует контент)
+- `/admin` — админ-панель
+
+Sitemap URL: `https://temptguide.com/sitemap.xml`
+
+#### Structured Data (JSON-LD)
+
+Компонент `web/src/components/JsonLd.tsx` генерирует structured data:
+
+| Тип | Страница | Поля |
+|-----|----------|------|
+| VideoObject | /video/[id] | name, description, thumbnailUrl, uploadDate (из video.published_at), duration, contentUrl |
+| Person | /model/[slug] | name, url, image |
+| BreadcrumbList | /video/[id], /model/[slug] | Навигационная цепочка |
+| WebSite + SearchAction | / (layout) | Поисковый интент для Google Sitelinks |
+
+#### Heading Hierarchy
+
+Все публичные страницы используют правильную иерархию заголовков:
+- Homepage: скрытый `<h1>` для SEO
+- /categories: `<h1>` вместо `<p>` для "Browse Categories"
+- /category/[slug]: `<h1>` для названия категории
+- /account/[platform]/[username]: `<h1>` для username
+
+#### Image Domain Restrictions (next.config.mjs)
+
+Вместо wildcard `**` — ограниченный список CDN-доменов:
+- `media.temptguide.com` (R2 CDN)
+- `*.cdninstagram.com` (Instagram)
+- `*.fbcdn.net` (Facebook CDN / Instagram)
+- `pbs.twimg.com` (Twitter)
+- `abs.twimg.com` (Twitter)
+
+#### Lighthouse Scores (2026-03-07)
+| Метрика | Значение |
+|---------|----------|
+| Performance | 76 |
+| SEO | 100 |
+| Best Practices | 96 |
+| Accessibility | 79 |
+| LCP (mobile) | 5.9s (known issue: feed VideoCard lazy-loading) |
+
 ---
 
 ## 8. Data Flow — Потоки данных
@@ -814,7 +1079,33 @@ Cold path (cache miss): ~20ms (SQL + Redis SET), раз в 60 сек на клю
 → Дальше стандартный flow /b/serve (см. 8.6)
 ```
 
-### 8.8 Мульти-сайт
+### 8.8 Banner Performance Metrics Collection
+```
+Баннер загружается в iframe на стороннем сайте:
+→ loader.js собирает клиентский контекст: screen, viewport, language, connection, UTM, referrer, page URL
+→ Прокидывает параметры в /b/serve?sw=1920&sh=1080&vw=800&vh=600&lang=en-US&conn=4g&...
+→ Go API enrichEvent(): парсит User-Agent (browser, OS, device_type) + читает query params
+→ Записывает обогащённое banner_impression событие в ClickHouse events (14 новых колонок)
+
+Performance beacon (при уходе со страницы):
+→ JS в HTML-шаблоне баннера собирает метрики:
+  - image_load_ms (Image.onload)
+  - render_ms (DOMContentLoaded)
+  - time_to_visible_ms (IntersectionObserver с threshold 0.5)
+  - dwell_time_ms (общее время видимости)
+  - hover_duration_ms (mouseenter/mouseleave)
+  - is_viewable (IAB standard: >=50% видимо >= 1 сек)
+→ beforeunload / visibilitychange → sendBeacon → POST /b/perf (JSON)
+→ Go API → InsertPerfEvent() → ClickHouse banner_perf table
+→ Materialized views: mv_banner_perf_daily (AggregatingMergeTree), mv_events_device_daily (SummingMergeTree)
+
+Админка → Promo → Performance tab:
+→ GET /admin/perf-summary → overview cards (avg load, viewability, dwell)
+→ GET /admin/device-breakdown → device/browser/OS breakdown
+→ GET /admin/referrer-stats → top referrers
+```
+
+### 8.9 Мульти-сайт
 ```
 Request Host: custom-domain.com
 → SiteDetection middleware → SELECT FROM sites WHERE domain = 'custom-domain.com'

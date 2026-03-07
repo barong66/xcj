@@ -7,7 +7,54 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/xcj/videosite-api/internal/model"
 )
+
+func TestEnrichEvent_ParsesQueryParams(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/b/serve?sw=1920&sh=1080&vw=1200&vh=800&lang=en-US&ct=4g&pu=https%3A%2F%2Fexample.com&utm_source=google&utm_medium=cpc&utm_campaign=test", nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	var ev model.Event
+	enrichEvent(&ev, req)
+
+	if ev.Browser != "Chrome" {
+		t.Errorf("Browser = %q, want Chrome", ev.Browser)
+	}
+	if ev.DeviceType != "desktop" {
+		t.Errorf("DeviceType = %q, want desktop", ev.DeviceType)
+	}
+	if ev.ScreenWidth != 1920 {
+		t.Errorf("ScreenWidth = %d, want 1920", ev.ScreenWidth)
+	}
+	if ev.ViewportWidth != 1200 {
+		t.Errorf("ViewportWidth = %d, want 1200", ev.ViewportWidth)
+	}
+	if ev.Language != "en-US" {
+		t.Errorf("Language = %q, want en-US", ev.Language)
+	}
+	if ev.ConnectionType != "4g" {
+		t.Errorf("ConnectionType = %q, want 4g", ev.ConnectionType)
+	}
+	if ev.UTMSource != "google" {
+		t.Errorf("UTMSource = %q, want google", ev.UTMSource)
+	}
+}
+
+func TestHandlePerfBeacon_NoBannerID(t *testing.T) {
+	h := &BannerHandler{}
+
+	req := httptest.NewRequest(http.MethodGet, "/b/perf", nil)
+	rr := httptest.NewRecorder()
+	h.HandlePerfBeacon(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	ct := rr.Header().Get("Content-Type")
+	if ct != "image/gif" {
+		t.Errorf("Content-Type = %q, want image/gif", ct)
+	}
+}
 
 func TestAdminAuth(t *testing.T) {
 	// Set up a known admin token.

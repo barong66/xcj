@@ -11,6 +11,7 @@ import (
 	"github.com/xcj/videosite-api/internal/clickhouse"
 	"github.com/xcj/videosite-api/internal/middleware"
 	"github.com/xcj/videosite-api/internal/ranking"
+	s3client "github.com/xcj/videosite-api/internal/s3"
 	"github.com/xcj/videosite-api/internal/store"
 	"github.com/xcj/videosite-api/internal/worker"
 )
@@ -30,6 +31,7 @@ func NewRouter(
 	workerMgr *worker.Manager,
 	ranker *ranking.Service,
 	siteBaseURL string,
+	s3 *s3client.Client,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -62,7 +64,7 @@ func NewRouter(
 	r.Route("/api/v1/admin", func(r chi.Router) {
 		r.Use(AdminAuth)
 
-		adminHandler := NewAdminHandler(adminStore, chReader, workerMgr, c)
+		adminHandler := NewAdminHandler(adminStore, chReader, workerMgr, c, s3)
 		healthHandler := NewHealthHandler(pool, c, eventBuffer, chReader, workerMgr)
 
 		// Health.
@@ -94,6 +96,7 @@ func NewRouter(
 		r.Delete("/banners/{id}", adminHandler.DeactivateBanner)
 		r.Post("/banners/batch-deactivate", adminHandler.BatchDeactivateBanners)
 		r.Post("/banners/batch-regenerate", adminHandler.BatchRegenerateBanners)
+		r.Post("/banners/{id}/recrop", adminHandler.RecropBanner)
 
 		// Queue.
 		r.Get("/queue", adminHandler.ListQueue)
@@ -125,8 +128,17 @@ func NewRouter(
 		// Banner Funnel Analytics.
 		r.Get("/banner-funnel", adminHandler.GetBannerFunnel)
 
+		// Performance Metrics.
+		r.Get("/perf-summary", adminHandler.GetPerfSummary)
+		r.Get("/device-breakdown", adminHandler.GetDeviceBreakdown)
+		r.Get("/referrer-stats", adminHandler.GetReferrerStats)
+
 		// Conversion Postbacks.
 		r.Get("/postbacks", adminHandler.ListPostbacks)
+
+		// Traffic Explorer.
+		r.Get("/traffic-stats", adminHandler.GetTrafficStats)
+		r.Get("/traffic-stats/dimensions", adminHandler.GetTrafficDimensions)
 	})
 
 	// Public banner serving — no auth, no site detection.
@@ -137,6 +149,7 @@ func NewRouter(
 	r.Get("/b/{id}", bannerHandler.ServeBanner)
 	r.Get("/b/{id}/click", bannerHandler.ClickBanner)
 	r.Get("/b/{id}/hover", bannerHandler.HoverBanner)
+	r.Get("/b/perf", bannerHandler.HandlePerfBeacon)
 
 	// API v1 routes — all require site detection.
 	r.Route("/api/v1", func(r chi.Router) {

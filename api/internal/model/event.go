@@ -17,6 +17,47 @@ type Event struct {
 	SourcePage string    `json:"source_page,omitempty"`
 	Source     string    `json:"source,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
+
+	// Parsed from user-agent.
+	Browser    string `json:"browser,omitempty"`
+	OS         string `json:"os,omitempty"`
+	DeviceType string `json:"device_type,omitempty"`
+
+	// Client context.
+	ScreenWidth    int    `json:"screen_width,omitempty"`
+	ScreenHeight   int    `json:"screen_height,omitempty"`
+	ViewportWidth  int    `json:"viewport_width,omitempty"`
+	ViewportHeight int    `json:"viewport_height,omitempty"`
+	Language       string `json:"language,omitempty"`
+	ConnectionType string `json:"connection_type,omitempty"`
+	PageURL        string `json:"page_url,omitempty"`
+	Country        string `json:"country,omitempty"`
+
+	// UTM parameters.
+	UTMSource   string `json:"utm_source,omitempty"`
+	UTMMedium   string `json:"utm_medium,omitempty"`
+	UTMCampaign string `json:"utm_campaign,omitempty"`
+}
+
+// PerfEvent holds banner performance metrics from the client.
+type PerfEvent struct {
+	BannerID        int64
+	VideoID         int64
+	AccountID       int64
+	SiteID          int64
+	ImageLoadMs     int
+	RenderMs        int
+	TimeToVisibleMs int
+	DwellTimeMs     int
+	HoverDurationMs int
+	IsViewable      bool
+	Browser         string
+	OS              string
+	DeviceType      string
+	ScreenWidth     int
+	ScreenHeight    int
+	ConnectionType  string
+	Country         string
 }
 
 // EventInput is what the client sends in POST /api/v1/events.

@@ -13,6 +13,10 @@ type bannerTemplateData struct {
 	HoverURL     string
 	Width        int
 	Height       int
+	BannerID     int64
+	VideoID      int64
+	AccountID    int64
+	PerfURL      string
 }
 
 // bannerStyles lists all available template style names.
@@ -85,7 +89,29 @@ body{overflow:hidden;background:#000}
 </div>
 </a>
 <script>
-(function(){var d=false;document.getElementById('bn').addEventListener('mouseenter',function(){if(d)return;d=true;new Image().src='{{.HoverURL}}';});})();
+(function(){
+var d=false,bn=document.getElementById('bn');
+bn.addEventListener('mouseenter',function(){if(d)return;d=true;new Image().src='{{.HoverURL}}';});
+var ps=new URLSearchParams(location.search);
+var sw=ps.get('sw')||0,sh=ps.get('sh')||0,ct=ps.get('ct')||'';
+var rs=Date.now(),ilt=0,vb=0,tv=0,vs=0;
+var img=document.querySelector('img');
+if(img&&!img.complete){var is=Date.now();img.onload=function(){ilt=Date.now()-is}}
+var vt=null;
+function onV(){if(!vs){vs=Date.now()}vt=setTimeout(function(){vb=1},1000)}
+function offV(){if(vs){tv+=Date.now()-vs;vs=0}if(vt)clearTimeout(vt)}
+document.addEventListener('visibilitychange',function(){document.hidden?offV():onV()});
+if(!document.hidden)onV();
+var hs=0,th=0;
+bn.addEventListener('mouseenter',function(){hs=Date.now()});
+bn.addEventListener('mouseleave',function(){if(hs){th+=Date.now()-hs;hs=0}});
+var sent=false;
+function sp(){if(sent)return;sent=true;if(vs)tv+=Date.now()-vs;
+var u='{{.PerfURL}}'+'&ilt='+ilt+'&rt='+(Date.now()-rs)+'&ttv='+(rs-(parseInt(ps.get('t0'))||rs))+'&dt='+tv+'&hd='+th+'&vb='+vb+'&sw='+sw+'&sh='+sh+'&ct='+ct;
+if(navigator.sendBeacon){navigator.sendBeacon(u)}else{new Image().src=u}}
+window.addEventListener('pagehide',sp);
+setTimeout(sp,10000);
+})();
 </script>
 </body></html>`
 
@@ -134,7 +160,29 @@ body{overflow:hidden;background:#000}
 </div>
 </a>
 <script>
-(function(){var d=false;document.getElementById('bn').addEventListener('mouseenter',function(){if(d)return;d=true;new Image().src='{{.HoverURL}}';});})();
+(function(){
+var d=false,bn=document.getElementById('bn');
+bn.addEventListener('mouseenter',function(){if(d)return;d=true;new Image().src='{{.HoverURL}}';});
+var ps=new URLSearchParams(location.search);
+var sw=ps.get('sw')||0,sh=ps.get('sh')||0,ct=ps.get('ct')||'';
+var rs=Date.now(),ilt=0,vb=0,tv=0,vs=0;
+var img=document.querySelector('img');
+if(img&&!img.complete){var is=Date.now();img.onload=function(){ilt=Date.now()-is}}
+var vt=null;
+function onV(){if(!vs){vs=Date.now()}vt=setTimeout(function(){vb=1},1000)}
+function offV(){if(vs){tv+=Date.now()-vs;vs=0}if(vt)clearTimeout(vt)}
+document.addEventListener('visibilitychange',function(){document.hidden?offV():onV()});
+if(!document.hidden)onV();
+var hs=0,th=0;
+bn.addEventListener('mouseenter',function(){hs=Date.now()});
+bn.addEventListener('mouseleave',function(){if(hs){th+=Date.now()-hs;hs=0}});
+var sent=false;
+function sp(){if(sent)return;sent=true;if(vs)tv+=Date.now()-vs;
+var u='{{.PerfURL}}'+'&ilt='+ilt+'&rt='+(Date.now()-rs)+'&ttv='+(rs-(parseInt(ps.get('t0'))||rs))+'&dt='+tv+'&hd='+th+'&vb='+vb+'&sw='+sw+'&sh='+sh+'&ct='+ct;
+if(navigator.sendBeacon){navigator.sendBeacon(u)}else{new Image().src=u}}
+window.addEventListener('pagehide',sp);
+setTimeout(sp,10000);
+})();
 </script>
 </body></html>`
 
@@ -176,7 +224,29 @@ body{overflow:hidden;background:#000}
 </div>
 </a>
 <script>
-(function(){var d=false;document.getElementById('bn').addEventListener('mouseenter',function(){if(d)return;d=true;new Image().src='{{.HoverURL}}';});})();
+(function(){
+var d=false,bn=document.getElementById('bn');
+bn.addEventListener('mouseenter',function(){if(d)return;d=true;new Image().src='{{.HoverURL}}';});
+var ps=new URLSearchParams(location.search);
+var sw=ps.get('sw')||0,sh=ps.get('sh')||0,ct=ps.get('ct')||'';
+var rs=Date.now(),ilt=0,vb=0,tv=0,vs=0;
+var img=document.querySelector('img');
+if(img&&!img.complete){var is=Date.now();img.onload=function(){ilt=Date.now()-is}}
+var vt=null;
+function onV(){if(!vs){vs=Date.now()}vt=setTimeout(function(){vb=1},1000)}
+function offV(){if(vs){tv+=Date.now()-vs;vs=0}if(vt)clearTimeout(vt)}
+document.addEventListener('visibilitychange',function(){document.hidden?offV():onV()});
+if(!document.hidden)onV();
+var hs=0,th=0;
+bn.addEventListener('mouseenter',function(){hs=Date.now()});
+bn.addEventListener('mouseleave',function(){if(hs){th+=Date.now()-hs;hs=0}});
+var sent=false;
+function sp(){if(sent)return;sent=true;if(vs)tv+=Date.now()-vs;
+var u='{{.PerfURL}}'+'&ilt='+ilt+'&rt='+(Date.now()-rs)+'&ttv='+(rs-(parseInt(ps.get('t0'))||rs))+'&dt='+tv+'&hd='+th+'&vb='+vb+'&sw='+sw+'&sh='+sh+'&ct='+ct;
+if(navigator.sendBeacon){navigator.sendBeacon(u)}else{new Image().src=u}}
+window.addEventListener('pagehide',sp);
+setTimeout(sp,10000);
+})();
 </script>
 </body></html>`
 
@@ -233,6 +303,28 @@ body{overflow:hidden;background:#000}
 </div>
 </a>
 <script>
-(function(){var d=false;document.getElementById('bn').addEventListener('mouseenter',function(){if(d)return;d=true;new Image().src='{{.HoverURL}}';});})();
+(function(){
+var d=false,bn=document.getElementById('bn');
+bn.addEventListener('mouseenter',function(){if(d)return;d=true;new Image().src='{{.HoverURL}}';});
+var ps=new URLSearchParams(location.search);
+var sw=ps.get('sw')||0,sh=ps.get('sh')||0,ct=ps.get('ct')||'';
+var rs=Date.now(),ilt=0,vb=0,tv=0,vs=0;
+var img=document.querySelector('img');
+if(img&&!img.complete){var is=Date.now();img.onload=function(){ilt=Date.now()-is}}
+var vt=null;
+function onV(){if(!vs){vs=Date.now()}vt=setTimeout(function(){vb=1},1000)}
+function offV(){if(vs){tv+=Date.now()-vs;vs=0}if(vt)clearTimeout(vt)}
+document.addEventListener('visibilitychange',function(){document.hidden?offV():onV()});
+if(!document.hidden)onV();
+var hs=0,th=0;
+bn.addEventListener('mouseenter',function(){hs=Date.now()});
+bn.addEventListener('mouseleave',function(){if(hs){th+=Date.now()-hs;hs=0}});
+var sent=false;
+function sp(){if(sent)return;sent=true;if(vs)tv+=Date.now()-vs;
+var u='{{.PerfURL}}'+'&ilt='+ilt+'&rt='+(Date.now()-rs)+'&ttv='+(rs-(parseInt(ps.get('t0'))||rs))+'&dt='+tv+'&hd='+th+'&vb='+vb+'&sw='+sw+'&sh='+sh+'&ct='+ct;
+if(navigator.sendBeacon){navigator.sendBeacon(u)}else{new Image().src=u}}
+window.addEventListener('pagehide',sp);
+setTimeout(sp,10000);
+})();
 </script>
 </body></html>`

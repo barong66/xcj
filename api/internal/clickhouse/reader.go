@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 	"time"
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
@@ -437,4 +438,399 @@ func (r *Reader) GetAccountFunnelStats(ctx context.Context, accountID int64, day
 		Days:    dayList,
 		Summary: summary,
 	}, nil
+}
+
+// ─── Performance Metrics ─────────────────────────────────────────────────────
+
+// PerfSummary holds performance metrics grouped by device/browser.
+type PerfSummary struct {
+	DeviceType      string  `json:"device_type"`
+	Browser         string  `json:"browser"`
+	TotalEvents     uint64  `json:"total_events"`
+	AvgImageLoadMs  float64 `json:"avg_image_load_ms"`
+	AvgRenderMs     float64 `json:"avg_render_ms"`
+	AvgDwellTimeMs  float64 `json:"avg_dwell_time_ms"`
+	P95ImageLoadMs  float64 `json:"p95_image_load_ms"`
+	P95RenderMs     float64 `json:"p95_render_ms"`
+	ViewabilityRate float64 `json:"viewability_rate"`
+}
+
+// GetPerfSummary returns banner performance metrics grouped by device type and browser.
+func (r *Reader) GetPerfSummary(ctx context.Context, days int) ([]PerfSummary, error) {
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			device_type,
+			browser,
+			count() AS total_events,
+			avg(image_load_ms) AS avg_image_load_ms,
+			avg(render_ms) AS avg_render_ms,
+			avg(dwell_time_ms) AS avg_dwell_time_ms,
+			quantile(0.95)(image_load_ms) AS p95_image_load_ms,
+			quantile(0.95)(render_ms) AS p95_render_ms,
+			if(total_events > 0, countIf(is_viewable = 1) * 100.0 / total_events, 0) AS viewability_rate
+		FROM banner_perf
+		WHERE created_at >= now() - toIntervalDay(?)
+		GROUP BY device_type, browser
+		ORDER BY total_events DESC
+	`, days)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse reader: perf summary: %w", err)
+	}
+	defer rows.Close()
+
+	var result []PerfSummary
+	for rows.Next() {
+		var s PerfSummary
+		if err := rows.Scan(&s.DeviceType, &s.Browser, &s.TotalEvents, &s.AvgImageLoadMs, &s.AvgRenderMs, &s.AvgDwellTimeMs, &s.P95ImageLoadMs, &s.P95RenderMs, &s.ViewabilityRate); err != nil {
+			return nil, fmt.Errorf("clickhouse reader: scan perf summary: %w", err)
+		}
+		result = append(result, s)
+	}
+	if result == nil {
+		result = []PerfSummary{}
+	}
+	return result, rows.Err()
+}
+
+// DeviceBreakdown holds event counts by device/OS/browser.
+type DeviceBreakdown struct {
+	DeviceType string  `json:"device_type"`
+	OS         string  `json:"os"`
+	Browser    string  `json:"browser"`
+	Events     uint64  `json:"events"`
+	Clicks     uint64  `json:"clicks"`
+	CTR        float64 `json:"ctr"`
+}
+
+// GetDeviceBreakdown returns banner impression/click stats grouped by device, OS, browser.
+func (r *Reader) GetDeviceBreakdown(ctx context.Context, days int) ([]DeviceBreakdown, error) {
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			device_type,
+			os,
+			browser,
+			countIf(event_type = 'banner_impression') AS events,
+			countIf(event_type = 'banner_click') AS clicks,
+			if(events > 0, round(clicks * 100.0 / events, 2), 0) AS ctr
+		FROM events
+		WHERE created_at >= now() - toIntervalDay(?)
+			AND event_type IN ('banner_impression', 'banner_click')
+			AND device_type != ''
+		GROUP BY device_type, os, browser
+		ORDER BY events DESC
+		LIMIT 50
+	`, days)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse reader: device breakdown: %w", err)
+	}
+	defer rows.Close()
+
+	var result []DeviceBreakdown
+	for rows.Next() {
+		var s DeviceBreakdown
+		if err := rows.Scan(&s.DeviceType, &s.OS, &s.Browser, &s.Events, &s.Clicks, &s.CTR); err != nil {
+			return nil, fmt.Errorf("clickhouse reader: scan device breakdown: %w", err)
+		}
+		result = append(result, s)
+	}
+	if result == nil {
+		result = []DeviceBreakdown{}
+	}
+	return result, rows.Err()
+}
+
+// ReferrerStat holds traffic stats by referrer domain.
+type ReferrerStat struct {
+	ReferrerDomain string  `json:"referrer_domain"`
+	Impressions    uint64  `json:"impressions"`
+	Clicks         uint64  `json:"clicks"`
+	CTR            float64 `json:"ctr"`
+}
+
+// GetReferrerStats returns banner impression/click stats grouped by referrer domain.
+func (r *Reader) GetReferrerStats(ctx context.Context, days int) ([]ReferrerStat, error) {
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			domain(referrer) AS referrer_domain,
+			countIf(event_type = 'banner_impression') AS impressions,
+			countIf(event_type = 'banner_click') AS clicks,
+			if(impressions > 0, round(clicks * 100.0 / impressions, 2), 0) AS ctr
+		FROM events
+		WHERE created_at >= now() - toIntervalDay(?)
+			AND event_type IN ('banner_impression', 'banner_click')
+			AND referrer != ''
+		GROUP BY referrer_domain
+		HAVING referrer_domain != ''
+		ORDER BY impressions DESC
+		LIMIT 50
+	`, days)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse reader: referrer stats: %w", err)
+	}
+	defer rows.Close()
+
+	var result []ReferrerStat
+	for rows.Next() {
+		var s ReferrerStat
+		if err := rows.Scan(&s.ReferrerDomain, &s.Impressions, &s.Clicks, &s.CTR); err != nil {
+			return nil, fmt.Errorf("clickhouse reader: scan referrer stat: %w", err)
+		}
+		result = append(result, s)
+	}
+	if result == nil {
+		result = []ReferrerStat{}
+	}
+	return result, rows.Err()
+}
+
+// ─── Traffic Explorer ────────────────────────────────────────────────────────
+
+// allowedDimensions maps user-facing dimension names to ClickHouse column expressions.
+var allowedDimensions = map[string]string{
+	"date":         "toString(toDate(created_at))",
+	"source":       "source",
+	"referrer":     "domain(referrer)",
+	"country":      "country",
+	"device_type":  "device_type",
+	"os":           "os",
+	"browser":      "browser",
+	"event_type":   "event_type",
+	"utm_source":   "utm_source",
+	"utm_medium":   "utm_medium",
+	"utm_campaign": "utm_campaign",
+}
+
+var allowedTrafficSorts = map[string]string{
+	"total_events":    "total_events",
+	"impressions":     "impressions",
+	"clicks":          "clicks",
+	"profile_views":   "profile_views",
+	"conversions":     "conversions",
+	"unique_sessions": "unique_sessions",
+	"ctr":             "ctr",
+	"conversion_rate": "conversion_rate",
+	"dimension1":      "dimension1",
+	"dimension2":      "dimension2",
+}
+
+var allowedFilterColumns = map[string]string{
+	"source":       "source",
+	"country":      "country",
+	"device_type":  "device_type",
+	"os":           "os",
+	"browser":      "browser",
+	"event_type":   "event_type",
+	"utm_source":   "utm_source",
+	"utm_medium":   "utm_medium",
+	"utm_campaign": "utm_campaign",
+	"referrer":     "domain(referrer)",
+}
+
+// TrafficStatsParams holds validated query parameters for the traffic explorer.
+type TrafficStatsParams struct {
+	GroupBy  string
+	GroupBy2 string
+	Days     int
+	Filters  map[string]string
+	SortBy   string
+	SortDir  string
+}
+
+// TrafficStatsRow represents one row in the traffic explorer results.
+type TrafficStatsRow struct {
+	Dimension1     string  `json:"dimension1"`
+	Dimension2     string  `json:"dimension2,omitempty"`
+	TotalEvents    uint64  `json:"total_events"`
+	Impressions    uint64  `json:"impressions"`
+	Clicks         uint64  `json:"clicks"`
+	ProfileViews   uint64  `json:"profile_views"`
+	Conversions    uint64  `json:"conversions"`
+	UniqueSessions uint64  `json:"unique_sessions"`
+	CTR            float64 `json:"ctr"`
+	ConversionRate float64 `json:"conversion_rate"`
+}
+
+// TrafficStatsResult holds rows and summary.
+type TrafficStatsResult struct {
+	Rows     []TrafficStatsRow `json:"rows"`
+	Summary  TrafficStatsRow   `json:"summary"`
+	GroupBy  string            `json:"group_by"`
+	GroupBy2 string            `json:"group_by2,omitempty"`
+	Days     int               `json:"days"`
+}
+
+// GetTrafficStats queries ClickHouse with dynamic GROUP BY and filters.
+func (r *Reader) GetTrafficStats(ctx context.Context, p TrafficStatsParams) (*TrafficStatsResult, error) {
+	dim1Expr, ok := allowedDimensions[p.GroupBy]
+	if !ok {
+		return nil, fmt.Errorf("invalid group_by: %s", p.GroupBy)
+	}
+
+	selectCols := fmt.Sprintf("%s AS dimension1", dim1Expr)
+	groupCols := "dimension1"
+	hasSecondary := false
+
+	if p.GroupBy2 != "" {
+		dim2Expr, ok := allowedDimensions[p.GroupBy2]
+		if !ok {
+			return nil, fmt.Errorf("invalid group_by2: %s", p.GroupBy2)
+		}
+		selectCols += fmt.Sprintf(", %s AS dimension2", dim2Expr)
+		groupCols += ", dimension2"
+		hasSecondary = true
+	}
+
+	whereParts := []string{"created_at > now() - toIntervalDay(?)"}
+	args := []interface{}{p.Days}
+
+	for filterName, filterVal := range p.Filters {
+		col, ok := allowedFilterColumns[filterName]
+		if !ok {
+			continue
+		}
+		whereParts = append(whereParts, fmt.Sprintf("%s = ?", col))
+		args = append(args, filterVal)
+	}
+
+	whereClause := strings.Join(whereParts, " AND ")
+
+	sortCol := "total_events"
+	if sc, ok := allowedTrafficSorts[p.SortBy]; ok {
+		sortCol = sc
+	}
+	sortDir := "DESC"
+	if p.SortDir == "asc" {
+		sortDir = "ASC"
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			%s,
+			count() AS total_events,
+			countIf(event_type IN ('feed_impression', 'profile_thumb_impression', 'banner_impression')) AS impressions,
+			countIf(event_type IN ('feed_click', 'click', 'profile_thumb_click', 'banner_click')) AS clicks,
+			countIf(event_type = 'profile_view') AS profile_views,
+			countIf(event_type IN ('social_click', 'content_click')) AS conversions,
+			uniq(session_id) AS unique_sessions,
+			if(impressions > 0, round(clicks * 100.0 / impressions, 2), 0) AS ctr,
+			if(clicks > 0, round(conversions * 100.0 / clicks, 2), 0) AS conversion_rate
+		FROM events
+		WHERE %s
+		GROUP BY %s
+		ORDER BY %s %s
+		LIMIT 500
+	`, selectCols, whereClause, groupCols, sortCol, sortDir)
+
+	rows, err := r.conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse reader: traffic stats: %w", err)
+	}
+	defer rows.Close()
+
+	var result []TrafficStatsRow
+	for rows.Next() {
+		var row TrafficStatsRow
+		var scanArgs []interface{}
+		scanArgs = append(scanArgs, &row.Dimension1)
+		if hasSecondary {
+			scanArgs = append(scanArgs, &row.Dimension2)
+		}
+		scanArgs = append(scanArgs, &row.TotalEvents, &row.Impressions, &row.Clicks,
+			&row.ProfileViews, &row.Conversions, &row.UniqueSessions, &row.CTR, &row.ConversionRate)
+
+		if err := rows.Scan(scanArgs...); err != nil {
+			return nil, fmt.Errorf("clickhouse reader: scan traffic stat: %w", err)
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("clickhouse reader: traffic stats rows: %w", err)
+	}
+	if result == nil {
+		result = []TrafficStatsRow{}
+	}
+
+	// Compute summary.
+	var summary TrafficStatsRow
+	for _, row := range result {
+		summary.TotalEvents += row.TotalEvents
+		summary.Impressions += row.Impressions
+		summary.Clicks += row.Clicks
+		summary.ProfileViews += row.ProfileViews
+		summary.Conversions += row.Conversions
+		summary.UniqueSessions += row.UniqueSessions
+	}
+	if summary.Impressions > 0 {
+		summary.CTR = math.Round(float64(summary.Clicks)*10000/float64(summary.Impressions)) / 100
+	}
+	if summary.Clicks > 0 {
+		summary.ConversionRate = math.Round(float64(summary.Conversions)*10000/float64(summary.Clicks)) / 100
+	}
+
+	return &TrafficStatsResult{
+		Rows:     result,
+		Summary:  summary,
+		GroupBy:  p.GroupBy,
+		GroupBy2: p.GroupBy2,
+		Days:     p.Days,
+	}, nil
+}
+
+// DimensionValues holds distinct values for a single dimension.
+type DimensionValues struct {
+	Dimension string   `json:"dimension"`
+	Values    []string `json:"values"`
+}
+
+// GetTrafficDimensions returns distinct values for filterable dimensions.
+func (r *Reader) GetTrafficDimensions(ctx context.Context, days int) ([]DimensionValues, error) {
+	dims := []struct {
+		name string
+		expr string
+	}{
+		{"source", "source"},
+		{"country", "country"},
+		{"device_type", "device_type"},
+		{"os", "os"},
+		{"browser", "browser"},
+		{"event_type", "event_type"},
+		{"utm_source", "utm_source"},
+		{"utm_medium", "utm_medium"},
+		{"utm_campaign", "utm_campaign"},
+	}
+
+	var result []DimensionValues
+	for _, d := range dims {
+		query := fmt.Sprintf(`
+			SELECT DISTINCT %s AS val
+			FROM events
+			WHERE created_at > now() - toIntervalDay(?)
+				AND %s != ''
+			ORDER BY val
+			LIMIT 100
+		`, d.expr, d.expr)
+
+		rows, err := r.conn.Query(ctx, query, days)
+		if err != nil {
+			slog.Error("clickhouse: get dimension values", "error", err, "dimension", d.name)
+			result = append(result, DimensionValues{Dimension: d.name, Values: []string{}})
+			continue
+		}
+
+		var vals []string
+		for rows.Next() {
+			var v string
+			if err := rows.Scan(&v); err != nil {
+				continue
+			}
+			vals = append(vals, v)
+		}
+		rows.Close()
+		if vals == nil {
+			vals = []string{}
+		}
+		result = append(result, DimensionValues{Dimension: d.name, Values: vals})
+	}
+
+	return result, nil
 }

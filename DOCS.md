@@ -1,6 +1,6 @@
 # xxxaccounter — Документация
 
-> Последнее обновление: 2026-03-07 (banner mass actions, style preview, re-grab)
+> Последнее обновление: 2026-03-07 (SEO audit + comprehensive fixes)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
 ---
@@ -236,15 +236,55 @@
   - Фильтр по дате (7/30/90 дней)
 - Список баннеров дополнен колонкой Hovers и breakdown по источникам
 
+### 5.2 Banner Metrics & Performance Analytics
+
+Расширение баннерной аналитики: сбор метрик производительности, парсинг User-Agent, клиентский контекст (устройство, экран, соединение, UTM), performance beacons для каждого баннер-показа.
+
+**Что собирается автоматически:**
+
+*Серверная сторона (при каждом banner_impression):*
+- **Browser** -- Chrome, Firefox, Safari, Edge, Opera, Samsung Browser, UC Browser, Other
+- **OS** -- Windows, macOS, Linux, Android, iOS, Chrome OS, Other
+- **Device Type** -- desktop, mobile, tablet, bot
+- **IP, Referrer** -- из HTTP request headers
+
+*Клиентская сторона (через loader.js):*
+- **Screen/Viewport** -- разрешение экрана и размер viewport
+- **Language** -- язык браузера (navigator.language)
+- **Connection Type** -- тип соединения (4g, 3g, wifi via navigator.connection)
+- **Page URL** -- URL страницы издателя
+- **UTM параметры** -- utm_source, utm_medium, utm_campaign
+
+*Performance beacon (при уходе со страницы):*
+- **Image Load Time** -- время загрузки изображения баннера (ms)
+- **Render Time** -- время рендеринга HTML (DOMContentLoaded, ms)
+- **Time to Visible** -- время до попадания в видимую область (IntersectionObserver, ms)
+- **Dwell Time** -- общее время видимости баннера (ms)
+- **Hover Duration** -- длительность наведения мыши (ms)
+- **Viewability** -- IAB стандарт: баннер считается "viewable" если >= 50% видимо >= 1 секунды
+
+**Admin Dashboard (Promo -- Performance tab):**
+- **Overview Cards** -- средние значения: image load time, render time, viewability %, dwell time
+- **Device Breakdown** -- разбивка событий по device_type, browser, OS
+- **Top Referrers** -- откуда приходит баннерный трафик
+- **Period Selector** -- 7 / 30 / 90 дней
+
+**Хранение:**
+- Обогащённые события -- ClickHouse `events` (14 новых колонок: browser, os, device_type, screen/viewport, language, connection, page_url, country, UTM)
+- Performance метрики -- ClickHouse `banner_perf` (отдельная таблица, TTL 6 месяцев)
+- Materialized Views: `mv_banner_perf_daily` (AggregatingMergeTree), `mv_events_device_daily` (SummingMergeTree)
+
+**Migration:** `scripts/migrations/012_clickhouse_banner_metrics.sql`
+
 ### 6. Админка (xcj)
 
 Веб-панель для управления платформой:
-- **Dashboard** — общая статистика (видео, аккаунты, очередь парсинга)
-- **Accounts** — добавлять/удалять источники контента, запускать парсинг, фильтр по оплате (paid/free), включение/отключение промоушена. Страница аккаунта: табы Stats (по умолчанию), Fan Site Links, Promo. Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (Static JPEG / Bold / Elegant / Minimalist / Card), re-grab. Удаление аккаунта — **необратимое** (hard DELETE, каскадно удаляет все видео, баннеры, записи очередей)
-- **Videos** — просматривать, удалять, пере-категоризировать видео
+- **Dashboard** -- общая статистика (видео, аккаунты, очередь парсинга)
+- **Accounts** -- добавлять/удалять источники контента, запускать парсинг, фильтр по оплате (paid/free), включение/отключение промоушена. Страница аккаунта: табы Stats (по умолчанию), Fan Site Links, Promo. Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (Static JPEG / Bold / Elegant / Minimalist / Card), re-grab. Удаление аккаунта -- **необратимое** (hard DELETE, каскадно удаляет все видео, баннеры, записи очередей)
+- **Videos** -- просматривать, удалять, пере-категоризировать видео
 - **Stats** — аналитика сайта: тумбы с показами, кликами, CTR
 - **Queue** — статус очереди парсинга (pending/running/done/failed)
-- **Promo** — все баннеры по всем paid-аккаунтам, управление размерами баннеров, embed-код для внешних сайтов. Три вкладки: Баннеры (список с hovers + source breakdown + embed-код через loader.js `<script>` тег с выбором стиля), Настройки (conversion tracker + ad sources), Статистика (воронка по источникам)
+- **Promo** — все баннеры по всем paid-аккаунтам, управление размерами баннеров, embed-код для внешних сайтов. Четыре вкладки: Баннеры (список с hovers + source breakdown + embed-код через loader.js `<script>` тег с выбором стиля), Настройки (conversion tracker + ad sources), Статистика (воронка по источникам), Performance (overview cards, device breakdown, top referrers)
 - **Ad Sources** — управление рекламными сетями (name, postback URL шаблон, active/inactive)
 - **Categories** — управление категориями
 
@@ -314,6 +354,23 @@
 - Админка (xcj): dashboard, управление аккаунтами/видео/очередью/аналитикой
 - Трекинг: impression (IntersectionObserver), click → sendBeacon
 
+### SEO (аудит и оптимизация, 2026-03-07)
+
+Комплексный SEO-аудит проведён через Lighthouse. Результаты: **SEO 100**, Performance 76, Best Practices 96, Accessibility 79.
+
+**Что реализовано:**
+- **OG/Twitter images** — динамическая генерация Open Graph (1200x630) и Twitter Card изображений с брендингом TemptGuide (`opengraph-image.tsx`, `twitter-image.tsx`)
+- **Twitter Cards** — полные мета-теги twitter:card, twitter:title, twitter:description, twitter:images на всех динамических страницах (model, video, category, country, account)
+- **Sitemap** — расширен: модели (через getAccounts), аккаунты, 15 стран, /categories, пагинированные видео (до 500)
+- **robots.txt** — блокирует /api/, /search, /admin
+- **Structured Data (JSON-LD)** — VideoObject (с правильным uploadDate из published_at), Person, BreadcrumbList, WebSite с SearchAction
+- **Heading hierarchy** — исправлены `<p>` на `<h1>` на страницах категорий, аккаунтов, homepage
+- **Emoji-only titles** — fallback для видео без текстового заголовка: "Video by @username on Platform"
+- **Canonical URLs** — на homepage и /categories
+- **Image domains** — ограничены в next.config.mjs (вместо wildcard `**`): media.temptguide.com, *.cdninstagram.com, *.fbcdn.net, pbs.twimg.com, abs.twimg.com
+
+**Известная проблема:** LCP 5.9s на мобильном — lazy-loading VideoCard в фиде. Hero image на /video/[id] уже имеет `priority`. Требует отдельной оптимизации.
+
 ## Потоки данных
 
 ### Добавление контента
@@ -363,10 +420,13 @@ Go API → EventBuffer (in-memory)
 - **banner_queue** — очередь генерации баннеров
 
 ### ClickHouse — аналитика
-- **events** — все события (impression, click, hover, view, banner_impression, banner_click)
-- **mv_banner_daily** — materialized view с агрегацией banner impressions/clicks по дням
+- **events** — все события (impression, click, hover, view, banner_impression, banner_click) + 14 колонок метрик (browser, os, device_type, screen/viewport, language, connection, page_url, country, UTM)
+- **banner_perf** — метрики производительности баннеров (image load, render, dwell time, viewability, hover duration). TTL 6 месяцев
+- **mv_banner_daily** — materialized view: агрегация banner impressions/clicks по дням
+- **mv_banner_perf_daily** — materialized view: агрегация performance метрик по дням (AggregatingMergeTree)
+- **mv_events_device_daily** — materialized view: разбивка событий по device/browser/OS по дням
   - Партиционирование по месяцам, TTL 12 месяцев
-  - Быстрые агрегации: countIf, GROUP BY
+  - Быстрые агрегации: countIf, avgState, quantileState, GROUP BY
 
 ### Redis — кеш
 - Списки видео (60 сек)

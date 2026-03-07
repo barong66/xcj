@@ -11,6 +11,9 @@ import {
   updateAdSource,
   getBannerFunnel,
   getPostbacks,
+  getPerfSummary,
+  getDeviceBreakdown,
+  getReferrerStats,
 } from "@/lib/admin-api";
 import type {
   AdminBanner,
@@ -18,12 +21,15 @@ import type {
   AdSource,
   BannerFunnelStat,
   ConversionPostback,
+  PerfSummary,
+  DeviceBreakdown,
+  ReferrerStat,
 } from "@/lib/admin-api";
 import { ToastProvider, useToast } from "../Toast";
 
 // ─── Tab types ───────────────────────────────────────────────────────────────
 
-type PromoTab = "banners" | "statistics" | "settings";
+type PromoTab = "banners" | "statistics" | "performance" | "settings";
 
 // ─── Banners Tab ─────────────────────────────────────────────────────────────
 
@@ -778,6 +784,217 @@ function SettingsTab({
   );
 }
 
+// ─── Performance Tab ─────────────────────────────────────────────────────────
+
+function PerformanceTab() {
+  const [days, setDays] = useState(7);
+  const [perfSummary, setPerfSummary] = useState<PerfSummary[]>([]);
+  const [deviceBreakdown, setDeviceBreakdown] = useState<DeviceBreakdown[]>([]);
+  const [referrerStats, setReferrerStats] = useState<ReferrerStat[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+
+  const loadData = useCallback(async (d: number) => {
+    setLoading(true);
+    try {
+      const [perfRes, deviceRes, refRes] = await Promise.all([
+        getPerfSummary(d),
+        getDeviceBreakdown(d),
+        getReferrerStats(d),
+      ]);
+      setPerfSummary(perfRes);
+      setDeviceBreakdown(deviceRes);
+      setReferrerStats(refRes);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to load performance data", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    loadData(days);
+  }, [days, loadData]);
+
+  // Compute overview aggregates from PerfSummary data.
+  const totalEvents = perfSummary.reduce((sum, r) => sum + r.total_events, 0);
+  const avgLoadTime = totalEvents > 0
+    ? perfSummary.reduce((sum, r) => sum + r.avg_image_load_ms * r.total_events, 0) / totalEvents
+    : 0;
+  const avgRenderTime = totalEvents > 0
+    ? perfSummary.reduce((sum, r) => sum + r.avg_render_ms * r.total_events, 0) / totalEvents
+    : 0;
+  const avgViewability = totalEvents > 0
+    ? perfSummary.reduce((sum, r) => sum + r.viewability_rate * r.total_events, 0) / totalEvents
+    : 0;
+  const avgDwellTime = totalEvents > 0
+    ? perfSummary.reduce((sum, r) => sum + r.avg_dwell_time_ms * r.total_events, 0) / totalEvents
+    : 0;
+
+  return (
+    <div>
+      {/* Period selector */}
+      <div className="flex items-center gap-2 mb-6">
+        {[7, 30, 90].map((d) => (
+          <button
+            key={d}
+            onClick={() => setDays(d)}
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              days === d
+                ? "bg-accent text-white"
+                : "bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525]"
+            }`}
+          >
+            {d}d
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <span className="text-[#6b6b6b] text-sm">Loading...</span>
+        </div>
+      ) : (
+        <>
+          {/* Overview cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+            {[
+              { label: "Avg Load Time", value: `${Math.round(avgLoadTime)} ms` },
+              { label: "Avg Render Time", value: `${Math.round(avgRenderTime)} ms` },
+              { label: "Viewability Rate", value: `${avgViewability.toFixed(1)}%` },
+              { label: "Avg Dwell Time", value: `${Math.round(avgDwellTime)} ms` },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="bg-[#141414] rounded-lg border border-[#1e1e1e] p-3"
+              >
+                <div className="text-[10px] text-[#6b6b6b] mb-0.5">{item.label}</div>
+                <div className="text-lg font-bold text-white">{item.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Performance by Device Type */}
+          {perfSummary.length > 0 ? (
+            <div className="bg-[#141414] rounded-lg border border-[#1e1e1e] overflow-hidden mb-6">
+              <div className="px-4 py-3 border-b border-[#1e1e1e]">
+                <h3 className="text-sm font-semibold text-white">Performance by Device Type</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-[#6b6b6b] text-xs border-b border-[#1e1e1e]">
+                      <th className="text-left px-4 py-2 font-medium">Device Type</th>
+                      <th className="text-right px-4 py-2 font-medium">Total Events</th>
+                      <th className="text-right px-4 py-2 font-medium">Avg Image Load (ms)</th>
+                      <th className="text-right px-4 py-2 font-medium">Avg Render (ms)</th>
+                      <th className="text-right px-4 py-2 font-medium">P95 Image Load (ms)</th>
+                      <th className="text-right px-4 py-2 font-medium">P95 Render (ms)</th>
+                      <th className="text-right px-4 py-2 font-medium">Viewability Rate (%)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {perfSummary.map((row, idx) => (
+                      <tr
+                        key={idx}
+                        className="border-b border-[#1e1e1e] last:border-b-0 hover:bg-[#1a1a1a] transition-colors"
+                      >
+                        <td className="px-4 py-2.5 text-white font-medium">{row.device_type}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.total_events.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{Math.round(row.avg_image_load_ms)}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{Math.round(row.avg_render_ms)}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{Math.round(row.p95_image_load_ms)}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{Math.round(row.p95_render_ms)}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.viewability_rate.toFixed(1)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-10 mb-6">
+              <span className="text-[#6b6b6b] text-sm">No performance data for this period</span>
+            </div>
+          )}
+
+          {/* Device & Browser Breakdown */}
+          {deviceBreakdown.length > 0 && (
+            <div className="bg-[#141414] rounded-lg border border-[#1e1e1e] overflow-hidden mb-6">
+              <div className="px-4 py-3 border-b border-[#1e1e1e]">
+                <h3 className="text-sm font-semibold text-white">Device & Browser Breakdown</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-[#6b6b6b] text-xs border-b border-[#1e1e1e]">
+                      <th className="text-left px-4 py-2 font-medium">Device</th>
+                      <th className="text-left px-4 py-2 font-medium">OS</th>
+                      <th className="text-left px-4 py-2 font-medium">Browser</th>
+                      <th className="text-right px-4 py-2 font-medium">Impressions</th>
+                      <th className="text-right px-4 py-2 font-medium">Clicks</th>
+                      <th className="text-right px-4 py-2 font-medium">CTR (%)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deviceBreakdown.map((row, idx) => (
+                      <tr
+                        key={idx}
+                        className="border-b border-[#1e1e1e] last:border-b-0 hover:bg-[#1a1a1a] transition-colors"
+                      >
+                        <td className="px-4 py-2.5 text-white font-medium">{row.device_type}</td>
+                        <td className="px-4 py-2.5 text-[#a0a0a0]">{row.os}</td>
+                        <td className="px-4 py-2.5 text-[#a0a0a0]">{row.browser}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.events.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.clicks.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.ctr.toFixed(1)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Top Referrers */}
+          {referrerStats.length > 0 && (
+            <div className="bg-[#141414] rounded-lg border border-[#1e1e1e] overflow-hidden">
+              <div className="px-4 py-3 border-b border-[#1e1e1e]">
+                <h3 className="text-sm font-semibold text-white">Top Referrers</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-[#6b6b6b] text-xs border-b border-[#1e1e1e]">
+                      <th className="text-left px-4 py-2 font-medium">Referrer Domain</th>
+                      <th className="text-right px-4 py-2 font-medium">Impressions</th>
+                      <th className="text-right px-4 py-2 font-medium">Clicks</th>
+                      <th className="text-right px-4 py-2 font-medium">CTR (%)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {referrerStats.map((row, idx) => (
+                      <tr
+                        key={idx}
+                        className="border-b border-[#1e1e1e] last:border-b-0 hover:bg-[#1a1a1a] transition-colors"
+                      >
+                        <td className="px-4 py-2.5 text-white font-medium">{row.referrer_domain}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.impressions.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.clicks.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.ctr.toFixed(1)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Main PromoContent ───────────────────────────────────────────────────────
 
 function PromoContent() {
@@ -809,6 +1026,7 @@ function PromoContent() {
   const tabs: { key: PromoTab; label: string }[] = [
     { key: "banners", label: "Banners" },
     { key: "statistics", label: "Statistics" },
+    { key: "performance", label: "Performance" },
     { key: "settings", label: "Settings" },
   ];
 
@@ -837,6 +1055,7 @@ function PromoContent() {
         <BannersTab sizes={sizes} sources={sources} onSizesChange={loadSizes} />
       )}
       {tab === "statistics" && <StatisticsTab />}
+      {tab === "performance" && <PerformanceTab />}
       {tab === "settings" && (
         <SettingsTab sources={sources} onSourcesChange={loadSources} />
       )}

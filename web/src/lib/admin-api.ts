@@ -537,7 +537,9 @@ export interface AdminBanner {
   account_id: number;
   video_id: number;
   banner_size_id: number;
+  video_frame_id: number | null;
   image_url: string;
+  source_image_url: string;
   width: number;
   height: number;
   is_active: boolean;
@@ -671,6 +673,16 @@ export async function batchRegenerateBanners(
   });
 }
 
+export async function recropBanner(
+  bannerId: number,
+  crop: { x: number; y: number; width: number; height: number },
+): Promise<{ image_url: string }> {
+  return adminFetch<{ image_url: string }>(`/banners/${bannerId}/recrop`, {
+    method: "POST",
+    body: JSON.stringify(crop),
+  });
+}
+
 // ─── Ad Sources ──────────────────────────────────────────────────────────────
 
 export interface AdSource {
@@ -757,4 +769,103 @@ export async function getPostbacks(
     `/postbacks${qs ? `?${qs}` : ""}`,
   );
   return res.postbacks;
+}
+
+// ─── Banner Performance Analytics ─────────────────────────────────────────────
+
+export interface PerfSummary {
+  device_type: string;
+  browser: string;
+  total_events: number;
+  avg_image_load_ms: number;
+  avg_render_ms: number;
+  avg_dwell_time_ms: number;
+  p95_image_load_ms: number;
+  p95_render_ms: number;
+  viewability_rate: number;
+}
+
+export interface DeviceBreakdown {
+  device_type: string;
+  os: string;
+  browser: string;
+  events: number;
+  clicks: number;
+  ctr: number;
+}
+
+export interface ReferrerStat {
+  referrer_domain: string;
+  category: string;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+}
+
+export async function getPerfSummary(days: number = 7): Promise<PerfSummary[]> {
+  return adminFetch<PerfSummary[]>(`/perf-summary?days=${days}`);
+}
+
+export async function getDeviceBreakdown(days: number = 7): Promise<DeviceBreakdown[]> {
+  return adminFetch<DeviceBreakdown[]>(`/device-breakdown?days=${days}`);
+}
+
+export async function getReferrerStats(days: number = 7): Promise<ReferrerStat[]> {
+  return adminFetch<ReferrerStat[]>(`/referrer-stats?days=${days}`);
+}
+
+// ─── Traffic Explorer ─────────────────────────────────────────────────────────
+
+export interface TrafficStatsRow {
+  dimension1: string;
+  dimension2?: string;
+  total_events: number;
+  impressions: number;
+  clicks: number;
+  profile_views: number;
+  conversions: number;
+  unique_sessions: number;
+  ctr: number;
+  conversion_rate: number;
+}
+
+export interface TrafficStatsResult {
+  rows: TrafficStatsRow[];
+  summary: TrafficStatsRow;
+  group_by: string;
+  group_by2?: string;
+  days: number;
+}
+
+export interface TrafficDimensionValues {
+  dimension: string;
+  values: string[];
+}
+
+export async function getTrafficStats(params: {
+  group_by?: string;
+  group_by2?: string;
+  days?: number;
+  sort?: string;
+  dir?: string;
+  [key: string]: string | number | undefined;
+}): Promise<TrafficStatsResult> {
+  const sp = new URLSearchParams();
+  Object.entries(params).forEach(([key, val]) => {
+    if (val !== undefined && val !== "") sp.set(key, String(val));
+  });
+  const qs = sp.toString();
+  return adminFetch<TrafficStatsResult>(`/traffic-stats${qs ? `?${qs}` : ""}`);
+}
+
+export async function getTrafficDimensions(
+  days?: number,
+): Promise<TrafficDimensionValues[]> {
+  const sp = new URLSearchParams();
+  if (days) sp.set("days", String(days));
+  const qs = sp.toString();
+  const res = await adminFetch<{ dimensions: TrafficDimensionValues[] }>(
+    `/traffic-stats/dimensions${qs ? `?${qs}` : ""}`,
+  );
+  return res.dimensions;
 }

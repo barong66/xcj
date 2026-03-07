@@ -47,6 +47,36 @@ func bannerExtra(bannerID int64, clickID string) string {
 	return fmt.Sprintf(`{"banner_id":%d}`, bannerID)
 }
 
+// enrichEvent fills parsed UA and client context fields on an event from the request.
+func enrichEvent(e *model.Event, r *http.Request) {
+	ua := ParseUA(r.UserAgent())
+	e.Browser = ua.Browser
+	e.OS = ua.OS
+	e.DeviceType = ua.DeviceType
+
+	q := r.URL.Query()
+	e.ScreenWidth, _ = strconv.Atoi(q.Get("sw"))
+	e.ScreenHeight, _ = strconv.Atoi(q.Get("sh"))
+	e.ViewportWidth, _ = strconv.Atoi(q.Get("vw"))
+	e.ViewportHeight, _ = strconv.Atoi(q.Get("vh"))
+	e.Language = q.Get("lang")
+	e.ConnectionType = q.Get("ct")
+	e.PageURL = q.Get("pu")
+	e.UTMSource = q.Get("utm_source")
+	e.UTMMedium = q.Get("utm_medium")
+	e.UTMCampaign = q.Get("utm_campaign")
+}
+
+func parseInt64(s string) int64 {
+	v, _ := strconv.ParseInt(s, 10, 64)
+	return v
+}
+
+func parseIntParam(s string) int {
+	v, _ := strconv.Atoi(s)
+	return v
+}
+
 // 1x1 transparent GIF for pixel tracking responses.
 var transparentGIF = []byte{
 	0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00,
@@ -84,7 +114,7 @@ func (h *BannerHandler) ServeBanner(w http.ResponseWriter, r *http.Request) {
 	src := r.URL.Query().Get("src")
 	clickID := r.URL.Query().Get("click_id")
 
-	h.buffer.Push(model.Event{
+	ev := model.Event{
 		SiteID:    0,
 		VideoID:   banner.VideoID,
 		AccountID: banner.AccountID,
@@ -95,7 +125,9 @@ func (h *BannerHandler) ServeBanner(w http.ResponseWriter, r *http.Request) {
 		Extra:     bannerExtra(banner.ID, clickID),
 		Source:    src,
 		CreatedAt: time.Now().UTC(),
-	})
+	}
+	enrichEvent(&ev, r)
+	h.buffer.Push(ev)
 
 	http.Redirect(w, r, banner.ImageURL, http.StatusFound)
 }
@@ -122,7 +154,7 @@ func (h *BannerHandler) ClickBanner(w http.ResponseWriter, r *http.Request) {
 	src := r.URL.Query().Get("src")
 	clickID := r.URL.Query().Get("click_id")
 
-	h.buffer.Push(model.Event{
+	ev := model.Event{
 		SiteID:    0,
 		VideoID:   banner.VideoID,
 		AccountID: banner.AccountID,
@@ -133,7 +165,9 @@ func (h *BannerHandler) ClickBanner(w http.ResponseWriter, r *http.Request) {
 		Extra:     bannerExtra(banner.ID, clickID),
 		Source:    src,
 		CreatedAt: time.Now().UTC(),
-	})
+	}
+	enrichEvent(&ev, r)
+	h.buffer.Push(ev)
 
 	slug, err := h.admin.GetAccountSlug(r.Context(), banner.AccountID)
 	if err != nil || slug == "" {
@@ -177,7 +211,7 @@ func (h *BannerHandler) HoverBanner(w http.ResponseWriter, r *http.Request) {
 	src := r.URL.Query().Get("src")
 	clickID := r.URL.Query().Get("click_id")
 
-	h.buffer.Push(model.Event{
+	ev := model.Event{
 		SiteID:    0,
 		VideoID:   banner.VideoID,
 		AccountID: banner.AccountID,
@@ -188,8 +222,43 @@ func (h *BannerHandler) HoverBanner(w http.ResponseWriter, r *http.Request) {
 		Extra:     bannerExtra(banner.ID, clickID),
 		Source:    src,
 		CreatedAt: time.Now().UTC(),
-	})
+	}
+	enrichEvent(&ev, r)
+	h.buffer.Push(ev)
 
+	writeTransparentPixel(w)
+}
+
+// HandlePerfBeacon handles GET /b/perf — receives performance metrics beacon from banner JS.
+func (h *BannerHandler) HandlePerfBeacon(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	bannerID, _ := strconv.ParseInt(q.Get("bid"), 10, 64)
+	if bannerID == 0 {
+		writeTransparentPixel(w)
+		return
+	}
+
+	ua := ParseUA(r.UserAgent())
+
+	p := model.PerfEvent{
+		BannerID:        bannerID,
+		VideoID:         parseInt64(q.Get("vid")),
+		AccountID:       parseInt64(q.Get("aid")),
+		ImageLoadMs:     parseIntParam(q.Get("ilt")),
+		RenderMs:        parseIntParam(q.Get("rt")),
+		TimeToVisibleMs: parseIntParam(q.Get("ttv")),
+		DwellTimeMs:     parseIntParam(q.Get("dt")),
+		HoverDurationMs: parseIntParam(q.Get("hd")),
+		IsViewable:      q.Get("vb") == "1",
+		Browser:         ua.Browser,
+		OS:              ua.OS,
+		DeviceType:      ua.DeviceType,
+		ScreenWidth:     parseIntParam(q.Get("sw")),
+		ScreenHeight:    parseIntParam(q.Get("sh")),
+		ConnectionType:  q.Get("ct"),
+	}
+
+	go h.buffer.InsertPerfEvent(context.Background(), &p)
 	writeTransparentPixel(w)
 }
 
@@ -242,7 +311,7 @@ func (h *BannerHandler) ServeDynamic(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log impression asynchronously.
-	h.buffer.Push(model.Event{
+	ev := model.Event{
 		SiteID:    0,
 		VideoID:   banner.VideoID,
 		AccountID: banner.AccountID,
@@ -253,7 +322,9 @@ func (h *BannerHandler) ServeDynamic(w http.ResponseWriter, r *http.Request) {
 		Extra:     bannerExtra(banner.ID, clickID),
 		Source:    eventSource,
 		CreatedAt: time.Now().UTC(),
-	})
+	}
+	enrichEvent(&ev, r)
+	h.buffer.Push(ev)
 
 	// Build click URL with source params.
 	clickURL := fmt.Sprintf("/b/%d/click", banner.ID)
@@ -293,6 +364,12 @@ func (h *BannerHandler) ServeDynamic(w http.ResponseWriter, r *http.Request) {
 		thumbURL = banner.ImageURL
 	}
 
+	// Build perf beacon URL.
+	perfURL := fmt.Sprintf("/b/perf?bid=%d&vid=%d&aid=%d", banner.ID, banner.VideoID, banner.AccountID)
+	if h.siteBaseURL != "" {
+		perfURL = h.siteBaseURL + perfURL
+	}
+
 	tmpl := pickBannerStyle(style)
 	data := bannerTemplateData{
 		ThumbnailURL: thumbURL,
@@ -301,6 +378,10 @@ func (h *BannerHandler) ServeDynamic(w http.ResponseWriter, r *http.Request) {
 		HoverURL:     hoverURL,
 		Width:        banner.Width,
 		Height:       banner.Height,
+		BannerID:     banner.ID,
+		VideoID:      banner.VideoID,
+		AccountID:    banner.AccountID,
+		PerfURL:      perfURL,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -465,9 +546,17 @@ var freq={};
 for(var i=0;i<words.length;i++){var w=words[i];if(!stop[w])freq[w]=(freq[w]||0)+1}
 var sorted=Object.keys(freq).sort(function(a,b){return freq[b]-freq[a]});
 var kw=sorted.slice(0,5).join(',');
+var sw=screen.width;var sh=screen.height;
+var vw=window.innerWidth;var vh=window.innerHeight;
+var lang=(navigator.language||'').substring(0,5);
+var ct='';try{var conn=navigator.connection||navigator.mozConnection||navigator.webkitConnection;if(conn)ct=conn.effectiveType||''}catch(e){}
+var pu=encodeURIComponent(location.href);
+var ups=new URLSearchParams(location.search);
+var us=ups.get('utm_source')||'';var um=ups.get('utm_medium')||'';var uc=ups.get('utm_campaign')||'';
+var ref=encodeURIComponent(document.referrer);
 var p=sz.split('x');
 var base='%s';
-var url=base+'/b/serve?size='+sz+(kw?'&kw='+encodeURIComponent(kw):'')+(src?'&src='+encodeURIComponent(src):'')+(cid?'&click_id='+encodeURIComponent(cid):'')+(st?'&style='+encodeURIComponent(st):'');
+var url=base+'/b/serve?size='+sz+(kw?'&kw='+encodeURIComponent(kw):'')+(src?'&src='+encodeURIComponent(src):'')+(cid?'&click_id='+encodeURIComponent(cid):'')+(st?'&style='+encodeURIComponent(st):'')+'&sw='+sw+'&sh='+sh+'&vw='+vw+'&vh='+vh+'&lang='+encodeURIComponent(lang)+'&ct='+encodeURIComponent(ct)+'&pu='+pu+'&ref='+ref+(us?'&utm_source='+encodeURIComponent(us):'')+(um?'&utm_medium='+encodeURIComponent(um):'')+(uc?'&utm_campaign='+encodeURIComponent(uc):'')+'&t0='+Date.now();
 var div=document.createElement('div');
 div.style.cssText='width:'+p[0]+'px;height:'+p[1]+'px;display:inline-block';
 s.parentNode.insertBefore(div,s);

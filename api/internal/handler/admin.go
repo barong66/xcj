@@ -1,19 +1,28 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"image"
+	"image/jpeg"
+	_ "image/png"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/xcj/videosite-api/internal/cache"
 	"github.com/xcj/videosite-api/internal/clickhouse"
+	s3client "github.com/xcj/videosite-api/internal/s3"
 	"github.com/xcj/videosite-api/internal/store"
 	"github.com/xcj/videosite-api/internal/worker"
+	"golang.org/x/image/draw"
 )
 
 type AdminHandler struct {
@@ -21,10 +30,11 @@ type AdminHandler struct {
 	ch        *clickhouse.Reader
 	workerMgr *worker.Manager
 	cache     *cache.Cache
+	s3        *s3client.Client
 }
 
-func NewAdminHandler(admin *store.AdminStore, ch *clickhouse.Reader, workerMgr *worker.Manager, c *cache.Cache) *AdminHandler {
-	return &AdminHandler{admin: admin, ch: ch, workerMgr: workerMgr, cache: c}
+func NewAdminHandler(admin *store.AdminStore, ch *clickhouse.Reader, workerMgr *worker.Manager, c *cache.Cache, s3 *s3client.Client) *AdminHandler {
+	return &AdminHandler{admin: admin, ch: ch, workerMgr: workerMgr, cache: c, s3: s3}
 }
 
 // AdminAuth is middleware that checks the Bearer token against the ADMIN_TOKEN env var.
@@ -932,4 +942,243 @@ func (h *AdminHandler) ListPostbacks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"postbacks": postbacks})
+}
+
+// ─── Performance Metrics ─────────────────────────────────────────────────────
+
+// GetPerfSummary handles GET /api/v1/admin/perf-summary
+func (h *AdminHandler) GetPerfSummary(w http.ResponseWriter, r *http.Request) {
+	days := intParam(r, "days", 7)
+	if days < 1 || days > 365 {
+		days = 7
+	}
+	stats, err := h.ch.GetPerfSummary(r.Context(), days)
+	if err != nil {
+		slog.Error("admin: perf summary", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get perf summary")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+// GetDeviceBreakdown handles GET /api/v1/admin/device-breakdown
+func (h *AdminHandler) GetDeviceBreakdown(w http.ResponseWriter, r *http.Request) {
+	days := intParam(r, "days", 7)
+	if days < 1 || days > 365 {
+		days = 7
+	}
+	stats, err := h.ch.GetDeviceBreakdown(r.Context(), days)
+	if err != nil {
+		slog.Error("admin: device breakdown", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get device breakdown")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+// GetReferrerStats handles GET /api/v1/admin/referrer-stats
+func (h *AdminHandler) GetReferrerStats(w http.ResponseWriter, r *http.Request) {
+	days := intParam(r, "days", 7)
+	if days < 1 || days > 365 {
+		days = 7
+	}
+	stats, err := h.ch.GetReferrerStats(r.Context(), days)
+	if err != nil {
+		slog.Error("admin: referrer stats", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get referrer stats")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+// ─── Traffic Explorer ─────────────────────────────────────────────────────────
+
+// GetTrafficStats handles GET /api/v1/admin/traffic-stats
+func (h *AdminHandler) GetTrafficStats(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	groupBy := q.Get("group_by")
+	if groupBy == "" {
+		groupBy = "date"
+	}
+
+	days := intParam(r, "days", 30)
+	if days < 1 || days > 365 {
+		days = 30
+	}
+
+	filterKeys := []string{"source", "country", "device_type", "browser", "os",
+		"event_type", "utm_source", "utm_medium", "utm_campaign", "referrer"}
+	filters := make(map[string]string)
+	for _, key := range filterKeys {
+		if val := q.Get(key); val != "" {
+			filters[key] = val
+		}
+	}
+
+	params := clickhouse.TrafficStatsParams{
+		GroupBy:  groupBy,
+		GroupBy2: q.Get("group_by2"),
+		Days:     days,
+		Filters:  filters,
+		SortBy:   q.Get("sort"),
+		SortDir:  q.Get("dir"),
+	}
+
+	result, err := h.ch.GetTrafficStats(r.Context(), params)
+	if err != nil {
+		slog.Error("admin: traffic stats", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get traffic stats")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetTrafficDimensions handles GET /api/v1/admin/traffic-stats/dimensions
+func (h *AdminHandler) GetTrafficDimensions(w http.ResponseWriter, r *http.Request) {
+	days := intParam(r, "days", 30)
+	if days < 1 || days > 365 {
+		days = 30
+	}
+
+	dims, err := h.ch.GetTrafficDimensions(r.Context(), days)
+	if err != nil {
+		slog.Error("admin: traffic dimensions", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get dimensions")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"dimensions": dims})
+}
+
+// ─── Banner Recrop ────────────────────────────────────────────────────────────
+
+// RecropBanner handles POST /api/v1/admin/banners/{id}/recrop
+func (h *AdminHandler) RecropBanner(w http.ResponseWriter, r *http.Request) {
+	if h.s3 == nil {
+		writeError(w, http.StatusServiceUnavailable, "S3 not configured")
+		return
+	}
+
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid banner id")
+		return
+	}
+
+	var input struct {
+		X      int `json:"x"`
+		Y      int `json:"y"`
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if input.Width <= 0 || input.Height <= 0 {
+		writeError(w, http.StatusBadRequest, "width and height must be positive")
+		return
+	}
+
+	// Get banner info and source image URL.
+	info, err := h.admin.GetBannerForRecrop(r.Context(), id)
+	if err != nil {
+		if strings.Contains(err.Error(), "no rows") {
+			writeError(w, http.StatusNotFound, "banner not found")
+			return
+		}
+		slog.Error("admin: get banner for recrop", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to get banner")
+		return
+	}
+	if info.SourceImageURL == "" {
+		writeError(w, http.StatusBadRequest, "no source image available")
+		return
+	}
+
+	// Download source image.
+	resp, err := http.Get(info.SourceImageURL)
+	if err != nil {
+		slog.Error("admin: download source image", "error", err, "url", info.SourceImageURL)
+		writeError(w, http.StatusInternalServerError, "failed to download source image")
+		return
+	}
+	defer resp.Body.Close()
+
+	srcData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Error("admin: read source image", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to read source image")
+		return
+	}
+
+	// Decode image.
+	srcImg, _, err := image.Decode(bytes.NewReader(srcData))
+	if err != nil {
+		slog.Error("admin: decode source image", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to decode source image")
+		return
+	}
+
+	// Validate crop bounds.
+	bounds := srcImg.Bounds()
+	if input.X < 0 || input.Y < 0 ||
+		input.X+input.Width > bounds.Dx() || input.Y+input.Height > bounds.Dy() {
+		writeError(w, http.StatusBadRequest, "crop area out of bounds")
+		return
+	}
+
+	// Crop.
+	cropRect := image.Rect(input.X, input.Y, input.X+input.Width, input.Y+input.Height)
+	type subImager interface {
+		SubImage(r image.Rectangle) image.Image
+	}
+	si, ok := srcImg.(subImager)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "image does not support cropping")
+		return
+	}
+	cropped := si.SubImage(cropRect)
+
+	// Resize to banner dimensions.
+	dst := image.NewRGBA(image.Rect(0, 0, info.Width, info.Height))
+	draw.CatmullRom.Scale(dst, dst.Bounds(), cropped, cropped.Bounds(), draw.Over, nil)
+
+	// Encode as JPEG.
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 90}); err != nil {
+		slog.Error("admin: encode recropped image", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to encode image")
+		return
+	}
+
+	// Build S3 key (same pattern as parser).
+	var s3Key string
+	if info.VideoFrameID != nil {
+		s3Key = fmt.Sprintf("banners/%d/%d_f%d_%dx%d.jpg",
+			info.AccountID, info.VideoID, *info.VideoFrameID, info.Width, info.Height)
+	} else {
+		s3Key = fmt.Sprintf("banners/%d/%d_%dx%d.jpg",
+			info.AccountID, info.VideoID, info.Width, info.Height)
+	}
+
+	// Upload to R2.
+	publicURL, err := h.s3.Upload(r.Context(), s3Key, bytes.NewReader(buf.Bytes()), int64(buf.Len()), "image/jpeg")
+	if err != nil {
+		slog.Error("admin: upload recropped banner", "error", err, "key", s3Key)
+		writeError(w, http.StatusInternalServerError, "failed to upload image")
+		return
+	}
+
+	// Add cache-busting timestamp.
+	imageURL := fmt.Sprintf("%s?v=%d", publicURL, time.Now().Unix())
+
+	// Update banner record.
+	if err := h.admin.UpdateBannerImageURL(r.Context(), id, imageURL); err != nil {
+		slog.Error("admin: update banner image url", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to update banner")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"image_url": imageURL})
 }

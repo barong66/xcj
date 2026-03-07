@@ -128,7 +128,11 @@ func (eb *EventBuffer) flush() {
 		INSERT INTO events (
 			site_id, video_id, event_type, session_id,
 			user_agent, ip, referrer, extra, created_at,
-			account_id, target_url, source_page, source
+			account_id, target_url, source_page, source,
+			browser, os, device_type,
+			screen_width, screen_height, viewport_width, viewport_height,
+			language, connection_type, page_url, country,
+			utm_source, utm_medium, utm_campaign
 		)
 	`)
 	if err != nil {
@@ -151,6 +155,20 @@ func (eb *EventBuffer) flush() {
 			e.TargetURL,
 			e.SourcePage,
 			e.Source,
+			e.Browser,
+			e.OS,
+			e.DeviceType,
+			int16(e.ScreenWidth),
+			int16(e.ScreenHeight),
+			int16(e.ViewportWidth),
+			int16(e.ViewportHeight),
+			e.Language,
+			e.ConnectionType,
+			e.PageURL,
+			e.Country,
+			e.UTMSource,
+			e.UTMMedium,
+			e.UTMCampaign,
 		); err != nil {
 			slog.Error("clickhouse: append event", "error", err)
 			continue
@@ -163,4 +181,31 @@ func (eb *EventBuffer) flush() {
 	}
 
 	slog.Info("clickhouse: flushed events", "count", len(events))
+}
+
+// InsertPerfEvent writes a single banner performance event to ClickHouse.
+func (eb *EventBuffer) InsertPerfEvent(ctx context.Context, p *model.PerfEvent) {
+	ctx2, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	isViewable := uint8(0)
+	if p.IsViewable {
+		isViewable = 1
+	}
+
+	err := eb.conn.Exec(ctx2, `
+		INSERT INTO banner_perf (
+			banner_id, video_id, account_id, site_id,
+			image_load_ms, render_ms, time_to_visible_ms, dwell_time_ms, hover_duration_ms,
+			is_viewable, browser, os, device_type,
+			screen_width, screen_height, connection_type, country
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.BannerID, p.VideoID, p.AccountID, p.SiteID,
+		int16(p.ImageLoadMs), int16(p.RenderMs), uint32(p.TimeToVisibleMs), uint32(p.DwellTimeMs), int16(p.HoverDurationMs),
+		isViewable, p.Browser, p.OS, p.DeviceType,
+		int16(p.ScreenWidth), int16(p.ScreenHeight), p.ConnectionType, p.Country,
+	)
+	if err != nil {
+		slog.Error("clickhouse: insert perf event", "error", err, "banner_id", p.BannerID)
+	}
 }
