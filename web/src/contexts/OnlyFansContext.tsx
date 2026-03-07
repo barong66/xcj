@@ -6,23 +6,27 @@ import type { ReactNode } from "react";
 interface OnlyFansState {
   url: string | null;
   username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
 }
 
 interface OnlyFansContextValue extends OnlyFansState {
-  set: (url: string | null, username: string | null) => void;
+  set: (url: string | null, username: string | null, displayName: string | null, avatarUrl: string | null) => void;
 }
 
 const OnlyFansContext = createContext<OnlyFansContextValue>({
   url: null,
   username: null,
+  displayName: null,
+  avatarUrl: null,
   set: () => {},
 });
 
 export function OnlyFansProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<OnlyFansState>({ url: null, username: null });
+  const [state, setState] = useState<OnlyFansState>({ url: null, username: null, displayName: null, avatarUrl: null });
 
-  const set = useCallback((url: string | null, username: string | null) => {
-    setState({ url, username });
+  const set = useCallback((url: string | null, username: string | null, displayName: string | null, avatarUrl: string | null) => {
+    setState({ url, username, displayName, avatarUrl });
   }, []);
 
   return (
@@ -39,16 +43,20 @@ export function useOnlyFans() {
 export function OnlyFansHeaderSetter({
   url,
   username,
+  displayName,
+  avatarUrl,
 }: {
   url: string | null;
   username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
 }) {
   const { set } = useOnlyFans();
 
   useEffect(() => {
-    set(url, username);
-    return () => set(null, null);
-  }, [url, username, set]);
+    set(url, username, displayName, avatarUrl);
+    return () => set(null, null, null, null);
+  }, [url, username, displayName, avatarUrl, set]);
 
   return null;
 }

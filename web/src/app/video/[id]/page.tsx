@@ -125,7 +125,12 @@ export default async function VideoPage({ params }: VideoPageProps) {
         ]}
       />
       <ViewTracker videoId={video.id} />
-      <OnlyFansHeaderSetter url={onlyfansUrl} username={video.account?.username} />
+      <OnlyFansHeaderSetter
+        url={onlyfansUrl}
+        username={video.account?.username}
+        displayName={video.account?.display_name || video.account?.username || null}
+        avatarUrl={video.account?.avatar_url || null}
+      />
 
       {/* Post header */}
       <div className="flex items-center gap-3 px-4 py-2.5">

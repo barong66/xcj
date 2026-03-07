@@ -115,7 +115,12 @@ export default async function ModelPage({
         />
         <ProfileJsonLd account={account} />
         <ProfileViewTracker accountId={account.id} />
-        <OnlyFansHeaderSetter url={onlyfansUrl} username={account.username} />
+        <OnlyFansHeaderSetter
+          url={onlyfansUrl}
+          username={account.username}
+          displayName={account.display_name || account.username}
+          avatarUrl={account.avatar_url || null}
+        />
         {sp.src && <AdLandingTracker source={sp.src} clickId={sp.click_id} />}
 
         <ProfileHeader account={account} />
