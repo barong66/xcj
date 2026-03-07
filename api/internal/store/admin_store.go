@@ -1151,21 +1151,22 @@ func (s *AdminStore) UpdateBannerSize(ctx context.Context, id int64, isActive bo
 // ─── Banners ──────────────────────────────────────────────────────────────────
 
 type AdminBanner struct {
-	ID           int64     `json:"id"`
-	AccountID    int64     `json:"account_id"`
-	VideoID      int64     `json:"video_id"`
-	BannerSizeID int64     `json:"banner_size_id"`
-	ImageURL     string    `json:"image_url"`
-	Width        int       `json:"width"`
-	Height       int       `json:"height"`
-	IsActive     bool      `json:"is_active"`
-	CreatedAt    time.Time `json:"created_at"`
-	VideoTitle   string    `json:"video_title"`
-	Username     string    `json:"username"`
-	Impressions  uint64    `json:"impressions"`
-	Hovers       uint64    `json:"hovers"`
-	Clicks       uint64    `json:"clicks"`
-	CTR          float64   `json:"ctr"`
+	ID             int64     `json:"id"`
+	AccountID      int64     `json:"account_id"`
+	VideoID        int64     `json:"video_id"`
+	BannerSizeID   int64     `json:"banner_size_id"`
+	VideoFrameID   *int64    `json:"video_frame_id"`
+	ImageURL       string    `json:"image_url"`
+	Width          int       `json:"width"`
+	Height         int       `json:"height"`
+	IsActive       bool      `json:"is_active"`
+	CreatedAt      time.Time `json:"created_at"`
+	VideoTitle     string    `json:"video_title"`
+	Username       string    `json:"username"`
+	Impressions    uint64    `json:"impressions"`
+	Hovers         uint64    `json:"hovers"`
+	Clicks         uint64    `json:"clicks"`
+	CTR            float64   `json:"ctr"`
 }
 
 type AdminBannerList struct {
@@ -1348,8 +1349,8 @@ func (s *AdminStore) InsertBanner(ctx context.Context, accountID, videoID, banne
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO banners (account_id, video_id, banner_size_id, image_url, width, height)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (video_id, banner_size_id) DO UPDATE SET image_url = EXCLUDED.image_url
-			WHERE banners.is_active = true
+		ON CONFLICT (video_id, banner_size_id) WHERE video_frame_id IS NULL
+			DO UPDATE SET image_url = EXCLUDED.image_url
 		RETURNING id, account_id, video_id, banner_size_id, image_url, width, height, is_active, created_at
 	`, accountID, videoID, bannerSizeID, imageURL, width, height).Scan(
 		&b.ID, &b.AccountID, &b.VideoID, &b.BannerSizeID, &b.ImageURL,

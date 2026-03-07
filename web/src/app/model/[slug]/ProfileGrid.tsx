@@ -105,6 +105,7 @@ function GridItem({
   return (
     <a
       ref={ref}
+      id={`video-${video.id}`}
       href={video.original_url}
       target="_blank"
       rel="noopener noreferrer"

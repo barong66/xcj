@@ -1,4 +1,4 @@
-"""Image utilities for banner generation.
+"""Image utilities for banner generation and frame extraction.
 
 Uses OpenCV face detection for smart cropping that preserves faces,
 with center-crop fallback. Banner overlay rendered via Pillow (Bold style).
@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import List, Tuple
 
 import cv2
+import ffmpeg
 import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
@@ -291,3 +293,48 @@ def generate_banner(
     except Exception:
         logger.error("Failed to generate banner %dx%d from %s", width, height, src_path, exc_info=True)
         return False
+
+
+def extract_frames(
+    video_path: str,
+    output_dir: str,
+    video_id: str,
+    duration_sec: int,
+    *,
+    num_frames: int = 4,
+    quality: int = 92,
+) -> List[Tuple[str, int]]:
+    """Extract evenly-spaced frames from a video file.
+
+    Skips first/last 10% of duration to avoid intros/outros.
+    Returns list of (local_path, timestamp_ms) for successfully extracted frames.
+    """
+    if duration_sec < 3:
+        timestamps = [duration_sec // 2]
+    elif duration_sec < 6:
+        timestamps = [int(duration_sec * 0.25), int(duration_sec * 0.75)]
+    else:
+        n = max(1, num_frames)
+        timestamps = [
+            int(duration_sec * (0.1 + 0.8 * i / max(n - 1, 1)))
+            for i in range(n)
+        ]
+
+    frames: List[Tuple[str, int]] = []
+    for i, ts_sec in enumerate(timestamps):
+        frame_path = os.path.join(output_dir, f"{video_id}_frame_{i}.jpg")
+        try:
+            (
+                ffmpeg
+                .input(video_path, ss=ts_sec)
+                .output(frame_path, vframes=1, format="image2", **{"q:v": 2})
+                .overwrite_output()
+                .run(quiet=True)
+            )
+            if os.path.isfile(frame_path) and os.path.getsize(frame_path) > 0:
+                frames.append((frame_path, ts_sec * 1000))
+        except ffmpeg.Error:
+            logger.warning("Failed to extract frame %d at %ds from %s", i, ts_sec, video_path)
+
+    logger.debug("Extracted %d/%d frames from %s", len(frames), len(timestamps), video_id)
+    return frames

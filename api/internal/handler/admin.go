@@ -751,6 +751,10 @@ func (h *AdminHandler) DeactivateBanner(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := h.admin.DeactivateBanner(r.Context(), id); err != nil {
+		if err.Error() == "banner not found" {
+			writeError(w, http.StatusNotFound, "banner not found")
+			return
+		}
 		slog.Error("admin: deactivate banner", "error", err, "id", id)
 		writeError(w, http.StatusInternalServerError, "failed to deactivate banner")
 		return

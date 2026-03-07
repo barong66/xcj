@@ -253,14 +253,15 @@ def _apify_get_user_videos(username: str, max_videos: int = 0) -> List[Dict]:
             username,
         )
 
-    videos: List[Dict] = []
+    posts: List[Dict] = []
     for item in items:
-        # Only keep video posts (Reels, IGTV, video posts).
         item_type = (item.get("type") or "").lower()
-        if item_type not in ("video", "reel"):
-            # Also check for videoUrl presence as a fallback indicator.
-            if not item.get("videoUrl"):
-                continue
+        is_video = item_type in ("video", "reel") or bool(item.get("videoUrl"))
+        is_image = not is_video and bool(
+            item.get("displayUrl") or item.get("previewUrl") or item.get("images")
+        )
+        if not is_video and not is_image:
+            continue
 
         # Parse timestamp: Apify returns ISO 8601 string in "timestamp" field.
         taken_at: Optional[Union[int, float]] = None
@@ -276,7 +277,12 @@ def _apify_get_user_videos(username: str, max_videos: int = 0) -> List[Dict]:
         post_id = item.get("id") or shortcode
         dims = item.get("dimensions") or {}
 
-        videos.append({
+        # Collect carousel images for sidecar posts.
+        carousel_images: List[str] = []
+        if item_type in ("sidecar", "carousel") or (is_image and item.get("images")):
+            carousel_images = [url for url in (item.get("images") or []) if url]
+
+        posts.append({
             "id": str(post_id),
             "shortcode": shortcode,
             "video_url": item.get("videoUrl"),
@@ -292,10 +298,12 @@ def _apify_get_user_videos(username: str, max_videos: int = 0) -> List[Dict]:
                 "height": dims.get("height") or item.get("dimensionsHeight"),
             },
             "duration": item.get("videoDuration"),
+            "media_type": "video" if is_video else "image",
+            "carousel_images": carousel_images,
         })
 
-    logger.info("Apify: %d video(s) after filtering for @%s", len(videos), username)
-    return videos
+    logger.info("Apify: %d post(s) after filtering for @%s", len(posts), username)
+    return posts
 
 
 # ─── Profile info via Apify ───────────────────────────────────────
@@ -479,12 +487,16 @@ class InstagramParser(BaseParser):
         loop: asyncio.AbstractEventLoop,
         username: str,
     ) -> Optional[ParsedVideo]:
+        from parser.utils.image import extract_frames
+
         video_id: str = vid.get("id") or vid["shortcode"]
         shortcode: str = vid.get("shortcode", video_id)
         original_url = _POST_URL.format(shortcode=shortcode)
         video_url: Optional[str] = vid.get("video_url")
         thumb_source_url: Optional[str] = vid.get("thumbnail_src")
         dims = vid.get("dimensions", {})
+        media_type: str = vid.get("media_type", "video")
+        carousel_images: List[str] = vid.get("carousel_images", [])
 
         # Detect orientation from source dimensions
         src_width = dims.get("width") or 0
@@ -520,10 +532,11 @@ class InstagramParser(BaseParser):
                     ),
                 )
 
-        # ── Preview clip ─────────────────────────────────────────
+        # ── Preview clip + frame extraction (video only) ─────────
         preview_path: Optional[str] = None
+        frame_paths: List[tuple] = []
 
-        if video_url:
+        if media_type == "video" and video_url:
             video_local = os.path.join(tmp_dir, f"{video_id}.mp4")
             downloaded_vid = await loop.run_in_executor(
                 None, _download_video, video_url, video_local,
@@ -545,10 +558,34 @@ class InstagramParser(BaseParser):
                 if ok:
                     preview_path = preview_dest
 
+                # Extract frames for banner generation.
+                if duration_sec_val and duration_sec_val > 0:
+                    frame_paths = await loop.run_in_executor(
+                        None,
+                        lambda: extract_frames(
+                            video_local,
+                            tmp_dir,
+                            video_id,
+                            duration_sec_val,
+                            num_frames=settings.frame_extraction_count,
+                            quality=settings.frame_extraction_quality,
+                        ),
+                    )
+
                 try:
                     os.remove(video_local)
                 except OSError:
                     pass
+
+        # ── Carousel images (download as extra frames) ───────────
+        if carousel_images:
+            for ci, img_url in enumerate(carousel_images):
+                ci_path = os.path.join(tmp_dir, f"{video_id}_carousel_{ci}.jpg")
+                ok = await loop.run_in_executor(
+                    None, _download_thumbnail, img_url, ci_path,
+                )
+                if ok:
+                    frame_paths.append((ci_path, 0))
 
         # ── Timestamps ───────────────────────────────────────────
         published_at = _parse_timestamp(vid.get("taken_at_timestamp"))
@@ -575,4 +612,6 @@ class InstagramParser(BaseParser):
             preview_path=preview_path,
             thumbnail_source_url=thumb_source_url,
             video_url=video_url,
+            media_type=media_type,
+            frame_paths=frame_paths,
         )

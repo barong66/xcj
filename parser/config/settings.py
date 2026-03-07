@@ -89,6 +89,10 @@ class Settings(BaseSettings):
     banner_quality: int = 90
     banner_poll_interval_sec: int = 10
 
+    # ── Frame extraction ──────────────────────────────────────────
+    frame_extraction_count: int = 4       # frames to extract per video
+    frame_extraction_quality: int = 92    # JPEG quality for frame images
+
     # ── Logging ──────────────────────────────────────────────────
     log_level: str = "INFO"
 

@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-07
+> Last updated: 2026-03-07 (multi-frame banners + image posts)
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -113,6 +113,7 @@ xcj/
 | is_promoted | BOOLEAN DEFAULT false | Промо-видео |
 | promoted_until | TIMESTAMPTZ NULL | Срок промо |
 | promotion_weight | FLOAT DEFAULT 0 | Вес при сортировке |
+| media_type | VARCHAR(8) DEFAULT 'video' | Тип контента: "video" или "image" |
 | is_active | BOOLEAN DEFAULT true | Soft-delete |
 | published_at | TIMESTAMPTZ NULL | Дата публикации на платформе |
 | created_at | TIMESTAMPTZ | Когда добавлено в систему |
@@ -205,12 +206,32 @@ xcj/
 | is_active | BOOLEAN DEFAULT true | |
 | created_at | TIMESTAMPTZ | |
 
-**UNIQUE:** (video_id, banner_size_id)
+| video_frame_id | BIGINT NULL FK(video_frames.id) | Фрейм-источник (NULL = из thumbnail) |
+
+**UNIQUE INDEXES (partial):**
+- `uq_banners_thumb_size` — (video_id, banner_size_id) WHERE video_frame_id IS NULL — один баннер из thumbnail на видео на размер
+- `uq_banners_frame_size` — (video_id, banner_size_id, video_frame_id) WHERE video_frame_id IS NOT NULL — один баннер на фрейм на размер
+
 **INDEX:** idx_banners_account (account_id)
 
-**InsertBanner upsert поведение:** При ON CONFLICT (video_id, banner_size_id) обновляет только image_url. НЕ сбрасывает is_active — если баннер был деактивирован вручную через админку, повторная генерация не реактивирует его.
+**InsertBanner upsert поведение:** При ON CONFLICT обновляет только image_url. НЕ сбрасывает is_active — если баннер был деактивирован вручную через админку, повторная генерация не реактивирует его.
 
 **Деактивация:** `DELETE /admin/banners/{id}` ставит `is_active=false`. Деактивированные баннеры не участвуют в ротации (/b/serve) и не возвращаются по idx_banners_serve.
+
+#### `video_frames` — Фреймы из видео (для баннеров)
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | BIGSERIAL PK | |
+| video_id | BIGINT FK(videos.id) ON DELETE CASCADE | Видео-источник |
+| frame_index | SMALLINT | Порядковый номер фрейма (0..N) |
+| timestamp_ms | INT DEFAULT 0 | Таймстемп в миллисекундах (0 для image posts) |
+| image_url | TEXT | URL на R2 |
+| created_at | TIMESTAMPTZ | |
+
+**UNIQUE:** (video_id, frame_index)
+**INDEX:** idx_video_frames_video (video_id)
+
+**Использование:** Хранит извлечённые фреймы из видео (4 кадра на равных интервалах) и изображения из Instagram carousel / image posts. Banner worker генерирует баннеры из этих фреймов в дополнение к thumbnail.
 
 #### `banner_queue` — Очередь генерации баннеров
 | Поле | Тип | Описание |
@@ -236,6 +257,9 @@ xcj/
 - `idx_banners_account` — (account_id)
 - `idx_banners_serve` — (width, height) WHERE is_active = true
 - `idx_banner_queue_status` — (status, created_at)
+- `idx_video_frames_video` — (video_id)
+- `uq_banners_thumb_size` — (video_id, banner_size_id) WHERE video_frame_id IS NULL
+- `uq_banners_frame_size` — (video_id, banner_size_id, video_frame_id) WHERE video_frame_id IS NOT NULL
 
 ---
 
@@ -460,11 +484,14 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 
 1. Воркер забирает pending задачи из parse_queue
 2. Вызывает парсер платформы (Twitter через yt-dlp, Instagram через httpx)
-3. Для каждого видео:
+3. Для каждого видео/поста:
+   - Определяет `media_type`: "video" или "image" (Instagram photos/carousels, Twitter image tweets)
    - Скачивает thumbnail, ресайзит до 480x270
-   - Генерирует 5-сек превью через ffmpeg (500k bitrate, 480p)
-   - Загружает в S3: `thumbnails/{platform}/{platform_id}.jpg` и `previews/{platform}/{platform_id}.mp4`
-   - Записывает в PostgreSQL
+   - Генерирует 5-сек превью через ffmpeg (500k bitrate, 480p) — только для video
+   - **Frame extraction** (видео): извлекает 4 кадра на равных интервалах через ffmpeg → `video_frames`
+   - **Image posts** (Instagram photos/carousels, Twitter images): изображения сохраняются как фреймы в `video_frames`
+   - Загружает в S3: `thumbnails/`, `previews/`, `frames/{platform}/{platform_id}_f{index}.jpg`
+   - Записывает в PostgreSQL (videos + video_frames)
 4. Обновляет статус задачи (done/failed)
 5. При ошибках увеличивает parse_errors; после 5 ошибок — отключает аккаунт
 
@@ -520,7 +547,20 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 | instagram_rate_limit_sec | 5 | Задержка между запросами IG |
 | banner_quality | 90 | JPEG quality баннеров |
 | banner_poll_interval_sec | 10 | Интервал опроса banner_queue |
-### 6.5 Генерация баннеров (parser/utils/image.py)
+| frame_extraction_count | 4 | Кол-во фреймов извлекаемых из видео |
+| frame_extraction_quality | 85 | JPEG quality извлечённых фреймов |
+### 6.5 Извлечение фреймов (parser/utils/image.py)
+
+**extract_frames(video_path, count=4, quality=85)** — извлекает N кадров из видео на равных интервалах:
+1. Определяет длительность видео через ffprobe
+2. Вычисляет таймстемпы: `[duration * i / (count+1) for i in 1..count]`
+3. Извлекает каждый кадр через ffmpeg `-ss {timestamp} -frames:v 1`
+4. Сохраняет как JPEG с заданным quality
+5. Возвращает список `(path, timestamp_ms)`
+
+Для image posts (Instagram photos, carousels, Twitter images) фреймы создаются напрямую из скачанных изображений без ffmpeg.
+
+### 6.6 Генерация баннеров (parser/utils/image.py)
 
 **Зависимости:** opencv-python-headless (OpenCV), numpy, Pillow, fonts-dejavu-core (Docker)
 
@@ -635,9 +675,10 @@ interface VideosResponse {
 Admin → POST /admin/accounts (создаёт аккаунт в PG)
      → POST /admin/accounts/{id}/reparse (ставит в очередь)
      → Parser Worker забирает задачу из parse_queue
-     → Парсер скачивает видео с платформы
+     → Парсер скачивает видео/изображения с платформы (media_type: video/image)
      → Генерит тумбы + превью → S3
-     → INSERT в videos + site_videos
+     → Извлекает фреймы: 4 кадра из видео (ffmpeg) / изображения из carousel → video_frames
+     → INSERT в videos + video_frames + site_videos
      → AI Categorizer → GPT-4o Vision → video_categories
 ```
 
@@ -660,7 +701,7 @@ Go API → EventBuffer (in-memory, max 1000 или 1s)
 Админ → /admin/stats → Go API → агрегация из ClickHouse + метаданные из PG
 ```
 
-### 8.4 Генерация баннеров
+### 8.4 Генерация баннеров (multi-frame)
 ```
 Триггеры:
   - Новое видео у paid-аккаунта → parse_worker enqueue в banner_queue
@@ -669,15 +710,20 @@ Go API → EventBuffer (in-memory, max 1000 или 1s)
 Banner Worker забирает задачу из banner_queue
 → Получает active banner_sizes
 → Если video_id=NULL → все видео аккаунта, иначе конкретное видео
-→ Для каждого (video, size):
-   → Скачать thumbnail_lg_url (810x1440 портрет)
-   → OpenCV face-aware smart crop (Haar cascade: frontal face → profile → upper body)
-   → Fallback: center-crop с upper-third bias (если лица не обнаружены)
-   → Resize (Lanczos) → целевой размер в пикселях
-   → Pillow ImageEnhance: contrast 1.35, color 1.4, sharpness 1.5, brightness 1.05
-   → Text overlay: gradient внизу (0→70% чёрный) + @username + "Watch Now →"
-   → JPEG q=90 → загрузить в R2: banners/{account_id}/{video_id}_{w}x{h}.jpg
-   → INSERT в таблицу banners
+→ Для каждого video:
+   1. Получает фреймы из video_frames (0..N extracted frames)
+   2. Генерирует баннер из thumbnail (video_frame_id=NULL):
+      → Скачать thumbnail_lg_url (810x1440 портрет)
+      → OpenCV face-aware smart crop → Lanczos resize → ImageEnhance → overlay → JPEG q=90
+      → R2: banners/{account_id}/{video_id}_{w}x{h}.jpg
+      → INSERT banners (video_frame_id=NULL)
+   3. Генерирует баннер из каждого фрейма (video_frame_id=frame.id):
+      → Скачать frame image_url
+      → OpenCV face-aware smart crop → Lanczos resize → ImageEnhance → overlay → JPEG q=90
+      → R2: banners/{account_id}/{video_id}_f{frame_id}_{w}x{h}.jpg
+      → INSERT banners (video_frame_id=frame.id)
+→ Результат: до 5 вариантов баннера на видео (1 thumbnail + 4 frames) × N sizes
+→ CTR-based selection естественно выбирает лучший вариант при показе
 → Обновить статус задачи (done/failed)
 ```
 

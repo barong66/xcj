@@ -5,7 +5,7 @@ import dataclasses
 import logging
 import re
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,10 @@ class ParsedVideo:
     thumbnail_source_url: Optional[str] = None
     # Direct video URL (for preview generation)
     video_url: Optional[str] = None
+    # Media type: 'video' or 'image'
+    media_type: str = "video"
+    # Extracted frames: list of (local_path, timestamp_ms)
+    frame_paths: List[Tuple[str, int]] = dataclasses.field(default_factory=list)
 
 
 # ─── Bio text cleaning ────────────────────────────────────────────

@@ -101,13 +101,30 @@ def upload_avatar(local_path: str, platform: str, username: str) -> str:
     return upload_file(local_path, s3_key)
 
 
-def upload_banner(local_path: str, account_id: int, video_id: int, width: int, height: int) -> str:
+def upload_frame(local_path: str, platform: str, video_platform_id: str, frame_index: int) -> str:
+    """Upload an extracted video frame and return its public URL."""
+    ext = os.path.splitext(local_path)[1] or ".jpg"
+    s3_key = f"frames/{platform}/{video_platform_id}_f{frame_index}{ext}"
+    return upload_file(local_path, s3_key)
+
+
+def upload_banner(
+    local_path: str,
+    account_id: int,
+    video_id: int,
+    width: int,
+    height: int,
+    frame_id: int | None = None,
+) -> str:
     """Upload a banner image and return its public URL.
 
     Appends a cache-busting timestamp param so regenerated banners
     bypass CDN/browser cache (same S3 key, immutable headers).
     """
     import time
-    s3_key = f"banners/{account_id}/{video_id}_{width}x{height}.jpg"
+    if frame_id is not None:
+        s3_key = f"banners/{account_id}/{video_id}_f{frame_id}_{width}x{height}.jpg"
+    else:
+        s3_key = f"banners/{account_id}/{video_id}_{width}x{height}.jpg"
     url = upload_file(local_path, s3_key)
     return f"{url}?v={int(time.time())}"

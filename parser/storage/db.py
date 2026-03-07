@@ -176,6 +176,7 @@ async def insert_video(
     height: Optional[int],
     published_at: Optional[datetime],
     country_id: Optional[int] = None,
+    media_type: str = "video",
 ) -> int:
     """Insert a video row (skip on conflict) and return its ``id``."""
     pool = await get_pool()
@@ -186,13 +187,13 @@ async def insert_video(
             title, description, duration_sec,
             thumbnail_url, thumbnail_lg_url, preview_url,
             width, height, country_id,
-            published_at
+            published_at, media_type
         ) VALUES (
             $1, $2, $3, $4,
             $5, $6, $7,
             $8, $9, $10,
             $11, $12, $13,
-            $14
+            $14, $15
         )
         ON CONFLICT (platform, platform_id) DO UPDATE
             SET thumbnail_url    = COALESCE(EXCLUDED.thumbnail_url,    videos.thumbnail_url),
@@ -205,7 +206,7 @@ async def insert_video(
         title, description, duration_sec,
         thumbnail_url, thumbnail_lg_url, preview_url,
         width, height, country_id,
-        published_at,
+        published_at, media_type,
     )
     return row["id"]
 
@@ -415,19 +416,72 @@ async def get_videos_for_banners(account_id: int, video_id: Optional[int] = None
     )
 
 
-async def insert_banner(account_id: int, video_id: int, banner_size_id: int, image_url: str, width: int, height: int) -> int:
+async def insert_banner(
+    account_id: int,
+    video_id: int,
+    banner_size_id: int,
+    image_url: str,
+    width: int,
+    height: int,
+    video_frame_id: Optional[int] = None,
+) -> int:
     """Insert or update a banner row. Returns the banner id."""
+    pool = await get_pool()
+    if video_frame_id is not None:
+        row = await pool.fetchrow(
+            """
+            INSERT INTO banners (account_id, video_id, banner_size_id, image_url, width, height, video_frame_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (video_id, banner_size_id, video_frame_id)
+                WHERE video_frame_id IS NOT NULL
+                DO UPDATE SET image_url = EXCLUDED.image_url, is_active = true
+            RETURNING id
+            """,
+            account_id, video_id, banner_size_id, image_url, width, height, video_frame_id,
+        )
+    else:
+        row = await pool.fetchrow(
+            """
+            INSERT INTO banners (account_id, video_id, banner_size_id, image_url, width, height)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (video_id, banner_size_id)
+                WHERE video_frame_id IS NULL
+                DO UPDATE SET image_url = EXCLUDED.image_url, is_active = true
+            RETURNING id
+            """,
+            account_id, video_id, banner_size_id, image_url, width, height,
+        )
+    return row["id"]
+
+
+async def insert_video_frame(
+    video_id: int,
+    frame_index: int,
+    timestamp_ms: int,
+    image_url: str,
+) -> int:
+    """Insert a video frame row. Returns the frame id."""
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        INSERT INTO banners (account_id, video_id, banner_size_id, image_url, width, height)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (video_id, banner_size_id) DO UPDATE SET image_url = EXCLUDED.image_url, is_active = true
+        INSERT INTO video_frames (video_id, frame_index, timestamp_ms, image_url)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (video_id, frame_index) DO UPDATE
+            SET image_url = EXCLUDED.image_url
         RETURNING id
         """,
-        account_id, video_id, banner_size_id, image_url, width, height,
+        video_id, frame_index, timestamp_ms, image_url,
     )
     return row["id"]
+
+
+async def get_video_frames(video_id: int) -> list[asyncpg.Record]:
+    """Return all frames for a video, ordered by frame_index."""
+    pool = await get_pool()
+    return await pool.fetch(
+        "SELECT id, frame_index, timestamp_ms, image_url FROM video_frames WHERE video_id = $1 ORDER BY frame_index",
+        video_id,
+    )
 
 
 async def enqueue_banner_generation(account_id: int, video_id: Optional[int] = None) -> int:

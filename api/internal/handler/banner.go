@@ -152,6 +152,8 @@ func (h *BannerHandler) ClickBanner(w http.ResponseWriter, r *http.Request) {
 		}
 		targetURL += "?" + params.Encode()
 	}
+	// Scroll to the specific video thumbnail on the profile page.
+	targetURL += fmt.Sprintf("#video-%d", banner.VideoID)
 	if h.siteBaseURL != "" {
 		targetURL = h.siteBaseURL + targetURL
 	}

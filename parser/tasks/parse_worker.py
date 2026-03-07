@@ -134,7 +134,23 @@ async def _upload_and_save(
         width=parsed.width,
         height=parsed.height,
         published_at=parsed.published_at,
+        media_type=parsed.media_type,
     )
+
+    # Upload extracted frames to R2 and store in DB.
+    for i, (frame_path, ts_ms) in enumerate(parsed.frame_paths):
+        try:
+            frame_url = await loop.run_in_executor(
+                None,
+                s3.upload_frame,
+                frame_path,
+                platform,
+                parsed.platform_id,
+                i,
+            )
+            await db.insert_video_frame(video_id, i, ts_ms, frame_url)
+        except Exception:
+            logger.warning("Failed to upload/store frame %d for %s", i, parsed.platform_id, exc_info=True)
 
     # Link the video to all active sites so it appears on the storefront.
     await db.link_video_to_sites(video_id)
@@ -223,6 +239,12 @@ def _cleanup_parsed_video(pv: ParsedVideo) -> None:
         if path and os.path.isfile(path):
             try:
                 os.remove(path)
+            except OSError:
+                pass
+    for frame_path, _ in pv.frame_paths:
+        if frame_path and os.path.isfile(frame_path):
+            try:
+                os.remove(frame_path)
             except OSError:
                 pass
 

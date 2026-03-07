@@ -1,6 +1,6 @@
 # xxxaccounter — Документация
 
-> Последнее обновление: 2026-03-07
+> Последнее обновление: 2026-03-07 (multi-frame banners + image posts)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
 ---
@@ -18,8 +18,11 @@
 ### 1. Сбор контента
 
 Админ добавляет аккаунт социальной сети (например `@SpaceX` на Twitter). Парсер автоматически:
-- Скачивает список видео с аккаунта
-- Генерирует превью-картинку (тумбу) и 5-секундный превью-клип
+- Скачивает список видео и изображений с аккаунта (видео, фото-посты, карусели)
+- Генерирует превью-картинку (тумбу) и 5-секундный превью-клип (для видео)
+- Извлекает 4 кадра из видео на равных интервалах (для баннеров)
+- Instagram: фото-посты и carousel-изображения тоже парсятся как источники для баннеров
+- Twitter: image tweets парсятся наравне с видео
 - Загружает файлы в облачное хранилище (S3)
 - AI (OpenAI GPT-4o Vision) автоматически назначает категории каждому видео
 
@@ -89,6 +92,8 @@
 **Как работает:**
 - Админ включает Promotion для аккаунта → система автоматически генерирует баннеры из всех видео во всех настроенных размерах
 - При парсинге новых видео у платного аккаунта → баннеры генерируются автоматически
+- **Multi-frame:** из каждого видео создаётся до 5 вариантов баннера (1 из thumbnail + 4 из извлечённых фреймов). CTR-based selection автоматически выбирает лучший вариант
+- **Image posts:** Instagram фото-посты, carousel-изображения и Twitter image tweets используются как дополнительные источники для баннеров
 - Готовые баннеры доступны по URL `/b/{id}` (302 redirect на CDN), клик по баннеру `/b/{id}/click` ведёт на профиль модели
 - Аналитика: banner_impression (показ) и banner_click (клик) в ClickHouse; Imprs/Clicks/CTR отображаются в админке
 
@@ -258,12 +263,14 @@
 
 ### Python Parser
 - Парсит Twitter (через yt-dlp) и Instagram (через API)
+- Поддерживает видео и изображения: Instagram photo posts, carousels, Twitter image tweets (media_type: video/image)
 - Генерирует тумбы (ffmpeg resize) и превью-клипы (5 сек)
+- **Frame extraction:** извлекает 4 кадра из видео (ffmpeg) + сохраняет carousel/photo изображения → `video_frames`
 - Загружает в S3
 - AI категоризация через OpenAI GPT-4o Vision API (пачками по 50 видео)
 - Работает как фоновый воркер, опрашивая очередь в PostgreSQL
 - **Worker loop** запускает 3 корутины через `asyncio.gather`: parse_worker, banner_worker, categorizer_worker
-- **Banner Worker** — генерирует баннеры из тумб видео для платных аккаунтов: OpenCV face-aware smart crop (fallback: center-crop) → Lanczos resize → Pillow ImageEnhance (contrast/color/sharpness/brightness) → gradient/text overlay → JPEG → R2
+- **Banner Worker** — генерирует баннеры из тумб + извлечённых фреймов для платных аккаунтов: до 5 вариантов на видео (1 thumbnail + 4 frames). OpenCV face-aware smart crop → Lanczos resize → Pillow ImageEnhance → gradient/text overlay → JPEG → R2. CTR-based selection выбирает лучший вариант
 - **Categorizer Worker** — фоновый цикл, берёт uncategorized видео, отправляет thumbnail в OpenAI GPT-4o Vision, сохраняет категории с confidence
 
 ### Next.js Frontend
@@ -279,8 +286,11 @@
 ```
 Админ → Создаёт аккаунт → Нажимает "Parse"
 → Задача в очередь (parse_queue, status=pending)
-→ Python Worker подхватывает → Парсит платформу
-→ Для каждого видео: тумба + превью → S3 → запись в PostgreSQL
+→ Python Worker подхватывает → Парсит платформу (видео + image posts)
+→ Для каждого видео/поста:
+  → тумба + превью → S3
+  → Frame extraction: 4 кадра из видео / изображения из carousel → video_frames → S3
+  → запись в PostgreSQL (videos + video_frames)
 → AI категоризатор → OpenAI GPT-4o → назначает категории
 → Видео появляется на витрине
 ```
@@ -313,8 +323,9 @@ Go API → EventBuffer (in-memory)
 - **video_categories** — связь видео↔категории (M2M, с confidence от AI)
 - **site_categories / site_videos** — какие видео/категории на каком сайте
 - **parse_queue** — очередь парсинга
+- **video_frames** — извлечённые фреймы из видео и изображения из carousel/photo posts (для мульти-баннеров)
 - **banner_sizes** — глобальные размеры баннеров (300x250 дефолтный, type: image/video)
-- **banners** — сгенерированные баннеры (video → image URL на R2)
+- **banners** — сгенерированные баннеры (video + optional frame → image URL на R2, несколько вариантов на видео)
 - **banner_queue** — очередь генерации баннеров
 
 ### ClickHouse — аналитика
@@ -391,17 +402,27 @@ curl -X POST http://localhost:8080/api/v1/admin/videos/recategorize \
 - Результаты первого прогона: 370 видео обработано, 41 категория создана, 1649 связей video_categories
 - Мониторинг: ClickUp task https://app.clickup.com/t/869ccek1u
 
-## Banner Worker (OpenCV Smart Crop)
+## Banner Worker (Multi-Frame + OpenCV Smart Crop)
 
 ### Как работает
-Banner Worker генерирует рекламные баннеры из thumbnail видео для платных аккаунтов. Использует OpenCV Haar cascade для face-aware кропа и Pillow ImageEnhance для программного улучшения цвета.
+Banner Worker генерирует рекламные баннеры для платных аккаунтов. Использует два источника изображений:
+1. **Thumbnail** — стандартный баннер из thumbnail видео (как раньше)
+2. **Extracted frames** — до 4 дополнительных фреймов из видео (или изображений из carousel/photo posts)
 
-### Пайплайн
+Для каждого источника применяется OpenCV Haar cascade для face-aware кропа и Pillow ImageEnhance для улучшения цвета. В итоге на одно видео может быть до 5 вариантов баннера. CTR-based selection при показе автоматически выбирает лучший вариант.
+
+### Пайплайн (на каждый источник изображения)
 ```
-thumbnail_lg_url → скачать → OpenCV face-aware smart crop → Pillow Lanczos resize → Pillow ImageEnhance (contrast 1.35, color 1.4, sharpness 1.5, brightness 1.05) → overlay (@username + "Watch Now →") → JPEG q=90 → R2
+image (thumbnail / frame) → скачать → OpenCV face-aware smart crop → Pillow Lanczos resize → Pillow ImageEnhance (contrast 1.35, color 1.4, sharpness 1.5, brightness 1.05) → overlay (@username + "Watch Now →") → JPEG q=90 → R2
 ```
 
-**Разделение ответственности:**
+### Источники фреймов
+- **Видео:** 4 кадра извлекаются ffmpeg на равных интервалах (configurable: `frame_extraction_count`)
+- **Instagram photos:** изображение поста сохраняется как фрейм
+- **Instagram carousels:** каждое изображение карусели — отдельный фрейм
+- **Twitter image tweets:** изображение сохраняется как фрейм
+
+### Разделение ответственности
 - **OpenCV** — face-aware smart crop (Haar cascade: frontal face → profile face → upper body). Позиционирует кроп вокруг обнаруженных лиц. Fallback — center-crop с upper-third bias
 - **Pillow** — resize (Lanczos) + color enhancement (ImageEnhance). Программные значения — стабильные и предсказуемые
 

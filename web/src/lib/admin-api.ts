@@ -42,6 +42,7 @@ async function adminFetch<T>(
     throw new Error(body.error || `API error: ${res.status}`);
   }
 
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 

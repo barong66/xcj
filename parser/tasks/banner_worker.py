@@ -1,6 +1,6 @@
 """Banner generation worker.
 
-Polls banner_queue, downloads thumbnails, generates banners
+Polls banner_queue, downloads thumbnails/frames, generates banners
 in all active sizes, uploads to R2, and records in the banners table.
 """
 from __future__ import annotations
@@ -23,8 +23,8 @@ from parser.utils.image import generate_banner
 logger = logging.getLogger(__name__)
 
 
-async def _download_thumbnail(url: str, dest_path: str) -> bool:
-    """Download a thumbnail image to a local path."""
+async def _download_image(url: str, dest_path: str) -> bool:
+    """Download an image to a local path."""
     loop = asyncio.get_running_loop()
 
     def _do_download() -> bool:
@@ -38,8 +38,77 @@ async def _download_thumbnail(url: str, dest_path: str) -> bool:
     try:
         return await loop.run_in_executor(None, _do_download)
     except Exception:
-        logger.warning("Failed to download thumbnail %s", url, exc_info=True)
+        logger.warning("Failed to download image %s", url, exc_info=True)
         return False
+
+
+async def _generate_banners_from_source(
+    loop: asyncio.AbstractEventLoop,
+    source_url: str,
+    video_id: int,
+    account_id: int,
+    username: str,
+    sizes: list,
+    *,
+    video_frame_id: Optional[int] = None,
+) -> int:
+    """Download a source image and generate banners for all sizes.
+
+    Returns the count of successfully generated banners.
+    """
+    generated = 0
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        src_path = os.path.join(tmp_dir, "source.jpg")
+        ok = await _download_image(source_url, src_path)
+        if not ok:
+            return 0
+
+        for size in sizes:
+            size_id = size["id"]
+            w = size["width"]
+            h = size["height"]
+
+            banner_path = os.path.join(tmp_dir, f"banner_{w}x{h}.jpg")
+
+            # Generate the banner image (face-aware crop + overlay).
+            success = await loop.run_in_executor(
+                None,
+                lambda sp=src_path, bp=banner_path, bw=w, bh=h, u=username: generate_banner(
+                    sp, bp, bw, bh,
+                    quality=settings.banner_quality,
+                    username=u,
+                ),
+            )
+            if not success:
+                continue
+
+            # Upload to R2.
+            try:
+                image_url = await loop.run_in_executor(
+                    None,
+                    lambda bp=banner_path, aid=account_id, vid=video_id, bw=w, bh=h, fid=video_frame_id: s3.upload_banner(
+                        bp, aid, vid, bw, bh, frame_id=fid,
+                    ),
+                )
+            except Exception:
+                logger.error(
+                    "Failed to upload banner for video %d frame=%s size %dx%d",
+                    video_id, video_frame_id, w, h, exc_info=True,
+                )
+                continue
+
+            # Record in DB.
+            await db.insert_banner(
+                account_id, video_id, size_id, image_url, w, h,
+                video_frame_id=video_frame_id,
+            )
+            generated += 1
+            logger.debug(
+                "Banner generated: video=%d frame=%s size=%dx%d",
+                video_id, video_frame_id, w, h,
+            )
+
+    return generated
 
 
 async def _process_banner_job(job) -> None:
@@ -73,56 +142,20 @@ async def _process_banner_job(job) -> None:
             thumb_url = video["thumb_url"]
             username = video.get("username", "")
 
-            if not thumb_url:
-                logger.warning("Video %d has no thumbnail, skipping", vid_id)
-                continue
+            # 1. Generate banner from thumbnail (video_frame_id=NULL).
+            if thumb_url:
+                generated += await _generate_banners_from_source(
+                    loop, thumb_url, vid_id, account_id, username, sizes,
+                    video_frame_id=None,
+                )
 
-            # Download thumbnail to temp file.
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                src_path = os.path.join(tmp_dir, "thumb.jpg")
-                ok = await _download_thumbnail(thumb_url, src_path)
-                if not ok:
-                    continue
-
-                # Generate banners for each size.
-                for size in sizes:
-                    size_id = size["id"]
-                    w = size["width"]
-                    h = size["height"]
-
-                    banner_path = os.path.join(tmp_dir, f"banner_{w}x{h}.jpg")
-
-                    # Generate the banner image (face-aware crop + overlay).
-                    success = await loop.run_in_executor(
-                        None,
-                        lambda sp=src_path, bp=banner_path, bw=w, bh=h, u=username: generate_banner(
-                            sp, bp, bw, bh,
-                            quality=settings.banner_quality,
-                            username=u,
-                        ),
-                    )
-                    if not success:
-                        continue
-
-                    # Upload to R2.
-                    try:
-                        image_url = await loop.run_in_executor(
-                            None,
-                            s3.upload_banner,
-                            banner_path,
-                            account_id,
-                            vid_id,
-                            w,
-                            h,
-                        )
-                    except Exception:
-                        logger.error("Failed to upload banner for video %d size %dx%d", vid_id, w, h, exc_info=True)
-                        continue
-
-                    # Record in DB.
-                    await db.insert_banner(account_id, vid_id, size_id, image_url, w, h)
-                    generated += 1
-                    logger.debug("Banner generated: video=%d size=%dx%d url=%s", vid_id, w, h, image_url)
+            # 2. Generate banners from each extracted frame.
+            frames = await db.get_video_frames(vid_id)
+            for frame in frames:
+                generated += await _generate_banners_from_source(
+                    loop, frame["image_url"], vid_id, account_id, username, sizes,
+                    video_frame_id=frame["id"],
+                )
 
         await db.finish_banner_job(job_id)
         logger.info("Banner job %d done: %d banners generated", job_id, generated)

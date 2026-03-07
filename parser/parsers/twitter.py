@@ -31,8 +31,8 @@ def _build_ytdlp_opts(tmp_dir: str, *, max_videos: int) -> dict:
         "extract_flat": False,
         "playlistend": max_videos,
         "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
-        # We only want entries that actually contain video.
-        "match_filter": "duration > 0",
+        # Allow image tweets through — we filter by media_type in Python.
+        # "match_filter": "duration > 0",
         # Prefer mp4 up to 720p to keep downloads small.
         "format": "best[height<=720][ext=mp4]/best[height<=720]/best",
         "socket_timeout": 30,
@@ -320,8 +320,9 @@ class TwitterParser(BaseParser):
                 continue
 
             duration = entry.get("duration")
-            if duration is None or duration <= 0:
-                continue
+            is_video = duration is not None and duration > 0
+            media_type = "video" if is_video else "image"
+            entry["_media_type"] = media_type
 
             try:
                 pv = await self._process_entry(entry, tmp_dir, loop)
@@ -331,7 +332,7 @@ class TwitterParser(BaseParser):
                 logger.warning("Failed to process entry %s", video_id, exc_info=True)
                 continue
 
-        logger.info("@%s: produced %d parsed videos", username, len(parsed))
+        logger.info("@%s: produced %d parsed posts", username, len(parsed))
         return parsed
 
     async def _process_entry(
@@ -340,8 +341,11 @@ class TwitterParser(BaseParser):
         tmp_dir: str,
         loop: asyncio.AbstractEventLoop,
     ) -> Optional[ParsedVideo]:
+        from parser.utils.image import extract_frames
+
         video_id: str = entry["id"]
         webpage_url: str = entry.get("webpage_url") or entry.get("url") or f"https://x.com/i/status/{video_id}"
+        media_type: str = entry.get("_media_type", "video")
 
         # ── Filter ───────────────────────────────────────────────
         duration = entry.get("duration")
@@ -383,36 +387,52 @@ class TwitterParser(BaseParser):
                     ),
                 )
 
-        # ── Preview clip ────────────────────────────────────────
+        # ── Preview clip + frame extraction (video only) ─────────
         preview_path: Optional[str] = None
+        frame_paths: List[tuple] = []
         video_url = entry.get("url")  # direct video stream URL
 
-        # We need to download the actual video to create a preview.
-        video_local = await loop.run_in_executor(
-            None, _download_video, webpage_url, tmp_dir, video_id,
-        )
-
-        if video_local and os.path.isfile(video_local):
-            preview_dest = os.path.join(tmp_dir, f"{video_id}_preview.mp4")
-            pv_height = settings.preview_portrait_height if is_portrait else settings.preview_height
-            ok = await loop.run_in_executor(
-                None,
-                lambda: _generate_preview(
-                    video_local,
-                    preview_dest,
-                    duration=settings.preview_duration_sec,
-                    height=pv_height,
-                    bitrate=settings.preview_video_bitrate,
-                ),
+        if media_type == "video":
+            # Download the actual video for preview + frame extraction.
+            video_local = await loop.run_in_executor(
+                None, _download_video, webpage_url, tmp_dir, video_id,
             )
-            if ok:
-                preview_path = preview_dest
 
-            # Remove the full video to save disk space.
-            try:
-                os.remove(video_local)
-            except OSError:
-                pass
+            if video_local and os.path.isfile(video_local):
+                preview_dest = os.path.join(tmp_dir, f"{video_id}_preview.mp4")
+                pv_height = settings.preview_portrait_height if is_portrait else settings.preview_height
+                ok = await loop.run_in_executor(
+                    None,
+                    lambda: _generate_preview(
+                        video_local,
+                        preview_dest,
+                        duration=settings.preview_duration_sec,
+                        height=pv_height,
+                        bitrate=settings.preview_video_bitrate,
+                    ),
+                )
+                if ok:
+                    preview_path = preview_dest
+
+                # Extract frames for banner generation.
+                if duration_sec and duration_sec > 0:
+                    frame_paths = await loop.run_in_executor(
+                        None,
+                        lambda: extract_frames(
+                            video_local,
+                            tmp_dir,
+                            video_id,
+                            duration_sec,
+                            num_frames=settings.frame_extraction_count,
+                            quality=settings.frame_extraction_quality,
+                        ),
+                    )
+
+                # Remove the full video to save disk space.
+                try:
+                    os.remove(video_local)
+                except OSError:
+                    pass
 
         # ── Timestamps ──────────────────────────────────────────
         published_at = _parse_timestamp(entry.get("timestamp")) or _parse_upload_date(entry.get("upload_date"))
@@ -423,7 +443,7 @@ class TwitterParser(BaseParser):
             original_url=webpage_url,
             title=entry.get("title") or entry.get("fulltitle"),
             description=entry.get("description"),
-            duration_sec=int(entry["duration"]) if entry.get("duration") else None,
+            duration_sec=duration_sec,
             width=entry.get("width"),
             height=entry.get("height"),
             published_at=published_at,
@@ -432,4 +452,6 @@ class TwitterParser(BaseParser):
             preview_path=preview_path,
             thumbnail_source_url=thumb_source_url,
             video_url=video_url,
+            media_type=media_type,
+            frame_paths=frame_paths,
         )
