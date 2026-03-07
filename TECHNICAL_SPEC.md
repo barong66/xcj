@@ -88,6 +88,8 @@ xcj/
 
 **UNIQUE INDEX:** (platform, username)
 
+**Удаление:** `DELETE /admin/accounts/{id}` выполняет hard DELETE (не soft delete). CASCADE удаляет все связанные записи: videos, banners, parse_queue, banner_queue.
+
 #### `videos` — Видео
 | Поле | Тип | Описание |
 |------|-----|----------|
@@ -206,6 +208,10 @@ xcj/
 **UNIQUE:** (video_id, banner_size_id)
 **INDEX:** idx_banners_account (account_id)
 
+**InsertBanner upsert поведение:** При ON CONFLICT (video_id, banner_size_id) обновляет только image_url. НЕ сбрасывает is_active — если баннер был деактивирован вручную через админку, повторная генерация не реактивирует его.
+
+**Деактивация:** `DELETE /admin/banners/{id}` ставит `is_active=false`. Деактивированные баннеры не участвуют в ротации (/b/serve) и не возвращаются по idx_banners_serve.
+
 #### `banner_queue` — Очередь генерации баннеров
 | Поле | Тип | Описание |
 |------|-----|----------|
@@ -307,7 +313,7 @@ WHERE event_type IN ('impression', 'click')
 | Метод | Путь | Описание |
 |-------|------|----------|
 | GET | /api/v1/videos | Список видео (sort, page, per_page, category_id, country_id, category, exclude_account_id) |
-| GET | /api/v1/videos/{id} | Детали видео |
+| GET | /api/v1/videos/{id} | Детали видео (account включает social_links) |
 | GET | /api/v1/search?q= | Полнотекстовый поиск |
 | GET | /api/v1/categories | Категории сайта |
 | GET | /api/v1/categories/{slug} | Детали категории |
@@ -332,7 +338,7 @@ WHERE event_type IN ('impression', 'click')
 | GET | /admin/accounts | Список аккаунтов (фильтры: platform, status, paid) |
 | POST | /admin/accounts | Создать аккаунт |
 | PUT | /admin/accounts/{id} | Обновить (is_active, is_paid) |
-| DELETE | /admin/accounts/{id} | Soft-delete аккаунта |
+| DELETE | /admin/accounts/{id} | Hard delete аккаунта (CASCADE: videos, banners, parse_queue, banner_queue) |
 | POST | /admin/accounts/{id}/reparse | Парсинг одного аккаунта |
 | POST | /admin/accounts/reparse-all | Парсинг всех аккаунтов |
 | GET | /admin/queue | Очередь парсинга |
@@ -350,6 +356,7 @@ WHERE event_type IN ('impression', 'click')
 | GET | /admin/accounts/{id}/banners/summary | Кол-во баннеров по размерам |
 | GET | /admin/accounts/{id}/banners | Список баннеров аккаунта (?size_id=) |
 | POST | /admin/accounts/{id}/banners/generate | Ручной запуск генерации |
+| DELETE | /admin/banners/{id} | Деактивация баннера (is_active=false) |
 | GET | /admin/banners | Все баннеры (Promo раздел) |
 
 ### 5.3 Публичные баннерные роуты (без авторизации)
@@ -389,12 +396,16 @@ Headers: `Cache-Control: no-cache, no-store`, без `X-Frame-Options` (разр
 | Атрибут | Тип | Описание |
 |---------|-----|----------|
 | `data-size` | string | Размер баннера `WxH` (напр. `300x250`). Default: `300x250` |
+| `data-style` | string | Стиль баннера: `bold`, `elegant`, `minimalist`, `card`. Default: случайный |
 | `data-src` | string | Источник трафика (напр. `adnet1`). Прокидывается как `src` параметр |
 | `data-click-id` | string | Click ID рекламной сети. Прокидывается как `click_id` параметр |
 
 Пример использования издателем:
 ```html
 <script async src="https://api.temptguide.com/b/loader.js" data-size="300x250" data-src="adnet1"></script>
+
+<!-- С выбором стиля -->
+<script async src="https://api.temptguide.com/b/loader.js" data-size="300x250" data-style="bold"></script>
 ```
 
 Headers: `Cache-Control: public, max-age=86400` (24h кеш), CORS `Access-Control-Allow-Origin: *`.
@@ -577,6 +588,8 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 - **BottomNav** — нижняя навигация: Home, Search, Shuffle (3 вкладки)
 - **ProfileGrid** — сетка тумб на странице модели; клик открывает оригинальный URL (Instagram/Twitter) напрямую + трекает `profile_thumb_click`
 - **SimilarModels** — секция «Similar Models» на странице профиля; 3-колоночная сетка с аватарами; показывается только для free (не paid) аккаунтов; загружает популярные видео из той же категории, исключая текущий аккаунт
+- **OnlyFansContext** (`web/src/contexts/OnlyFansContext.tsx`) — React Context + Provider для передачи OnlyFans URL из страниц (model profile, video detail) в глобальный Header. Компонент `OnlyFansHeaderSetter` вызывает `setOnlyFansUrl()` через useEffect при маунте страницы и очищает при анмаунте
+- **Header OF Button** (`web/src/components/Header.tsx`) — когда `onlyFansUrl` из OnlyFansContext не пустой, Header показывает синюю pill-кнопку "Follow me" с иконкой OF справа. Клик открывает OnlyFans ссылку в новой вкладке и трекает `social_click`
 - **AdminShell** — layout админки (sidebar + header)
 
 ### 7.4 TypeScript типы
@@ -591,6 +604,7 @@ interface Video {
 
 interface Account {
   username: string; avatar_url: string; platform: "twitter" | "instagram";
+  social_links?: Record<string, string>; // e.g. { onlyfans: "https://onlyfans.com/model" }
 }
 
 interface Category { slug: string; name: string; video_count?: number; }
@@ -714,13 +728,14 @@ Cold path (cache miss): ~20ms (SQL + Redis SET), раз в 60 сек на клю
 
 ### 8.7 Контекстный таргетинг (loader.js)
 ```
-Сайт издателя: <script async src="api.temptguide.com/b/loader.js" data-size="300x250">
+Сайт издателя: <script async src="api.temptguide.com/b/loader.js" data-size="300x250" data-style="bold">
 → GET /b/loader.js (24h кеш) → JS ~1.5KB
 → JS на странице издателя:
-  1. Читает <title>, meta description, meta keywords, og:*, <h1>, URL path
-  2. Частотный анализ: tokenize → фильтр ~80 стоп-слов → top-5 ключевых слов
-  3. IntersectionObserver (rootMargin 200px): ждёт пока placeholder приближается к viewport
-  4. Lazy: создаёт <iframe src="/b/serve?size=300x250&kw=keyword1,keyword2&src=...&click_id=...">
+  1. Читает data-style из <script> тега (bold/elegant/minimalist/card, по умолчанию: не передаётся → случайный)
+  2. Читает <title>, meta description, meta keywords, og:*, <h1>, URL path
+  3. Частотный анализ: tokenize → фильтр ~80 стоп-слов → top-5 ключевых слов
+  4. IntersectionObserver (rootMargin 200px): ждёт пока placeholder приближается к viewport
+  5. Lazy: создаёт <iframe src="/b/serve?size=300x250&kw=keyword1,keyword2&style=bold&src=...&click_id=...">
 → Дальше стандартный flow /b/serve (см. 8.6)
 ```
 
@@ -944,7 +959,8 @@ GROUP BY event_date, source, event_type;
 
 - **AdLandingTracker** (`web/src/components/AdLandingTracker.tsx`) — сохраняет src + click_id из URL в sessionStorage
 - **analytics.ts** (`web/src/lib/analytics.ts`) — обогащает события click_id из sessionStorage; новый event type `content_click` (первый клик за сессию)
-- **Promo: Settings tab** (`web/src/app/admin/promo/page.tsx`) — embed-коды с выбором source, форма для conversion tracker
+- **Promo: Banners tab** (`web/src/app/admin/promo/page.tsx`) — embed-коды через loader.js `<script>` тег (вместо iframe) с выбором стиля (Bold/Elegant/Minimalist/Card/Random) и источника трафика; preview по-прежнему использует iframe для live-рендеринга
+- **Promo: Settings tab** (`web/src/app/admin/promo/page.tsx`) — форма для conversion tracker
 - **Promo: Statistics tab** (`web/src/app/admin/promo/page.tsx`) — воронка по источникам, таблица с CTR/конверсией
 - **Ad Sources management** (`web/src/app/admin/ad-sources/page.tsx`) — CRUD для рекламных сетей
 

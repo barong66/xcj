@@ -410,6 +410,7 @@ var s=document.currentScript;
 var sz=s.getAttribute('data-size')||'300x250';
 var src=s.getAttribute('data-src')||'';
 var cid=s.getAttribute('data-click-id')||'';
+var st=s.getAttribute('data-style')||'';
 var gm=function(n){var e=document.querySelector('meta[name="'+n+'"],meta[property="'+n+'"]');return e?e.getAttribute('content')||'':''};
 var raw=[document.title,gm('description'),gm('keywords'),gm('og:title'),gm('og:description')]
 var h1=document.querySelector('h1');if(h1)raw.push(h1.textContent);
@@ -423,7 +424,7 @@ var sorted=Object.keys(freq).sort(function(a,b){return freq[b]-freq[a]});
 var kw=sorted.slice(0,5).join(',');
 var p=sz.split('x');
 var base='%s';
-var url=base+'/b/serve?size='+sz+(kw?'&kw='+encodeURIComponent(kw):'')+(src?'&src='+encodeURIComponent(src):'')+(cid?'&click_id='+encodeURIComponent(cid):'');
+var url=base+'/b/serve?size='+sz+(kw?'&kw='+encodeURIComponent(kw):'')+(src?'&src='+encodeURIComponent(src):'')+(cid?'&click_id='+encodeURIComponent(cid):'')+(st?'&style='+encodeURIComponent(st):'');
 var div=document.createElement('div');
 div.style.cssText='width:'+p[0]+'px;height:'+p[1]+'px;display:inline-block';
 s.parentNode.insertBefore(div,s);

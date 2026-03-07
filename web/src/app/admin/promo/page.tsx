@@ -6,7 +6,6 @@ import {
   getAllBanners,
   getBannerSizes,
   createBannerSize,
-  getAdminCategories,
   getAdSources,
   createAdSource,
   updateAdSource,
@@ -15,7 +14,6 @@ import {
 } from "@/lib/admin-api";
 import type {
   AdminBanner,
-  AdminCategory,
   BannerSize,
   AdSource,
   BannerFunnelStat,
@@ -38,30 +36,26 @@ function EmbedCodeSection({
   sources: AdSource[];
   toast: (msg: string, type?: "error" | "success" | "info") => void;
 }) {
-  const [categories, setCategories] = useState<AdminCategory[]>([]);
-  const [selectedCat, setSelectedCat] = useState("");
   const [selectedSource, setSelectedSource] = useState("");
-  const [keywords, setKeywords] = useState("");
+  const [selectedStyle, setSelectedStyle] = useState("");
   const [previewSizeId, setPreviewSizeId] = useState<number | null>(null);
   const [iframeKey, setIframeKey] = useState(0);
-
-  useEffect(() => {
-    getAdminCategories().then(setCategories).catch(() => {});
-  }, []);
 
   const buildServeUrl = (size: BannerSize) => {
     const params = new URLSearchParams();
     params.set("size", `${size.width}x${size.height}`);
-    if (selectedCat) params.set("cat", selectedCat);
-    if (keywords.trim()) params.set("kw", keywords.trim());
     if (selectedSource) params.set("src", selectedSource);
+    if (selectedStyle) params.set("style", selectedStyle);
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     return `${origin}/b/serve?${params.toString()}`;
   };
 
   const buildCode = (size: BannerSize) => {
-    const src = buildServeUrl(size);
-    return `<iframe src="${src}" width="${size.width}" height="${size.height}" frameborder="0" scrolling="no" style="border:none;overflow:hidden"></iframe>`;
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const attrs = [`data-size="${size.width}x${size.height}"`];
+    if (selectedSource) attrs.push(`data-src="${selectedSource}"`);
+    if (selectedStyle) attrs.push(`data-style="${selectedStyle}"`);
+    return `<script async src="${origin}/b/loader.js" ${attrs.join(" ")}></script>`;
   };
 
   const handleCopy = (code: string) => {
@@ -87,23 +81,16 @@ function EmbedCodeSection({
           ))}
         </select>
         <select
-          value={selectedCat}
-          onChange={(e) => setSelectedCat(e.target.value)}
+          value={selectedStyle}
+          onChange={(e) => setSelectedStyle(e.target.value)}
           className="px-3 py-1.5 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white focus:outline-none focus:border-accent"
         >
-          <option value="">All categories</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.slug}>
-              {c.name}
-            </option>
-          ))}
+          <option value="">Random style</option>
+          <option value="bold">Bold</option>
+          <option value="elegant">Elegant</option>
+          <option value="minimalist">Minimalist</option>
+          <option value="card">Card</option>
         </select>
-        <input
-          value={keywords}
-          onChange={(e) => setKeywords(e.target.value)}
-          placeholder="Keywords (optional)"
-          className="px-3 py-1.5 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white placeholder-[#4a4a4a] focus:outline-none focus:border-accent"
-        />
       </div>
 
       <div className="space-y-2">
