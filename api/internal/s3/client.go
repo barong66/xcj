@@ -37,10 +37,8 @@ func NewClient(endpoint, accessKey, secretKey, region, bucket, publicURL string)
 // Upload puts an object into the bucket and returns its public URL with a cache-busting param.
 func (c *Client) Upload(ctx context.Context, key string, data io.Reader, size int64, contentType string) (string, error) {
 	_, err := c.mc.PutObject(ctx, c.bucket, key, data, size, minio.PutObjectOptions{
-		ContentType: contentType,
-		UserMetadata: map[string]string{
-			"Cache-Control": "public, max-age=31536000, immutable",
-		},
+		ContentType:  contentType,
+		CacheControl: "public, max-age=31536000, immutable",
 	})
 	if err != nil {
 		return "", fmt.Errorf("s3: upload %s: %w", key, err)
