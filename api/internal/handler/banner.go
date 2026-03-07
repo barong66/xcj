@@ -487,10 +487,6 @@ func (h *BannerHandler) PreviewBanner(w http.ResponseWriter, r *http.Request) {
 	style := r.URL.Query().Get("style")
 
 	thumbURL := banner.ImageURL
-	// Try to get original thumbnail for better rendering in HTML templates.
-	if tURL, err := h.admin.GetVideoThumbnail(r.Context(), banner.VideoID); err == nil && tURL != "" {
-		thumbURL = tURL
-	}
 
 	tmpl := pickBannerStyle(style)
 	data := bannerTemplateData{

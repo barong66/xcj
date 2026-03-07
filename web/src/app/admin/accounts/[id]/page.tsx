@@ -54,7 +54,7 @@ function AccountProfileContent() {
   const [bannersLoading, setBannersLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [selectedBannerIds, setSelectedBannerIds] = useState<Set<number>>(new Set());
-  const [bannerStyle, setBannerStyle] = useState<string>("static");
+  const [bannerStyle, setBannerStyle] = useState<string>("bold");
   const [batchActionLoading, setBatchActionLoading] = useState(false);
 
   // Crop modal state
@@ -631,7 +631,7 @@ function AccountProfileContent() {
                 onChange={(e) => setBannerStyle(e.target.value)}
                 className="px-2 py-1.5 text-xs rounded-lg bg-[#1e1e1e] border border-[#2a2a2a] text-[#a0a0a0] focus:outline-none focus:border-accent"
               >
-                <option value="static">Static JPEG</option>
+                <option value="static">Static</option>
                 <option value="bold">Bold</option>
                 <option value="elegant">Elegant</option>
                 <option value="minimalist">Minimalist</option>
