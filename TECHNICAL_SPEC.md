@@ -365,7 +365,7 @@ WHERE event_type IN ('impression', 'click')
 |----------|-----|----------|
 | `size` | string | Размер `WxH` (напр. `300x250`). Альтернативно: `w` + `h` отдельно |
 | `cat` | string | Slug категории (опционально) |
-| `kw` | string | Ключевые слова — ILIKE по title/description (опционально, не кешируется) |
+| `kw` | string | Категория — treated as category slug, JOIN по video_categories (опционально) |
 | `aid` | int | Account ID (опционально) |
 
 Ответ — HTML-страница с `<a href="SITE_BASE_URL/b/{id}/click" target="_top"><img src="CDN_URL">`.
@@ -398,7 +398,7 @@ Headers: `Cache-Control: no-cache, no-store`, без `X-Frame-Options` (разр
 | bp:{w}x{h}:{cat} | 60s | Пул баннеров по размеру + категории |
 | bp:{w}x{h}:a{aid} | 60s | Пул баннеров по размеру + аккаунту |
 
-Кеш обходится для random сортировки, при `exclude_account_id`, и для keyword-запросов баннеров.
+Кеш обходится для random сортировки и при `exclude_account_id`.
 
 ---
 
@@ -660,12 +660,14 @@ Banner Worker забирает задачу из banner_queue
 → Next.js rewrite /b/* → Go API (http://api:8080)
 → Go API /b/serve:
   1. Парсит size (WxH), cat, kw, aid
-  2. Keyword → skip cache, SQL напрямую
-  3. Иначе → Redis GET по ключу bp:{w}x{h}[:cat|:a{aid}]
-  4. Cache miss → SQL (JOIN banners/videos/accounts, +categories если cat) → Redis SET (TTL 60s)
-  5. rand.Intn(len(pool)) → выбрать случайный баннер
-  6. Push banner_impression event (source=serve) → EventBuffer → ClickHouse
-  7. Ответ HTML: <a href="SITE_BASE_URL/b/{id}/click" target="_top"><img src="CDN_URL">
+  2. kw treated as category slug (same as cat) → Redis GET по ключу bp:{w}x{h}[:cat|:a{aid}]
+  3. Cache miss → SQL (JOIN banners/videos/accounts, +categories если cat/kw) → Redis SET (TTL 60s)
+  4. selectBestBanner(pool) → CTR-based selection:
+     - Query ClickHouse GetBannerStats for each banner's CTR per video_id
+     - Pick banner with highest CTR
+     - Equal CTR → random fallback
+  5. Push banner_impression event (source=serve) → EventBuffer → ClickHouse
+  6. Ответ HTML: <a href="SITE_BASE_URL/b/{id}/click" target="_top"><img src="CDN_URL">
 
 Hot path (cache hit): < 2ms
 Cold path (cache miss): ~20ms (SQL + Redis SET), раз в 60 сек на ключ

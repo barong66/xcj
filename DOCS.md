@@ -87,9 +87,10 @@
 - Можно добавлять новые размеры через админку
 
 **Динамический сервинг (iframe embed):**
-- `GET /b/serve?size=300x250` — отдаёт HTML-страницу с случайным баннером из пула, ротация при каждом запросе
-- Таргетинг: `&cat=slug` (категория), `&kw=keyword` (ILIKE по title/description), `&aid=123` (конкретный аккаунт)
-- Redis-кеш пулов баннеров (TTL 60s): hot path < 2ms, keyword-запросы не кешируются
+- `GET /b/serve?size=300x250` — отдаёт HTML-страницу с лучшим баннером из пула (CTR-based selection), ротация при равном CTR
+- Таргетинг: `&cat=slug` (категория), `&kw=category_slug` (категория, аналог cat), `&aid=123` (конкретный аккаунт)
+- **CTR-based selection:** вместо случайного выбора — система выбирает баннер с наивысшим CTR из ClickHouse; при равном CTR — случайный fallback
+- Redis-кеш пулов баннеров (TTL 60s): hot path < 2ms
 - Click tracking: клик по баннеру → `/b/{id}/click` → redirect на `/model/{slug}` (абсолютный URL через SITE_BASE_URL)
 - Impression tracking: автоматически при каждом показе через EventBuffer → ClickHouse
 - Пустой пул → graceful degradation (пустая прозрачная страница)
