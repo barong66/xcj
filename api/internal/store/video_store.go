@@ -87,7 +87,7 @@ func (s *VideoStore) List(ctx context.Context, params model.VideoListParams) (*m
 
 	selectQuery := fmt.Sprintf(`
 		SELECT v.id, v.account_id, v.platform, v.platform_id, v.original_url,
-			COALESCE(v.title,''), COALESCE(v.description,''), v.duration_sec, COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(v.preview_url,''),
+			COALESCE(v.title,''), COALESCE(v.description,''), COALESCE(v.duration_sec,0), COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(v.preview_url,''),
 			v.width, v.height, v.country_id, v.view_count, v.click_count,
 			v.is_active, v.is_promoted, v.promoted_until, v.promotion_weight,
 			v.published_at, v.created_at
@@ -147,7 +147,7 @@ func (s *VideoStore) GetByID(ctx context.Context, id int64) (*model.Video, error
 	var v model.Video
 	err := s.pool.QueryRow(ctx, `
 		SELECT v.id, v.account_id, v.platform, v.platform_id, v.original_url,
-			COALESCE(v.title,''), COALESCE(v.description,''), v.duration_sec, COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(v.preview_url,''),
+			COALESCE(v.title,''), COALESCE(v.description,''), COALESCE(v.duration_sec,0), COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(v.preview_url,''),
 			v.width, v.height, v.country_id, v.view_count, v.click_count,
 			v.is_active, v.is_promoted, v.promoted_until, v.promotion_weight,
 			v.published_at, v.created_at
@@ -214,7 +214,7 @@ func (s *VideoStore) Search(ctx context.Context, siteID int64, query string, pag
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT v.id, v.account_id, v.platform, v.platform_id, v.original_url,
-			COALESCE(v.title,''), COALESCE(v.description,''), v.duration_sec, COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(v.preview_url,''),
+			COALESCE(v.title,''), COALESCE(v.description,''), COALESCE(v.duration_sec,0), COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(v.preview_url,''),
 			v.width, v.height, v.country_id, v.view_count, v.click_count,
 			v.is_active, v.is_promoted, v.promoted_until, v.promotion_weight,
 			v.published_at, v.created_at
@@ -421,7 +421,7 @@ func (s *VideoStore) GetByIDs(ctx context.Context, ids []int64) ([]model.Video, 
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT v.id, v.account_id, v.platform, v.platform_id, v.original_url,
-			COALESCE(v.title,''), COALESCE(v.description,''), v.duration_sec, COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(v.preview_url,''),
+			COALESCE(v.title,''), COALESCE(v.description,''), COALESCE(v.duration_sec,0), COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(v.preview_url,''),
 			v.width, v.height, v.country_id, v.view_count, v.click_count,
 			v.is_active, v.is_promoted, v.promoted_until, v.promotion_weight,
 			v.published_at, v.created_at
