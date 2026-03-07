@@ -33,6 +33,16 @@ export async function POST(request: NextRequest) {
     maxAge: 60 * 60 * 24 * 7, // 7 days
   });
 
+  // Non-httpOnly token so browser JS can send Authorization header directly
+  // to Go API (nginx routes /api/v1/admin/* to Go, bypassing Next.js proxy).
+  response.cookies.set("admin_bearer", adminToken, {
+    httpOnly: false,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 7,
+  });
+
   // Non-httpOnly flag so frontend can check if user is logged in (no secret).
   response.cookies.set("admin_authed", "1", {
     httpOnly: false,
@@ -50,6 +60,12 @@ export async function DELETE() {
 
   response.cookies.set("admin_token", "", {
     httpOnly: true,
+    path: "/",
+    maxAge: 0,
+  });
+
+  response.cookies.set("admin_bearer", "", {
+    httpOnly: false,
     path: "/",
     maxAge: 0,
   });

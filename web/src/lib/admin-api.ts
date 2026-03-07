@@ -7,20 +7,31 @@ function getApiUrl(): string {
   return process.env.API_URL || "http://localhost:8080";
 }
 
+function getAdminBearer(): string | undefined {
+  if (typeof document === "undefined") return undefined;
+  const match = document.cookie.match(/(?:^|;\s*)admin_bearer=([^;]*)/);
+  return match?.[1] || undefined;
+}
+
 async function adminFetch<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
   const url = `${getApiUrl()}/api/v1/admin${path}`;
-  // Token is sent via httpOnly cookie — the Next.js API proxy reads
-  // it server-side and injects the Authorization header to Go API.
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...((options?.headers as Record<string, string>) || {}),
+  };
+  // Send Bearer token directly so requests work even when nginx
+  // routes /api/v1/admin/* to Go API (bypassing Next.js proxy).
+  const bearer = getAdminBearer();
+  if (bearer) {
+    headers["Authorization"] = `Bearer ${bearer}`;
+  }
   const res = await fetch(url, {
     ...options,
     credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
+    headers,
   });
 
   if (res.status === 401) {
