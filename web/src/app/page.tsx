@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getVideos } from "@/lib/api";
-import { SITE_NAME } from "@/lib/constants";
+import { SITE_NAME, SITE_URL } from "@/lib/constants";
 import type { SortOption } from "@/types";
 import { InfiniteVideoGrid } from "@/components/InfiniteVideoGrid";
 import { SortControls } from "@/components/SortControls";
@@ -14,6 +14,9 @@ export const metadata: Metadata = {
   title: `${SITE_NAME} - Trending Videos from Twitter & Instagram`,
   description:
     "Discover the latest trending videos from Twitter and Instagram. Browse by category, filter by country, and watch previews instantly.",
+  alternates: {
+    canonical: SITE_URL,
+  },
 };
 
 interface HomePageProps {
@@ -33,6 +36,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     return (
       <>
         <WebsiteJsonLd searchUrl="/search" />
+        <h1 className="sr-only">Trending Videos from Twitter & Instagram</h1>
         {src && <AdLandingTracker source={src} anchor={anchor} />}
         {!anchor && (
           <Suspense fallback={null}>

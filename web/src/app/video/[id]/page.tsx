@@ -24,10 +24,13 @@ export async function generateMetadata({
   try {
     const video = await getVideo(id);
     const platformLabel = video.platform === "twitter" ? "Twitter/X" : "Instagram";
+    // Strip emoji and non-letter characters to detect empty/emoji-only titles
+    const textOnly = video.title.replace(/[^\w\s,.!?'"-]/g, "").trim();
+    const metaTitle = textOnly || `Video by @${video.account.username} on ${platformLabel}`;
 
     return {
-      title: video.title,
-      description: `Watch "${video.title}" by @${video.account.username} on ${platformLabel}. ${formatViewCount(video.view_count)} views.`,
+      title: metaTitle,
+      description: `Watch "${metaTitle}" by @${video.account.username} on ${platformLabel}. ${formatViewCount(video.view_count)} views.`,
       openGraph: {
         type: "video.other",
         title: video.title,

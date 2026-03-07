@@ -27,18 +27,28 @@ export async function generateMetadata({
     const account = await getAccountBySlug(slug, 1, 1);
     const displayName = account.display_name || account.username;
 
+    const cleanBio = account.bio?.replace(/\n+/g, " ").slice(0, 155);
+
     return {
       title: `${displayName} (@${account.username})`,
       description:
-        account.bio ||
+        cleanBio ||
         `Watch ${account.video_count || 0} videos from @${account.username} on ${SITE_NAME}.`,
       openGraph: {
         title: `${displayName} (@${account.username}) | ${SITE_NAME}`,
         description:
-          account.bio ||
+          cleanBio ||
           `Videos from @${account.username}.`,
         url: `${SITE_URL}/model/${slug}`,
         images: account.avatar_url ? [{ url: account.avatar_url }] : undefined,
+      },
+      twitter: {
+        card: "summary_large_image",
+        title: `${displayName} (@${account.username}) | ${SITE_NAME}`,
+        description:
+          cleanBio ||
+          `Videos from @${account.username}.`,
+        images: account.avatar_url ? [account.avatar_url] : undefined,
       },
       alternates: {
         canonical: `${SITE_URL}/model/${slug}`,

@@ -26,6 +26,11 @@ export async function generateMetadata({
       description: `Videos from @${username} on ${platformLabel}.`,
       url: `${SITE_URL}/account/${platform}/${username}`,
     },
+    twitter: {
+      card: "summary_large_image",
+      title: `@${username} on ${platformLabel} | ${SITE_NAME}`,
+      description: `Videos from @${username} on ${platformLabel}.`,
+    },
     alternates: {
       canonical: `${SITE_URL}/account/${platform}/${username}`,
     },
@@ -75,7 +80,7 @@ export default async function AccountPage({
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[16px] font-semibold text-txt">@{username}</p>
+              <h1 className="text-[16px] font-semibold text-txt">@{username}</h1>
               <p className="text-[13px] text-txt-muted mt-0.5">
                 {data.total} video{data.total !== 1 ? "s" : ""} &middot; {platformLabel}
               </p>

@@ -13,7 +13,7 @@ export function VideoJsonLd({ video }: VideoJsonLdProps) {
     description: video.title,
     thumbnailUrl: video.thumbnail_url,
     contentUrl: video.preview_url,
-    uploadDate: new Date().toISOString(),
+    uploadDate: video.published_at || new Date().toISOString(),
     duration: `PT${video.duration_sec}S`,
     interactionStatistic: {
       "@type": "InteractionCounter",

@@ -50,6 +50,11 @@ export async function generateMetadata({
       description: `Browse trending videos from ${countryName}.`,
       url: `${SITE_URL}/country/${code}`,
     },
+    twitter: {
+      card: "summary_large_image",
+      title: `Videos from ${countryName} | ${SITE_NAME}`,
+      description: `Browse trending videos from ${countryName}.`,
+    },
     alternates: {
       canonical: `${SITE_URL}/country/${code}`,
     },

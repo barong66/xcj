@@ -35,6 +35,11 @@ export async function generateMetadata({
       description: `Browse ${categoryName} videos from Twitter and Instagram.`,
       url: `${SITE_URL}/category/${slug}`,
     },
+    twitter: {
+      card: "summary_large_image",
+      title: `${categoryName} Videos | ${SITE_NAME}`,
+      description: `Browse ${categoryName} videos from Twitter and Instagram.`,
+    },
     alternates: {
       canonical: `${SITE_URL}/category/${slug}`,
     },
@@ -72,7 +77,7 @@ export default async function CategoryPage({
           ]}
         />
         <div className="px-4 py-3 border-b border-border">
-          <p className="text-[15px] font-semibold text-txt">{categoryName}</p>
+          <h1 className="text-[15px] font-semibold text-txt">{categoryName}</h1>
           <p className="text-[13px] text-txt-muted mt-0.5">
             {data.total} video{data.total !== 1 ? "s" : ""}
           </p>
