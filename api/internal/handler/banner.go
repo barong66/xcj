@@ -380,6 +380,53 @@ func (h *BannerHandler) selectBestBanner(ctx context.Context, pool []store.Serva
 	return best[rand.Intn(len(best))]
 }
 
+// ServeLoader handles GET /b/loader.js — returns the embed script that
+// extracts page context (title, meta, h1) and creates an iframe with keywords.
+func (h *BannerHandler) ServeLoader(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Determine base URL for iframe src from the request's own origin.
+	scheme := "https"
+	if fproto := r.Header.Get("X-Forwarded-Proto"); fproto != "" {
+		scheme = fproto
+	}
+	host := r.Host
+	base := scheme + "://" + host
+
+	fmt.Fprintf(w, loaderJS, base)
+}
+
+// loaderJS is the embed script template. %%s is replaced with the API base URL.
+// All other literal %% are escaped for fmt.Fprintf.
+const loaderJS = `(function(){
+var s=document.currentScript;
+var sz=s.getAttribute('data-size')||'300x250';
+var src=s.getAttribute('data-src')||'';
+var cid=s.getAttribute('data-click-id')||'';
+var gm=function(n){var e=document.querySelector('meta[name="'+n+'"],meta[property="'+n+'"]');return e?e.getAttribute('content')||'':''};
+var raw=[document.title,gm('description'),gm('keywords'),gm('og:title'),gm('og:description')]
+var h1=document.querySelector('h1');if(h1)raw.push(h1.textContent);
+raw.push(location.pathname.replace(/[\/\-_]/g,' '));
+raw=raw.join(' ').toLowerCase();
+var stop={the:1,a:1,an:1,and:1,or:1,but:1,in:1,on:1,at:1,to:1,for:1,of:1,with:1,by:1,is:1,are:1,was:1,were:1,be:1,been:1,has:1,have:1,had:1,do:1,does:1,did:1,will:1,would:1,could:1,should:1,may:1,might:1,this:1,that:1,it:1,its:1,not:1,no:1,from:1,as:1,if:1,so:1,than:1,then:1,into:1,up:1,out:1,about:1,just:1,also:1,how:1,what:1,when:1,where:1,who:1,which:1,all:1,each:1,every:1,some:1,any:1,more:1,most:1,other:1,new:1,free:1,watch:1,video:1,videos:1,com:1,www:1,http:1,https:1,page:1,home:1,click:1,here:1,best:1,top:1,hot:1,sexy:1,model:1,models:1,content:1,profile:1,view:1,see:1,get:1,like:1,one:1,two:1};
+var words=raw.match(/[a-z]{3,}/g)||[];
+var freq={};
+for(var i=0;i<words.length;i++){var w=words[i];if(!stop[w])freq[w]=(freq[w]||0)+1}
+var sorted=Object.keys(freq).sort(function(a,b){return freq[b]-freq[a]});
+var kw=sorted.slice(0,5).join(',');
+var p=sz.split('x');
+var base='%s';
+var url=base+'/b/serve?size='+sz+(kw?'&kw='+encodeURIComponent(kw):'')+(src?'&src='+encodeURIComponent(src):'')+(cid?'&click_id='+encodeURIComponent(cid):'');
+var div=document.createElement('div');
+div.style.cssText='width:'+p[0]+'px;height:'+p[1]+'px;display:inline-block';
+s.parentNode.insertBefore(div,s);
+var mk=function(){var f=document.createElement('iframe');f.src=url;f.width=p[0];f.height=p[1];f.frameBorder='0';f.scrolling='no';f.style.cssText='border:none;overflow:hidden;display:block';div.appendChild(f)};
+if('IntersectionObserver' in window){var o=new IntersectionObserver(function(e){if(e[0].isIntersecting){o.disconnect();mk()}},{rootMargin:'200px'});o.observe(div)}else{mk()}
+})();
+`
+
 // parseBannerSize extracts width and height from "size=WxH" or "w=W&h=H" query params.
 func parseBannerSize(r *http.Request) (int, int) {
 	if sizeStr := r.URL.Query().Get("size"); sizeStr != "" {
