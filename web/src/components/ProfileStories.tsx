@@ -23,13 +23,14 @@ export async function ProfileStories() {
             <Link
               key={account.id}
               href={`/model/${slug}`}
+              aria-label={name}
               className="flex flex-col items-center gap-1 shrink-0"
             >
               <div className="w-[56px] h-[56px] rounded-full p-[2px] bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400">
                 <div className="w-full h-full rounded-full overflow-hidden bg-bg ring-2 ring-bg">
                   <Image
                     src={account.avatar_url}
-                    alt={name}
+                    alt=""
                     width={52}
                     height={52}
                     className="w-full h-full object-cover"

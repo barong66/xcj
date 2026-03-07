@@ -11,9 +11,10 @@ import { PlatformIcon } from "./PlatformIcon";
 
 interface VideoCardProps {
   video: Video;
+  priority?: boolean;
 }
 
-export function VideoCard({ video }: VideoCardProps) {
+export function VideoCard({ video, priority }: VideoCardProps) {
   const cardRef = useRef<HTMLElement>(null);
   const hasTrackedImpression = useRef(false);
   const router = useRouter();
@@ -56,7 +57,7 @@ export function VideoCard({ video }: VideoCardProps) {
             {video.account.avatar_url ? (
               <Image
                 src={video.account.avatar_url}
-                alt={video.account.username}
+                alt=""
                 width={32}
                 height={32}
                 className="w-full h-full object-cover"
@@ -100,9 +101,9 @@ export function VideoCard({ video }: VideoCardProps) {
           src={video.thumbnail_url}
           alt={video.title}
           fill
-          sizes="430px"
+          sizes="(max-width: 430px) 100vw, 430px"
           className="object-cover"
-          loading="lazy"
+          {...(priority ? { priority: true } : { loading: "lazy" as const })}
         />
 
         {/* Duration badge */}
@@ -133,6 +134,7 @@ export function VideoCard({ video }: VideoCardProps) {
               navigator.clipboard.writeText(`${window.location.origin}${modelHref}`);
             }
           }}
+          aria-label="Share"
           className="flex items-center gap-1.5 text-txt-secondary hover:text-txt transition-colors ml-auto"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -156,7 +158,7 @@ export function VideoCard({ video }: VideoCardProps) {
               <Link
                 key={cat.slug}
                 href={`/category/${cat.slug}`}
-                className="hover:underline mr-1.5"
+                className="hover:underline mr-1.5 inline-block py-1"
               >
                 #{cat.name.toLowerCase().replace(/\s+/g, "")}
               </Link>

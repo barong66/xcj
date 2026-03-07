@@ -75,6 +75,7 @@ export function BottomNav() {
             <Link
               key={tab.label}
               href={tab.href}
+              aria-label={tab.label}
               className={`flex flex-col items-center justify-center w-full h-full transition-colors ${
                 isActive ? "text-txt" : "text-txt-muted"
               }`}

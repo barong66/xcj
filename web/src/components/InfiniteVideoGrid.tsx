@@ -87,8 +87,8 @@ export function InfiniteVideoGrid({
 
   return (
     <div className="flex flex-col">
-      {items.map((video) => (
-        <VideoCard key={video.id} video={video} />
+      {items.map((video, i) => (
+        <VideoCard key={video.id} video={video} priority={i === 0} />
       ))}
 
       {hasMore && (

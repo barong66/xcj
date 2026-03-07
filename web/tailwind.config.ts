@@ -22,7 +22,7 @@ const config: Config = {
         txt: {
           DEFAULT: "#ffffff",
           secondary: "#a0a0a0",
-          muted: "#6b6b6b",
+          muted: "#808080",
         },
         border: {
           DEFAULT: "#2a2a2a",
