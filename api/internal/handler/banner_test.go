@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"bytes"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -85,6 +87,71 @@ func TestBannerExtra(t *testing.T) {
 			got := bannerExtra(tt.bannerID, tt.clickID)
 			if got != tt.want {
 				t.Errorf("bannerExtra(%d, %q) = %q, want %q", tt.bannerID, tt.clickID, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPickBannerStyle(t *testing.T) {
+	// Known styles return the correct template.
+	for _, style := range bannerStyles {
+		tmpl := pickBannerStyle(style)
+		if tmpl == nil {
+			t.Errorf("pickBannerStyle(%q) returned nil", style)
+		}
+		if tmpl.Name() != style {
+			t.Errorf("pickBannerStyle(%q).Name() = %q", style, tmpl.Name())
+		}
+	}
+
+	// Unknown style returns a valid template (random).
+	tmpl := pickBannerStyle("nonexistent")
+	if tmpl == nil {
+		t.Error("pickBannerStyle(unknown) returned nil")
+	}
+
+	// Empty style returns a valid template.
+	tmpl = pickBannerStyle("")
+	if tmpl == nil {
+		t.Error("pickBannerStyle('') returned nil")
+	}
+}
+
+func TestBannerTemplateRender(t *testing.T) {
+	data := bannerTemplateData{
+		ThumbnailURL: "https://media.temptguide.com/thumb.jpg",
+		Username:     "testuser",
+		ClickURL:     "/b/42/click?src=test",
+		HoverURL:     "/b/42/hover?src=test",
+		Width:        300,
+		Height:       250,
+	}
+
+	for _, style := range bannerStyles {
+		t.Run(style, func(t *testing.T) {
+			tmpl := pickBannerStyle(style)
+			var buf bytes.Buffer
+			err := tmpl.Execute(&buf, data)
+			if err != nil {
+				t.Fatalf("template %q render error: %v", style, err)
+			}
+			output := buf.String()
+
+			// Check essential content is present.
+			// Note: html/template escapes / as \/ in JS contexts,
+			// so check for URL parts without leading slashes.
+			checks := []string{
+				data.ThumbnailURL,
+				data.Username,
+				"click?src=test",
+				"hover?src=test",
+				"300",
+				"250",
+			}
+			for _, check := range checks {
+				if !strings.Contains(output, check) {
+					t.Errorf("template %q missing %q in output", style, check)
+				}
 			}
 		})
 	}

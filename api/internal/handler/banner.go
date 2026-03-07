@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"fmt"
-	"html"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -202,6 +201,7 @@ func (h *BannerHandler) HoverBanner(w http.ResponseWriter, r *http.Request) {
 //   - aid:  account ID
 //   - src:  traffic source identifier
 //   - click_id: ad network click ID for conversion tracking
+//   - style: banner template style (bold/elegant/minimalist/card, default: random)
 func (h *BannerHandler) ServeDynamic(w http.ResponseWriter, r *http.Request) {
 	width, height := parseBannerSize(r)
 	if width <= 0 || height <= 0 {
@@ -214,6 +214,7 @@ func (h *BannerHandler) ServeDynamic(w http.ResponseWriter, r *http.Request) {
 	aid, _ := strconv.ParseInt(r.URL.Query().Get("aid"), 10, 64)
 	src := r.URL.Query().Get("src")
 	clickID := r.URL.Query().Get("click_id")
+	style := r.URL.Query().Get("style")
 
 	pool := h.getBannerPool(r, width, height, cat, kw, aid)
 
@@ -284,22 +285,26 @@ func (h *BannerHandler) ServeDynamic(w http.ResponseWriter, r *http.Request) {
 		hoverURL = h.siteBaseURL + hoverURL
 	}
 
-	// Escape URLs for safe HTML embedding.
-	safeClickURL := html.EscapeString(clickURL)
-	safeHoverURL := html.EscapeString(hoverURL)
+	// Use raw thumbnail for HTML template; fall back to static JPEG.
+	thumbURL := banner.ThumbnailURL
+	if thumbURL == "" {
+		thumbURL = banner.ImageURL
+	}
+
+	tmpl := pickBannerStyle(style)
+	data := bannerTemplateData{
+		ThumbnailURL: thumbURL,
+		Username:     banner.Username,
+		ClickURL:     clickURL,
+		HoverURL:     hoverURL,
+		Width:        banner.Width,
+		Height:       banner.Height,
+	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<style>*{margin:0;padding:0}body{overflow:hidden}</style></head>
-<body>
-<a id="b" href="%s" target="_top">
-<img src="%s" width="%d" height="%d" style="display:block" alt="">
-</a>
-<script>
-(function(){var d=false;document.getElementById('b').addEventListener('mouseenter',function(){if(d)return;d=true;new Image().src='%s';});})();
-</script>
-</body></html>`, safeClickURL, html.EscapeString(banner.ImageURL), banner.Width, banner.Height, safeHoverURL)
+	if err := tmpl.Execute(w, data); err != nil {
+		slog.Error("banner: template render", "error", err, "style", style)
+	}
 }
 
 // getBannerPool returns the pool of eligible banners, using Redis cache when possible.

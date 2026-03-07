@@ -89,10 +89,6 @@ class Settings(BaseSettings):
     banner_quality: int = 90
     banner_poll_interval_sec: int = 10
 
-    # ── Gemini (banner image editing) ──────────────────────────
-    gemini_api_key: Optional[str] = None
-    gemini_model: str = "gemini-2.5-flash-image"
-
     # ── Logging ──────────────────────────────────────────────────
     log_level: str = "INFO"
 

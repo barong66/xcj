@@ -1,6 +1,6 @@
 # xxxaccounter — Документация
 
-> Последнее обновление: 2026-03-06
+> Последнее обновление: 2026-03-07
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
 ---
@@ -76,10 +76,10 @@
 - Аналитика: banner_impression (показ) и banner_click (клик) в ClickHouse; Imprs/Clicks/CTR отображаются в админке
 
 **Качество баннеров:**
-- **Gemini AI smart crop** — Gemini Image Editing API (`gemini-2.5-flash-image`) выполняет только smart crop (composition/framing) под нужный aspect ratio (напр. "6:5"). Gemini НЕ делает color enhancement — только кадрирование (~$0.04 за изображение). Fallback при недоступности Gemini — center-crop
+- **OpenCV face-aware smart crop** — Haar cascade (frontal face → profile face → upper body) определяет лица и позиционирует кроп вокруг них. Fallback — center-crop с upper-third bias
 - **Pillow ImageEnhance** — программное улучшение цвета после resize: contrast +35%, color saturation +40%, sharpness +50%, brightness +5%
 - **Text overlay** — градиент внизу + @username + "Watch Now →" делает баннер кликабельным и узнаваемым
-- Полный пайплайн: Gemini crop → Pillow Lanczos resize → Pillow enhance → overlay → JPEG q=90
+- Полный пайплайн: OpenCV smart crop → Pillow Lanczos resize → Pillow enhance → overlay → JPEG q=90
 
 **Размеры (настраиваемые):**
 - 300x250 (Medium Rectangle) — дефолтный
@@ -87,14 +87,48 @@
 - Можно добавлять новые размеры через админку
 
 **Динамический сервинг (iframe embed):**
-- `GET /b/serve?size=300x250` — отдаёт HTML-страницу с лучшим баннером из пула (CTR-based selection), ротация при равном CTR
+- `GET /b/serve?size=300x250` — отдаёт интерактивный HTML-баннер с hover-эффектами (CTR-based selection), ротация при равном CTR
 - Таргетинг: `&cat=slug` (категория), `&kw=category_slug` (категория, аналог cat), `&aid=123` (конкретный аккаунт)
+- **Стили баннеров (`&style=`):** 4 HTML+CSS шаблона с hover-эффектами (scale, glow, opacity transitions). По умолчанию — случайный стиль:
+  - **bold** — яркий: розовая рамка, градиентная CTA-кнопка "Watch Now", "Exclusive Content"
+  - **elegant** — утончённый: золотые акценты, serif шрифт, backdrop-filter blur, diamond-орнамент
+  - **minimalist** — чистый: лёгкий overlay, watermark "TemptGuide", стрелочный CTA
+  - **card** — карточка: тёмная нижняя панель (25%) + фото (75%), кнопка play, красный акцент
+- Баннеры используют raw thumbnail (thumbnail_lg_url) вместо статического JPEG, показывают @username
 - **CTR-based selection:** вместо случайного выбора — система выбирает баннер с наивысшим CTR из ClickHouse; при равном CTR — случайный fallback
 - Redis-кеш пулов баннеров (TTL 60s): hot path < 2ms
 - Click tracking: клик по баннеру → `/b/{id}/click` → redirect на `/model/{slug}` (абсолютный URL через SITE_BASE_URL)
 - Impression tracking: автоматически при каждом показе через EventBuffer → ClickHouse
+- Hover tracking: JS mouseenter в HTML-шаблоне → 1x1 GIF pixel `/b/{id}/hover`
 - Пустой пул → graceful degradation (пустая прозрачная страница)
 - Embed-код генерируется в админке (Promo → Embed Code): выбор категории + keywords → копируемые iframe-сниппеты для каждого размера
+
+**Embed-скрипт для издателей (loader.js):**
+
+Вместо ручной вставки iframe с фиксированными параметрами, издатель может использовать лёгкий JS-скрипт (~1.5KB), который автоматически определяет контекст страницы и подбирает релевантный баннер.
+
+Как работает:
+1. Издатель вставляет одну строку кода на страницу
+2. Скрипт читает контекст страницы: заголовок, meta-теги (description, keywords, Open Graph), `<h1>`, URL
+3. Выполняет частотный анализ слов, отфильтровывает стоп-слова, извлекает top-5 ключевых слов
+4. Создаёт iframe с контекстным таргетингом: `/b/serve?kw=keyword1,keyword2,...`
+5. Lazy loading: баннер загружается только когда приближается к видимой области (200px до viewport)
+
+Использование:
+```html
+<!-- Простейший вариант -->
+<script async src="https://api.temptguide.com/b/loader.js" data-size="300x250"></script>
+
+<!-- С привязкой к рекламной сети -->
+<script async src="https://api.temptguide.com/b/loader.js" data-size="300x250" data-src="adnet1" data-click-id="{CLICK_ID}"></script>
+```
+
+Атрибуты:
+- `data-size` — размер баннера (напр. `300x250`), по умолчанию `300x250`
+- `data-src` — источник трафика (slug рекламной сети)
+- `data-click-id` — ID клика рекламной сети для S2S постбеков
+
+Скрипт кешируется 24 часа, работает на любом домене (CORS enabled).
 
 **Управление:**
 - Вкладка "Promo" на странице аккаунта — просмотр баннеров в оригинальном размере, ручная генерация
@@ -192,6 +226,7 @@
 - Middleware: определение сайта по домену, rate limiting, CORS, логирование
 - Буфер аналитических событий → batch insert в ClickHouse
 - Динамический сервинг баннеров (`/b/serve`) с Redis-кешем пулов и ротацией
+- Embed-скрипт для контекстного таргетинга (`/b/loader.js`) — извлекает ключевые слова со страницы издателя
 
 ### Python Parser
 - Парсит Twitter (через yt-dlp) и Instagram (через API)
@@ -200,7 +235,7 @@
 - AI категоризация через OpenAI GPT-4o Vision API (пачками по 50 видео)
 - Работает как фоновый воркер, опрашивая очередь в PostgreSQL
 - **Worker loop** запускает 3 корутины через `asyncio.gather`: parse_worker, banner_worker, categorizer_worker
-- **Banner Worker** — генерирует баннеры из тумб видео для платных аккаунтов: Gemini AI smart crop (aspect ratio only, fallback: center-crop) → Lanczos resize → Pillow ImageEnhance (contrast/color/sharpness/brightness) → gradient/text overlay → JPEG → R2
+- **Banner Worker** — генерирует баннеры из тумб видео для платных аккаунтов: OpenCV face-aware smart crop (fallback: center-crop) → Lanczos resize → Pillow ImageEnhance (contrast/color/sharpness/brightness) → gradient/text overlay → JPEG → R2
 - **Categorizer Worker** — фоновый цикл, берёт uncategorized видео, отправляет thumbnail в OpenAI GPT-4o Vision, сохраняет категории с confidence
 
 ### Next.js Frontend
@@ -328,29 +363,22 @@ curl -X POST http://localhost:8080/api/v1/admin/videos/recategorize \
 - Результаты первого прогона: 370 видео обработано, 41 категория создана, 1649 связей video_categories
 - Мониторинг: ClickUp task https://app.clickup.com/t/869ccek1u
 
-## Banner Worker (Gemini Image Editing)
+## Banner Worker (OpenCV Smart Crop)
 
 ### Как работает
-Banner Worker генерирует рекламные баннеры из thumbnail видео для платных аккаунтов. Использует Gemini Image Editing API для интеллектуального кропа (composition/framing) и Pillow ImageEnhance для программного улучшения цвета.
+Banner Worker генерирует рекламные баннеры из thumbnail видео для платных аккаунтов. Использует OpenCV Haar cascade для face-aware кропа и Pillow ImageEnhance для программного улучшения цвета.
 
 ### Пайплайн
 ```
-thumbnail_lg_url → скачать → Gemini smart crop (aspect ratio, напр. "6:5") → Pillow Lanczos resize → Pillow ImageEnhance (contrast 1.35, color 1.4, sharpness 1.5, brightness 1.05) → overlay (@username + "Watch Now →") → JPEG q=90 → R2
+thumbnail_lg_url → скачать → OpenCV face-aware smart crop → Pillow Lanczos resize → Pillow ImageEnhance (contrast 1.35, color 1.4, sharpness 1.5, brightness 1.05) → overlay (@username + "Watch Now →") → JPEG q=90 → R2
 ```
 
 **Разделение ответственности:**
-- **Gemini** — только smart crop (composition, framing, rule of thirds). Промпт запрашивает aspect ratio, не пиксели, чтобы избежать сквоша
+- **OpenCV** — face-aware smart crop (Haar cascade: frontal face → profile face → upper body). Позиционирует кроп вокруг обнаруженных лиц. Fallback — center-crop с upper-third bias
 - **Pillow** — resize (Lanczos) + color enhancement (ImageEnhance). Программные значения — стабильные и предсказуемые
 
-### Env-переменные
-| Переменная | Описание |
-|------------|----------|
-| `GEMINI_API_KEY` | Google Gemini API key (обязателен для AI crop; без него — fallback на center-crop) |
-| `GEMINI_MODEL` | Модель Gemini (default: `gemini-2.5-flash-image`) |
-
 ### Стоимость
-- ~$0.04 за изображение (Gemini Image Editing API)
-- При недоступности Gemini (нет ключа, ошибка API) — автоматический fallback на center-crop (бесплатно)
+- Бесплатно (OpenCV — локальная библиотека, внешних API нет)
 
 ---
 

@@ -106,6 +106,16 @@
     <input id="aid" type="number" placeholder="optional" style="width:100px">
   </div>
   <div>
+    <label>Style</label>
+    <select id="style">
+      <option value="">Random</option>
+      <option value="bold">Bold</option>
+      <option value="elegant">Elegant</option>
+      <option value="minimalist">Minimalist</option>
+      <option value="card">Card</option>
+    </select>
+  </div>
+  <div>
     <label>&nbsp;</label>
     <button onclick="loadBanner()">Load Banner</button>
   </div>
@@ -167,6 +177,7 @@ function loadBanner() {
   var kw = document.getElementById('kw').value.trim();
   var src = document.getElementById('src').value.trim();
   var aid = document.getElementById('aid').value.trim();
+  var style = document.getElementById('style').value;
 
   var params = new URLSearchParams();
   params.set('size', size);
@@ -174,6 +185,7 @@ function loadBanner() {
   if (kw) params.set('kw', kw);
   if (src) params.set('src', src);
   if (aid) params.set('aid', aid);
+  if (style) params.set('style', style);
 
   var url = '/b/serve?' + params.toString();
   var ts = Date.now();

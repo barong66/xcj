@@ -1414,18 +1414,22 @@ func (s *AdminStore) GetAccountSlug(ctx context.Context, accountID int64) (strin
 
 // ServableBanner holds minimal data for dynamic banner serving.
 type ServableBanner struct {
-	ID        int64  `json:"id"`
-	AccountID int64  `json:"aid"`
-	VideoID   int64  `json:"vid"`
-	ImageURL  string `json:"url"`
-	Width     int    `json:"w"`
-	Height    int    `json:"h"`
+	ID           int64  `json:"id"`
+	AccountID    int64  `json:"aid"`
+	VideoID      int64  `json:"vid"`
+	ImageURL     string `json:"url"`
+	ThumbnailURL string `json:"thumb"`
+	Username     string `json:"user"`
+	Width        int    `json:"w"`
+	Height       int    `json:"h"`
 }
 
 // ListServableBanners returns all active banners for given size, optionally filtered by category or account.
 func (s *AdminStore) ListServableBanners(ctx context.Context, width, height int, categorySlug string, accountID int64) ([]ServableBanner, error) {
 	query := `
-		SELECT b.id, b.account_id, b.video_id, b.image_url, b.width, b.height
+		SELECT b.id, b.account_id, b.video_id, b.image_url,
+			COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(a.username, ''),
+			b.width, b.height
 		FROM banners b
 		JOIN videos v ON v.id = b.video_id AND v.is_active = true
 		JOIN accounts a ON a.id = b.account_id AND a.is_paid = true AND a.is_active = true`
@@ -1459,7 +1463,7 @@ func (s *AdminStore) ListServableBanners(ctx context.Context, width, height int,
 	var banners []ServableBanner
 	for rows.Next() {
 		var b ServableBanner
-		if err := rows.Scan(&b.ID, &b.AccountID, &b.VideoID, &b.ImageURL, &b.Width, &b.Height); err != nil {
+		if err := rows.Scan(&b.ID, &b.AccountID, &b.VideoID, &b.ImageURL, &b.ThumbnailURL, &b.Username, &b.Width, &b.Height); err != nil {
 			return nil, fmt.Errorf("admin_store: scan servable banner: %w", err)
 		}
 		banners = append(banners, b)
