@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-07 (account stats tab)
+> Last updated: 2026-03-07 (banner mass actions, style preview, re-grab)
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -407,6 +407,8 @@ ORDER BY event_date DESC
 | GET | /admin/accounts/{id}/banners | Список баннеров аккаунта (?size_id=) |
 | POST | /admin/accounts/{id}/banners/generate | Ручной запуск генерации |
 | DELETE | /admin/banners/{id} | Деактивация баннера (is_active=false) |
+| POST | /admin/banners/batch-deactivate | Массовая деактивация баннеров (body: {ids: [...]}) |
+| POST | /admin/banners/batch-regenerate | Массовая перегенерация баннеров (body: {ids: [...]}) |
 | GET | /admin/banners | Все баннеры (Promo раздел) |
 
 ### 5.3 Публичные баннерные роуты (без авторизации)
@@ -416,6 +418,7 @@ ORDER BY event_date DESC
 | GET | /b/serve | Динамический сервинг: интерактивный HTML-баннер с hover-эффектами из пула (iframe embed) |
 | GET | /b/loader.js | Embed-скрипт (~1.5KB) для контекстного таргетинга баннеров |
 | GET | /b/{id} | 302 redirect на R2 URL + banner_impression в ClickHouse |
+| GET | /b/{id}/preview | Admin preview: рендерит баннер в выбранном HTML-стиле (?style=bold/elegant/minimalist/card) |
 | GET | /b/{id}/click | 302 redirect на /model/{slug} + banner_click в ClickHouse |
 
 **GET /b/serve** — параметры:
@@ -636,7 +639,7 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 | /admin/stats | Статистика по видео (тумбы + views/clicks/CTR) |
 | /admin/categories | Категории |
 | /admin/promo | Все баннеры + управление размерами |
-| /admin/accounts/[id] | Профиль аккаунта (табы: Stats (default), Fan Site Links, Promo) |
+| /admin/accounts/[id] | Профиль аккаунта (табы: Stats (default), Fan Site Links, Promo). Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (iframe), re-grab |
 
 **Авторизация:** cookie `admin_token` → Bearer token к Go API. Cookie `admin_authed=1` для фронтенд-проверки.
 
@@ -1017,6 +1020,7 @@ GROUP BY event_date, source, event_type;
 |-------|------|----------|
 | GET | /b/serve | Обновлён: принимает src, click_id; добавлен JS mouseenter трекер в iframe HTML |
 | GET | /b/{id}/hover | Новый: возвращает 1x1 прозрачный GIF, пишет banner_hover в ClickHouse |
+| GET | /b/{id}/preview | Admin preview: рендерит баннер в HTML-стиле (?style=bold/elegant/minimalist/card) для предпросмотра в админке |
 | GET | /b/{id}/click | Обновлён: прокидывает src, click_id в redirect URL |
 
 #### Админские эндпоинты
@@ -1026,6 +1030,8 @@ GROUP BY event_date, source, event_type;
 | POST | /admin/ad-sources | Создать рекламную сеть |
 | PUT | /admin/ad-sources/{id} | Обновить рекламную сеть |
 | GET | /admin/banners/funnel | Статистика воронки по source (из ClickHouse) |
+| POST | /admin/banners/batch-deactivate | Массовая деактивация баннеров по списку ID |
+| POST | /admin/banners/batch-regenerate | Массовая перегенерация баннеров по списку ID |
 
 ### 11.8 Frontend — Новые компоненты
 
