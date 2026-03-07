@@ -26,6 +26,14 @@ type Config struct {
 	ProjectDir string // root directory containing parser/ package
 
 	SiteBaseURL string // public site URL for absolute redirects (e.g. https://temptguide.com)
+
+	// S3 / Cloudflare R2
+	S3Endpoint  string
+	S3Bucket    string
+	S3AccessKey string
+	S3SecretKey string
+	S3Region    string
+	S3PublicURL string
 }
 
 func Load() *Config {
@@ -49,6 +57,13 @@ func Load() *Config {
 		ProjectDir: envOrDefault("PROJECT_DIR", ".."),
 
 		SiteBaseURL: envOrDefault("SITE_BASE_URL", ""),
+
+		S3Endpoint:  envOrDefault("S3_ENDPOINT", ""),
+		S3Bucket:    envOrDefault("S3_BUCKET", ""),
+		S3AccessKey: envOrDefault("S3_ACCESS_KEY", ""),
+		S3SecretKey: envOrDefault("S3_SECRET_KEY", ""),
+		S3Region:    envOrDefault("S3_REGION", "auto"),
+		S3PublicURL: envOrDefault("S3_PUBLIC_URL", ""),
 	}
 }
 

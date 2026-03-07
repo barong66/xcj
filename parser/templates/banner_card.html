@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Banner — Card</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+
+  .banner {
+    width: 300px;
+    height: 250px;
+    position: relative;
+    overflow: hidden;
+    background: #0D0D0D;
+    font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+    cursor: pointer;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  }
+
+  /* Photo area — top 75% */
+  .photo {
+    position: relative;
+    width: 100%;
+    height: 187px;
+    overflow: hidden;
+  }
+
+  .photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 20%;
+    display: block;
+    transition: transform 0.3s ease;
+  }
+
+  .banner:hover .photo img {
+    transform: scale(1.04);
+  }
+
+  /* Fade into dark bar */
+  .photo::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 30px;
+    background: linear-gradient(to top, #1A1A2E 0%, transparent 100%);
+  }
+
+  /* Dark bar — bottom 25% */
+  .bar {
+    position: relative;
+    height: 63px;
+    background: #1A1A2E;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+  }
+
+  /* Accent line */
+  .bar::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #E94560 0%, #E94560 40%, rgba(233,69,96,0.3) 100%);
+  }
+
+  .bar-left {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .username {
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+
+  .subtitle {
+    color: rgba(255,255,255,0.4);
+    font-size: 10px;
+    font-weight: 400;
+  }
+
+  /* Play button */
+  .play-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #E94560;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 15px rgba(233,69,96,0.3);
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+
+  .banner:hover .play-btn {
+    transform: scale(1.08);
+    box-shadow: 0 0 25px rgba(233,69,96,0.5);
+  }
+
+  /* CSS triangle for play icon */
+  .play-icon {
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 7px 0 7px 12px;
+    border-color: transparent transparent transparent #fff;
+    margin-left: 2px;
+  }
+
+  /* Live indicator dot */
+  .live-dot {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 8px;
+    height: 8px;
+    background: #E94560;
+    border-radius: 50%;
+    box-shadow: 0 0 6px rgba(233,69,96,0.6);
+    z-index: 2;
+  }
+</style>
+</head>
+<body>
+
+<div class="banner">
+  <div class="photo">
+    <img src="https://media.temptguide.com/thumbnails/instagram/3807424937263783721_lg.jpg" alt="">
+    <div class="live-dot"></div>
+  </div>
+  <div class="bar">
+    <div class="bar-left">
+      <span class="username">@sofi.sun.s</span>
+      <span class="subtitle">Watch exclusive content</span>
+    </div>
+    <div class="play-btn">
+      <div class="play-icon"></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

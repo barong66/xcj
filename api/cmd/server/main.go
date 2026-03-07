@@ -15,6 +15,7 @@ import (
 	"github.com/xcj/videosite-api/internal/cron"
 	"github.com/xcj/videosite-api/internal/handler"
 	"github.com/xcj/videosite-api/internal/ranking"
+	s3client "github.com/xcj/videosite-api/internal/s3"
 	"github.com/xcj/videosite-api/internal/store"
 	"github.com/xcj/videosite-api/internal/worker"
 )
@@ -94,6 +95,20 @@ func main() {
 	})
 	scheduler.Start()
 
+	// Initialize S3/R2 client (optional — recrop won't work without it).
+	var s3 *s3client.Client
+	if cfg.S3Endpoint != "" && cfg.S3AccessKey != "" {
+		var err error
+		s3, err = s3client.NewClient(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Region, cfg.S3Bucket, cfg.S3PublicURL)
+		if err != nil {
+			slog.Error("failed to create S3 client", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("S3/R2 client ready", "bucket", cfg.S3Bucket)
+	} else {
+		slog.Warn("S3 not configured — banner recrop disabled")
+	}
+
 	// Build router.
 	router := handler.NewRouter(
 		pool,
@@ -109,6 +124,7 @@ func main() {
 		workerMgr,
 		rankingService,
 		cfg.SiteBaseURL,
+		s3,
 	)
 
 	// Create HTTP server.

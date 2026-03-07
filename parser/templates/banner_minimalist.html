@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Banner — Minimalist</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+
+  .banner {
+    width: 300px;
+    height: 250px;
+    position: relative;
+    overflow: hidden;
+    background: #000;
+    font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+    cursor: pointer;
+  }
+
+  .banner img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 20%;
+    display: block;
+    transition: transform 0.3s ease;
+  }
+
+  .banner:hover img {
+    transform: scale(1.03);
+  }
+
+  /* Subtle bottom gradient */
+  .banner::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 40%;
+    background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.3) 50%, transparent 100%);
+    pointer-events: none;
+  }
+
+  .overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 14px 16px;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  .username {
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    letter-spacing: 0.3px;
+  }
+
+  .cta {
+    color: rgba(255,255,255,0.6);
+    font-size: 11px;
+    font-weight: 400;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    letter-spacing: 0.5px;
+    transition: color 0.2s;
+  }
+
+  .banner:hover .cta {
+    color: rgba(255,255,255,0.9);
+  }
+
+  /* Tiny watermark */
+  .watermark {
+    position: absolute;
+    top: 10px;
+    left: 12px;
+    z-index: 2;
+    color: rgba(255,255,255,0.35);
+    font-size: 8px;
+    font-weight: 400;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  }
+</style>
+</head>
+<body>
+
+<div class="banner">
+  <img src="https://media.temptguide.com/thumbnails/instagram/3807424937263783721_lg.jpg" alt="">
+  <span class="watermark">TemptGuide</span>
+  <div class="overlay">
+    <span class="username">@sofi.sun.s</span>
+    <span class="cta">View Profile &rarr;</span>
+  </div>
+</div>
+
+</body>
+</html>

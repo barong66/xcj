@@ -1157,6 +1157,7 @@ type AdminBanner struct {
 	BannerSizeID   int64     `json:"banner_size_id"`
 	VideoFrameID   *int64    `json:"video_frame_id"`
 	ImageURL       string    `json:"image_url"`
+	SourceImageURL string    `json:"source_image_url"`
 	Width          int       `json:"width"`
 	Height         int       `json:"height"`
 	IsActive       bool      `json:"is_active"`
@@ -1251,7 +1252,13 @@ func (s *AdminStore) ListAccountBanners(ctx context.Context, accountID int64, si
 	args = append(args, (page-1)*perPage)
 
 	query := fmt.Sprintf(`
-		SELECT b.id, b.account_id, b.video_id, b.banner_size_id, b.image_url, b.width, b.height, b.is_active, b.created_at,
+		SELECT b.id, b.account_id, b.video_id, b.banner_size_id, b.video_frame_id,
+			b.image_url,
+			CASE WHEN b.video_frame_id IS NOT NULL
+				THEN COALESCE((SELECT vf.image_url FROM video_frames vf WHERE vf.id = b.video_frame_id), '')
+				ELSE COALESCE(v.thumbnail_lg_url, v.thumbnail_url, '')
+			END AS source_image_url,
+			b.width, b.height, b.is_active, b.created_at,
 			COALESCE(v.title,''), COALESCE(a.username,'')
 		FROM banners b
 		JOIN videos v ON v.id = b.video_id
@@ -1270,7 +1277,8 @@ func (s *AdminStore) ListAccountBanners(ctx context.Context, accountID int64, si
 	var banners []AdminBanner
 	for rows.Next() {
 		var b AdminBanner
-		if err := rows.Scan(&b.ID, &b.AccountID, &b.VideoID, &b.BannerSizeID, &b.ImageURL,
+		if err := rows.Scan(&b.ID, &b.AccountID, &b.VideoID, &b.BannerSizeID, &b.VideoFrameID,
+			&b.ImageURL, &b.SourceImageURL,
 			&b.Width, &b.Height, &b.IsActive, &b.CreatedAt, &b.VideoTitle, &b.Username); err != nil {
 			return nil, fmt.Errorf("admin_store: scan banner: %w", err)
 		}
@@ -1306,7 +1314,13 @@ func (s *AdminStore) ListAllBanners(ctx context.Context, page, perPage int) (*Ad
 
 	offset := (page - 1) * perPage
 	rows, err := s.pool.Query(ctx, `
-		SELECT b.id, b.account_id, b.video_id, b.banner_size_id, b.image_url, b.width, b.height, b.is_active, b.created_at,
+		SELECT b.id, b.account_id, b.video_id, b.banner_size_id, b.video_frame_id,
+			b.image_url,
+			CASE WHEN b.video_frame_id IS NOT NULL
+				THEN COALESCE((SELECT vf.image_url FROM video_frames vf WHERE vf.id = b.video_frame_id), '')
+				ELSE COALESCE(v.thumbnail_lg_url, v.thumbnail_url, '')
+			END AS source_image_url,
+			b.width, b.height, b.is_active, b.created_at,
 			COALESCE(v.title,''), COALESCE(a.username,'')
 		FROM banners b
 		JOIN videos v ON v.id = b.video_id
@@ -1323,7 +1337,8 @@ func (s *AdminStore) ListAllBanners(ctx context.Context, page, perPage int) (*Ad
 	var banners []AdminBanner
 	for rows.Next() {
 		var b AdminBanner
-		if err := rows.Scan(&b.ID, &b.AccountID, &b.VideoID, &b.BannerSizeID, &b.ImageURL,
+		if err := rows.Scan(&b.ID, &b.AccountID, &b.VideoID, &b.BannerSizeID, &b.VideoFrameID,
+			&b.ImageURL, &b.SourceImageURL,
 			&b.Width, &b.Height, &b.IsActive, &b.CreatedAt, &b.VideoTitle, &b.Username); err != nil {
 			return nil, fmt.Errorf("admin_store: scan banner: %w", err)
 		}
@@ -1409,6 +1424,49 @@ func (s *AdminStore) BatchRegenerateBanners(ctx context.Context, ids []int64) (i
 		count++
 	}
 	return count, rows.Err()
+}
+
+// BannerRecropInfo holds data needed to re-crop a banner.
+type BannerRecropInfo struct {
+	ID             int64
+	AccountID      int64
+	VideoID        int64
+	VideoFrameID   *int64
+	Width          int
+	Height         int
+	SourceImageURL string
+}
+
+// GetBannerForRecrop returns the banner info and its source image URL.
+func (s *AdminStore) GetBannerForRecrop(ctx context.Context, id int64) (*BannerRecropInfo, error) {
+	var info BannerRecropInfo
+	err := s.pool.QueryRow(ctx, `
+		SELECT b.id, b.account_id, b.video_id, b.video_frame_id, b.width, b.height,
+			CASE WHEN b.video_frame_id IS NOT NULL
+				THEN COALESCE((SELECT vf.image_url FROM video_frames vf WHERE vf.id = b.video_frame_id), '')
+				ELSE COALESCE(v.thumbnail_lg_url, v.thumbnail_url, '')
+			END AS source_image_url
+		FROM banners b
+		JOIN videos v ON v.id = b.video_id
+		WHERE b.id = $1 AND b.is_active = true
+	`, id).Scan(&info.ID, &info.AccountID, &info.VideoID, &info.VideoFrameID,
+		&info.Width, &info.Height, &info.SourceImageURL)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: get banner for recrop: %w", err)
+	}
+	return &info, nil
+}
+
+// UpdateBannerImageURL updates the image URL of a banner.
+func (s *AdminStore) UpdateBannerImageURL(ctx context.Context, id int64, imageURL string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE banners SET image_url = $2 WHERE id = $1`, id, imageURL)
+	if err != nil {
+		return fmt.Errorf("admin_store: update banner image url: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("banner not found")
+	}
+	return nil
 }
 
 // EnqueueBannerGeneration inserts a job into banner_queue.

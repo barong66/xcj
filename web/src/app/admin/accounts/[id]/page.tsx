@@ -3,6 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import Cropper from "react-easy-crop";
+import type { Area } from "react-easy-crop";
 import {
   getAdminAccount,
   updateAdminAccount,
@@ -13,6 +15,7 @@ import {
   deactivateBanner,
   batchDeactivateBanners,
   batchRegenerateBanners,
+  recropBanner,
   getAccountStats,
 } from "@/lib/admin-api";
 import type {
@@ -53,6 +56,13 @@ function AccountProfileContent() {
   const [selectedBannerIds, setSelectedBannerIds] = useState<Set<number>>(new Set());
   const [bannerStyle, setBannerStyle] = useState<string>("static");
   const [batchActionLoading, setBatchActionLoading] = useState(false);
+
+  // Crop modal state
+  const [cropBanner, setCropBanner] = useState<AdminBanner | null>(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+  const [cropSaving, setCropSaving] = useState(false);
 
   // Stats state
   const [statsData, setStatsData] = useState<AccountDayStat[]>([]);
@@ -267,6 +277,45 @@ function AccountProfileContent() {
       setSelectedBannerIds(new Set());
     } else {
       setSelectedBannerIds(new Set(banners.map((b) => b.id)));
+    }
+  };
+
+  const openCropModal = (banner: AdminBanner) => {
+    if (!banner.source_image_url) {
+      toast("No source image available for this banner", "error");
+      return;
+    }
+    setCropBanner(banner);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setCroppedAreaPixels(null);
+  };
+
+  const handleCropComplete = useCallback((_: Area, croppedPixels: Area) => {
+    setCroppedAreaPixels(croppedPixels);
+  }, []);
+
+  const handleCropSave = async () => {
+    if (!cropBanner || !croppedAreaPixels) return;
+    setCropSaving(true);
+    try {
+      const result = await recropBanner(cropBanner.id, {
+        x: Math.round(croppedAreaPixels.x),
+        y: Math.round(croppedAreaPixels.y),
+        width: Math.round(croppedAreaPixels.width),
+        height: Math.round(croppedAreaPixels.height),
+      });
+      setBanners((prev) =>
+        prev.map((b) =>
+          b.id === cropBanner.id ? { ...b, image_url: result.image_url } : b,
+        ),
+      );
+      toast("Banner re-cropped successfully");
+      setCropBanner(null);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to re-crop", "error");
+    } finally {
+      setCropSaving(false);
     }
   };
 
@@ -724,6 +773,16 @@ function AccountProfileContent() {
                           Copy URL
                         </button>
                         <button
+                          onClick={() => openCropModal(b)}
+                          className="text-[10px] text-[#6b6b6b] hover:text-accent transition-colors"
+                          title="Re-crop banner"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M6 2v14a2 2 0 0 0 2 2h14" />
+                            <path d="M18 22V8a2 2 0 0 0-2-2H2" />
+                          </svg>
+                        </button>
+                        <button
                           onClick={() => handleRegenerateBanner(b.id)}
                           className="text-[10px] text-[#6b6b6b] hover:text-accent transition-colors"
                           title="Re-grab banner"
@@ -750,6 +809,66 @@ function AccountProfileContent() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Crop Modal */}
+      {cropBanner && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
+          <div className="bg-[#1a1a1a] rounded-xl border border-[#2a2a2a] w-[90vw] max-w-3xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-[#2a2a2a]">
+              <div>
+                <h3 className="text-sm font-medium text-white">Re-crop Banner</h3>
+                <p className="text-xs text-[#6b6b6b] mt-0.5">
+                  {cropBanner.width}x{cropBanner.height} &mdash; {cropBanner.video_title || `Video #${cropBanner.video_id}`}
+                </p>
+              </div>
+              <button
+                onClick={() => setCropBanner(null)}
+                className="text-[#6b6b6b] hover:text-white transition-colors text-lg leading-none"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="relative flex-1 min-h-[400px]">
+              <Cropper
+                image={cropBanner.source_image_url}
+                crop={crop}
+                zoom={zoom}
+                aspect={cropBanner.width / cropBanner.height}
+                onCropChange={setCrop}
+                onZoomChange={setZoom}
+                onCropComplete={handleCropComplete}
+              />
+            </div>
+            <div className="p-4 border-t border-[#2a2a2a] flex items-center gap-4">
+              <label className="text-xs text-[#6b6b6b]">Zoom</label>
+              <input
+                type="range"
+                min={1}
+                max={3}
+                step={0.1}
+                value={zoom}
+                onChange={(e) => setZoom(Number(e.target.value))}
+                className="flex-1 accent-accent"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setCropBanner(null)}
+                  className="px-4 py-1.5 text-xs text-[#6b6b6b] border border-[#2a2a2a] rounded hover:border-[#3a3a3a] transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCropSave}
+                  disabled={cropSaving || !croppedAreaPixels}
+                  className="px-4 py-1.5 text-xs text-white bg-accent rounded hover:opacity-90 transition-opacity disabled:opacity-50"
+                >
+                  {cropSaving ? "Saving..." : "Save Crop"}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
