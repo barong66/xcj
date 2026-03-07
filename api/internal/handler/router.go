@@ -82,6 +82,7 @@ func NewRouter(
 		r.Get("/accounts/{id}/banners/summary", adminHandler.GetAccountBannerSummary)
 		r.Get("/accounts/{id}/banners", adminHandler.ListAccountBanners)
 		r.Post("/accounts/{id}/banners/generate", adminHandler.GenerateAccountBanners)
+		r.Get("/accounts/{id}/stats", adminHandler.GetAccountStats)
 
 		// Banner Sizes.
 		r.Get("/banner-sizes", adminHandler.ListBannerSizes)
@@ -91,6 +92,8 @@ func NewRouter(
 		// Banners (all accounts).
 		r.Get("/banners", adminHandler.ListAllBanners)
 		r.Delete("/banners/{id}", adminHandler.DeactivateBanner)
+		r.Post("/banners/batch-deactivate", adminHandler.BatchDeactivateBanners)
+		r.Post("/banners/batch-regenerate", adminHandler.BatchRegenerateBanners)
 
 		// Queue.
 		r.Get("/queue", adminHandler.ListQueue)
@@ -130,6 +133,7 @@ func NewRouter(
 	bannerHandler := NewBannerHandler(adminStore, eventBuffer, chReader, c, siteBaseURL)
 	r.Get("/b/loader.js", bannerHandler.ServeLoader)
 	r.Get("/b/serve", bannerHandler.ServeDynamic)
+	r.Get("/b/{id}/preview", bannerHandler.PreviewBanner)
 	r.Get("/b/{id}", bannerHandler.ServeBanner)
 	r.Get("/b/{id}/click", bannerHandler.ClickBanner)
 	r.Get("/b/{id}/hover", bannerHandler.HoverBanner)

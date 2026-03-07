@@ -598,6 +598,37 @@ export async function getAccountBanners(
   );
 }
 
+// ─── Account Stats ───────────────────────────────────────────────────────────
+
+export interface AccountDayStat {
+  date: string;
+  profile_views: number;
+  instagram_clicks: number;
+  paid_site_clicks: number;
+  video_clicks: number;
+  thumb_impressions: number;
+  unique_sessions: number;
+  avg_session_sec: number;
+}
+
+export interface AccountStatsResponse {
+  stats: AccountDayStat[];
+  summary: AccountDayStat;
+  days: number;
+}
+
+export async function getAccountStats(
+  accountId: number,
+  days?: number,
+): Promise<AccountStatsResponse> {
+  const sp = new URLSearchParams();
+  if (days) sp.set("days", String(days));
+  const qs = sp.toString();
+  return adminFetch<AccountStatsResponse>(
+    `/accounts/${accountId}/stats${qs ? `?${qs}` : ""}`,
+  );
+}
+
 export async function generateAccountBanners(
   accountId: number,
 ): Promise<{ status: string }> {
@@ -620,6 +651,24 @@ export async function getAllBanners(params?: {
 
 export async function deactivateBanner(id: number): Promise<void> {
   await adminFetch(`/banners/${id}`, { method: "DELETE" });
+}
+
+export async function batchDeactivateBanners(
+  ids: number[],
+): Promise<{ deactivated: number }> {
+  return adminFetch<{ deactivated: number }>("/banners/batch-deactivate", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+}
+
+export async function batchRegenerateBanners(
+  ids: number[],
+): Promise<{ enqueued: number }> {
+  return adminFetch<{ enqueued: number }>("/banners/batch-regenerate", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
 }
 
 // ─── Ad Sources ──────────────────────────────────────────────────────────────

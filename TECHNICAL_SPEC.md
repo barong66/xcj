@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-07 (multi-frame banners + image posts)
+> Last updated: 2026-03-07 (account stats tab)
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -326,6 +326,31 @@ FROM events
 WHERE event_type IN ('impression', 'click')
 ```
 
+Воронка аккаунта (per-day funnel для GET /admin/accounts/{id}/stats):
+```sql
+SELECT
+    toDate(created_at) AS event_date,
+    countIf(event_type = 'impression') AS profile_views,
+    countIf(event_type = 'click') AS ig_tw_clicks,
+    countIf(event_type = 'social_click') AS paid_site_clicks,
+    countIf(event_type = 'profile_thumb_click') AS video_clicks,
+    uniqExact(session_id) AS sessions,
+    avg(session_duration) AS avg_session_sec
+FROM events
+WHERE video_id IN (SELECT id FROM videos WHERE account_id = {account_id})
+  AND created_at >= now() - INTERVAL {days} DAY
+GROUP BY event_date
+ORDER BY event_date DESC
+```
+
+Метрики воронки:
+- **Profile Views** — показы профиля модели (impression events для видео аккаунта)
+- **IG/Twitter Clicks** — клики на оригинальный контент (click events)
+- **Paid Site Clicks** — клики на фансайт/OnlyFans (social_click events)
+- **Video Clicks** — клики по тумбам на странице модели (profile_thumb_click events)
+- **Sessions** — уникальные сессии
+- **Avg Session Duration** — средняя длительность сессии
+
 ---
 
 ## 5. Go API — Эндпоинты
@@ -377,6 +402,7 @@ WHERE event_type IN ('impression', 'click')
 | GET | /admin/banner-sizes | Список размеров баннеров |
 | POST | /admin/banner-sizes | Добавить размер |
 | PUT | /admin/banner-sizes/{id} | Вкл/выкл размер |
+| GET | /admin/accounts/{id}/stats | Статистика воронки аккаунта (days=7/30/90) |
 | GET | /admin/accounts/{id}/banners/summary | Кол-во баннеров по размерам |
 | GET | /admin/accounts/{id}/banners | Список баннеров аккаунта (?size_id=) |
 | POST | /admin/accounts/{id}/banners/generate | Ручной запуск генерации |
@@ -610,7 +636,7 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 | /admin/stats | Статистика по видео (тумбы + views/clicks/CTR) |
 | /admin/categories | Категории |
 | /admin/promo | Все баннеры + управление размерами |
-| /admin/accounts/[id] | Профиль аккаунта (табы: Fan Site Links, Promo) |
+| /admin/accounts/[id] | Профиль аккаунта (табы: Stats (default), Fan Site Links, Promo) |
 
 **Авторизация:** cookie `admin_token` → Bearer token к Go API. Cookie `admin_authed=1` для фронтенд-проверки.
 

@@ -11,12 +11,15 @@ import {
   getAccountBanners,
   generateAccountBanners,
   deactivateBanner,
+  batchDeactivateBanners,
+  batchRegenerateBanners,
+  getAccountStats,
 } from "@/lib/admin-api";
 import type {
   AdminAccount,
   BannerSizeSummary,
   AdminBanner,
-  AdminBannerList,
+  AccountDayStat,
 } from "@/lib/admin-api";
 import { ToastProvider, useToast } from "../../Toast";
 
@@ -28,7 +31,7 @@ const FAN_SITES = [
   { key: "stripchat", label: "Stripchat", placeholder: "username or full URL", color: "#C23B6E" },
 ] as const;
 
-type Tab = "links" | "promo";
+type Tab = "stats" | "links" | "promo";
 
 function AccountProfileContent() {
   const params = useParams();
@@ -38,18 +41,24 @@ function AccountProfileContent() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [links, setLinks] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<Tab>("links");
+  const [activeTab, setActiveTab] = useState<Tab>("stats");
   const { toast } = useToast();
 
   // Promo state
   const [bannerSummary, setBannerSummary] = useState<BannerSizeSummary[]>([]);
   const [banners, setBanners] = useState<AdminBanner[]>([]);
-  const [bannersTotal, setBannersTotal] = useState(0);
-  const [bannersPage, setBannersPage] = useState(1);
-  const [bannersTotalPages, setBannersTotalPages] = useState(1);
   const [selectedSizeId, setSelectedSizeId] = useState<number | null>(null);
   const [bannersLoading, setBannersLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [selectedBannerIds, setSelectedBannerIds] = useState<Set<number>>(new Set());
+  const [bannerStyle, setBannerStyle] = useState<string>("static");
+  const [batchActionLoading, setBatchActionLoading] = useState(false);
+
+  // Stats state
+  const [statsData, setStatsData] = useState<AccountDayStat[]>([]);
+  const [statsSummary, setStatsSummary] = useState<AccountDayStat | null>(null);
+  const [statsDays, setStatsDays] = useState(30);
+  const [statsLoading, setStatsLoading] = useState(false);
 
   const loadAccount = useCallback(async () => {
     try {
@@ -78,18 +87,15 @@ function AccountProfileContent() {
     }
   }, [id]);
 
-  const loadBanners = useCallback(async (sizeId: number | null, page: number) => {
+  const loadBanners = useCallback(async (sizeId: number | null) => {
     setBannersLoading(true);
     try {
       const result = await getAccountBanners(id, {
         size_id: sizeId ?? undefined,
-        page,
-        per_page: 12,
+        page: 1,
+        per_page: 1000,
       });
       setBanners(result.banners);
-      setBannersTotal(result.total);
-      setBannersTotalPages(result.total_pages);
-      setBannersPage(result.page);
     } catch {
       setBanners([]);
     } finally {
@@ -100,9 +106,30 @@ function AccountProfileContent() {
   useEffect(() => {
     if (activeTab === "promo") {
       loadBannerSummary();
-      loadBanners(selectedSizeId, 1);
+      loadBanners(selectedSizeId);
+      setSelectedBannerIds(new Set());
     }
   }, [activeTab, loadBannerSummary, loadBanners, selectedSizeId]);
+
+  // Load stats when stats tab is active or period changes.
+  const loadStats = useCallback(async (d: number) => {
+    setStatsLoading(true);
+    try {
+      const result = await getAccountStats(id, d);
+      setStatsData(result.stats);
+      setStatsSummary(result.summary);
+    } catch {
+      // silent
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (activeTab === "stats") {
+      loadStats(statsDays);
+    }
+  }, [activeTab, statsDays, loadStats]);
 
   const handleSaveLinks = async () => {
     if (!account) return;
@@ -179,10 +206,67 @@ function AccountProfileContent() {
     try {
       await deactivateBanner(bannerId);
       setBanners((prev) => prev.filter((b) => b.id !== bannerId));
+      setSelectedBannerIds((prev) => { const next = new Set(prev); next.delete(bannerId); return next; });
       toast("Banner deactivated");
       loadBannerSummary();
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to deactivate", "error");
+    }
+  };
+
+  const handleRegenerateBanner = async (bannerId: number) => {
+    try {
+      const result = await batchRegenerateBanners([bannerId]);
+      toast(`Re-grab enqueued (${result.enqueued} job)`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to regenerate", "error");
+    }
+  };
+
+  const handleBatchDeactivate = async () => {
+    const ids = Array.from(selectedBannerIds);
+    if (!confirm(`Deactivate ${ids.length} banner(s)?`)) return;
+    setBatchActionLoading(true);
+    try {
+      const result = await batchDeactivateBanners(ids);
+      setBanners((prev) => prev.filter((b) => !selectedBannerIds.has(b.id)));
+      setSelectedBannerIds(new Set());
+      toast(`${result.deactivated} banner(s) deactivated`);
+      loadBannerSummary();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to deactivate", "error");
+    } finally {
+      setBatchActionLoading(false);
+    }
+  };
+
+  const handleBatchRegenerate = async () => {
+    const ids = Array.from(selectedBannerIds);
+    setBatchActionLoading(true);
+    try {
+      const result = await batchRegenerateBanners(ids);
+      toast(`Re-grab enqueued (${result.enqueued} job(s))`);
+      setSelectedBannerIds(new Set());
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to regenerate", "error");
+    } finally {
+      setBatchActionLoading(false);
+    }
+  };
+
+  const toggleBannerSelection = (id: number) => {
+    setSelectedBannerIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedBannerIds.size === banners.length) {
+      setSelectedBannerIds(new Set());
+    } else {
+      setSelectedBannerIds(new Set(banners.map((b) => b.id)));
     }
   };
 
@@ -314,6 +398,16 @@ function AccountProfileContent() {
       {/* Tabs */}
       <div className="flex gap-1 mb-4 border-b border-[#1e1e1e]">
         <button
+          onClick={() => setActiveTab("stats")}
+          className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+            activeTab === "stats"
+              ? "border-accent text-white"
+              : "border-transparent text-[#6b6b6b] hover:text-[#a0a0a0]"
+          }`}
+        >
+          Stats
+        </button>
+        <button
           onClick={() => setActiveTab("links")}
           className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
             activeTab === "links"
@@ -336,6 +430,92 @@ function AccountProfileContent() {
       </div>
 
       {/* Tab content */}
+      {activeTab === "stats" && (
+        <div>
+          {/* Period selector */}
+          <div className="flex items-center gap-2 mb-4">
+            {[7, 30, 90].map((d) => (
+              <button
+                key={d}
+                onClick={() => setStatsDays(d)}
+                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                  statsDays === d
+                    ? "bg-accent text-white"
+                    : "bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525]"
+                }`}
+              >
+                {d}d
+              </button>
+            ))}
+          </div>
+
+          {statsLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <span className="text-[#6b6b6b] text-sm">Loading...</span>
+            </div>
+          ) : (
+            <>
+              {/* Summary cards */}
+              {statsSummary && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+                  {[
+                    { label: "Profile Views", value: statsSummary.profile_views.toLocaleString() },
+                    { label: "IG / Twitter", value: statsSummary.instagram_clicks.toLocaleString() },
+                    { label: "Paid Sites", value: statsSummary.paid_site_clicks.toLocaleString() },
+                    { label: "Video Clicks", value: statsSummary.video_clicks.toLocaleString() },
+                    { label: "Sessions", value: statsSummary.unique_sessions.toLocaleString() },
+                    { label: "Avg Duration", value: formatDuration(statsSummary.avg_session_sec) },
+                  ].map((item) => (
+                    <div key={item.label} className="bg-[#141414] rounded-lg border border-[#1e1e1e] p-3">
+                      <div className="text-[10px] text-[#6b6b6b] mb-0.5">{item.label}</div>
+                      <div className="text-lg font-bold text-white tabular-nums">{item.value}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Daily table */}
+              {statsData.length > 0 ? (
+                <div className="bg-[#141414] rounded-lg border border-[#1e1e1e] overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-[#6b6b6b] text-xs border-b border-[#1e1e1e]">
+                          <th className="text-left px-4 py-2 font-medium">Date</th>
+                          <th className="text-right px-4 py-2 font-medium">Profile Views</th>
+                          <th className="text-right px-4 py-2 font-medium">IG / Twitter</th>
+                          <th className="text-right px-4 py-2 font-medium">Paid Sites</th>
+                          <th className="text-right px-4 py-2 font-medium">Video Clicks</th>
+                          <th className="text-right px-4 py-2 font-medium">Sessions</th>
+                          <th className="text-right px-4 py-2 font-medium">Avg Duration</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {statsData.map((row) => (
+                          <tr key={row.date} className="border-b border-[#1e1e1e] last:border-b-0 hover:bg-[#1a1a1a] transition-colors">
+                            <td className="px-4 py-2.5 text-white font-medium">{row.date}</td>
+                            <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.profile_views.toLocaleString()}</td>
+                            <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.instagram_clicks.toLocaleString()}</td>
+                            <td className="px-4 py-2.5 text-right text-white font-medium">{row.paid_site_clicks.toLocaleString()}</td>
+                            <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.video_clicks.toLocaleString()}</td>
+                            <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{row.unique_sessions.toLocaleString()}</td>
+                            <td className="px-4 py-2.5 text-right text-[#a0a0a0]">{formatDuration(row.avg_session_sec)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center py-10">
+                  <span className="text-[#6b6b6b] text-sm">No stats data for this period</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {activeTab === "links" && (
         <div className="bg-[#141414] rounded-lg border border-[#1e1e1e] overflow-hidden">
           <div className="px-5 py-4 border-b border-[#1e1e1e] flex items-center justify-between">
@@ -393,22 +573,35 @@ function AccountProfileContent() {
 
       {activeTab === "promo" && (
         <div className="space-y-4">
-          {/* Generate button */}
-          <div className="flex items-center justify-between">
+          {/* Toolbar: generate + style selector */}
+          <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-white">Banners</h2>
-            <button
-              onClick={handleGenerate}
-              disabled={generating}
-              className="px-3 py-1.5 text-sm rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              {generating ? "Generating..." : "Generate Banners"}
-            </button>
+            <div className="flex items-center gap-2">
+              <select
+                value={bannerStyle}
+                onChange={(e) => setBannerStyle(e.target.value)}
+                className="px-2 py-1.5 text-xs rounded-lg bg-[#1e1e1e] border border-[#2a2a2a] text-[#a0a0a0] focus:outline-none focus:border-accent"
+              >
+                <option value="static">Static JPEG</option>
+                <option value="bold">Bold</option>
+                <option value="elegant">Elegant</option>
+                <option value="minimalist">Minimalist</option>
+                <option value="card">Card</option>
+              </select>
+              <button
+                onClick={handleGenerate}
+                disabled={generating}
+                className="px-3 py-1.5 text-sm rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {generating ? "Generating..." : "Generate Banners"}
+              </button>
+            </div>
           </div>
 
           {/* Banner size summary */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <button
-              onClick={() => { setSelectedSizeId(null); setBannersPage(1); }}
+              onClick={() => setSelectedSizeId(null)}
               className={`bg-[#141414] rounded-lg border p-3 text-left transition-colors ${
                 selectedSizeId === null ? "border-accent" : "border-[#1e1e1e] hover:border-[#333]"
               }`}
@@ -421,7 +614,7 @@ function AccountProfileContent() {
             {bannerSummary.map((s) => (
               <button
                 key={s.banner_size_id}
-                onClick={() => { setSelectedSizeId(s.banner_size_id); setBannersPage(1); }}
+                onClick={() => setSelectedSizeId(s.banner_size_id)}
                 className={`bg-[#141414] rounded-lg border p-3 text-left transition-colors ${
                   selectedSizeId === s.banner_size_id ? "border-accent" : "border-[#1e1e1e] hover:border-[#333]"
                 }`}
@@ -434,6 +627,40 @@ function AccountProfileContent() {
             ))}
           </div>
 
+          {/* Select all + mass action bar */}
+          {banners.length > 0 && (
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-[#6b6b6b] hover:text-[#a0a0a0] transition-colors">
+                <input
+                  type="checkbox"
+                  checked={banners.length > 0 && selectedBannerIds.size === banners.length}
+                  onChange={toggleSelectAll}
+                  className="accent-accent w-3.5 h-3.5"
+                />
+                Select all ({banners.length})
+              </label>
+              {selectedBannerIds.size > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[#6b6b6b]">{selectedBannerIds.size} selected</span>
+                  <button
+                    onClick={handleBatchRegenerate}
+                    disabled={batchActionLoading}
+                    className="px-2.5 py-1 text-xs rounded-lg bg-[#1e1e1e] text-[#a0a0a0] hover:text-accent hover:bg-[#252525] disabled:opacity-40 transition-colors"
+                  >
+                    Re-grab
+                  </button>
+                  <button
+                    onClick={handleBatchDeactivate}
+                    disabled={batchActionLoading}
+                    className="px-2.5 py-1 text-xs rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 disabled:opacity-40 transition-colors"
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Banner list */}
           {bannersLoading ? (
             <div className="flex items-center justify-center py-10">
@@ -444,14 +671,22 @@ function AccountProfileContent() {
               <span className="text-[#6b6b6b] text-sm">No banners yet. Click &quot;Generate Banners&quot; to create them.</span>
             </div>
           ) : (
-            <>
-              <div className="flex flex-wrap gap-4">
-                {banners.map((b) => (
-                  <div
-                    key={b.id}
-                    className="bg-[#141414] rounded-lg border border-[#1e1e1e] overflow-hidden"
-                  >
-                    <div className="bg-[#0a0a0a] p-2">
+            <div className="flex flex-wrap gap-4">
+              {banners.map((b) => (
+                <div
+                  key={b.id}
+                  className={`bg-[#141414] rounded-lg border overflow-hidden transition-colors ${
+                    selectedBannerIds.has(b.id) ? "border-accent" : "border-[#1e1e1e]"
+                  }`}
+                >
+                  <div className="bg-[#0a0a0a] p-2 relative">
+                    <input
+                      type="checkbox"
+                      checked={selectedBannerIds.has(b.id)}
+                      onChange={() => toggleBannerSelection(b.id)}
+                      className="absolute top-3 left-3 accent-accent w-3.5 h-3.5 z-10 cursor-pointer"
+                    />
+                    {bannerStyle === "static" ? (
                       <img
                         src={b.image_url}
                         alt={b.video_title}
@@ -459,70 +694,74 @@ function AccountProfileContent() {
                         height={b.height}
                         style={{ width: b.width, height: b.height }}
                       />
+                    ) : (
+                      <iframe
+                        src={`/b/${b.id}/preview?style=${bannerStyle}`}
+                        width={b.width}
+                        height={b.height}
+                        style={{ width: b.width, height: b.height, border: "none" }}
+                        loading="lazy"
+                        title={`Banner ${b.id} preview`}
+                      />
+                    )}
+                  </div>
+                  <div className="p-3" style={{ width: Math.max(b.width + 16, 200) }}>
+                    <div className="text-xs text-white truncate mb-1">
+                      {b.video_title || `Video #${b.video_id}`}
                     </div>
-                    <div className="p-3" style={{ width: Math.max(b.width + 16, 200) }}>
-                      <div className="text-xs text-white truncate mb-1">
-                        {b.video_title || `Video #${b.video_id}`}
-                      </div>
-                      <div className="text-[10px] text-[#6b6b6b] mb-1.5">
-                        Imprs: {b.impressions || 0} &nbsp;|&nbsp; Clicks: {b.clicks || 0} &nbsp;|&nbsp; CTR: {b.ctr || 0}%
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-[#6b6b6b]">
-                          {b.width}x{b.height}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleCopyUrl(b.image_url)}
-                            className="text-[10px] text-[#6b6b6b] hover:text-accent transition-colors"
-                          >
-                            Copy URL
-                          </button>
-                          <button
-                            onClick={() => handleDeactivateBanner(b.id)}
-                            className="text-[10px] text-[#6b6b6b] hover:text-red-400 transition-colors"
-                            title="Deactivate banner"
-                          >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="3 6 5 6 21 6" />
-                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                            </svg>
-                          </button>
-                        </div>
+                    <div className="text-[10px] text-[#6b6b6b] mb-1.5">
+                      Imprs: {b.impressions || 0} &nbsp;|&nbsp; Clicks: {b.clicks || 0} &nbsp;|&nbsp; CTR: {b.ctr || 0}%
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-[#6b6b6b]">
+                        {b.width}x{b.height}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleCopyUrl(b.image_url)}
+                          className="text-[10px] text-[#6b6b6b] hover:text-accent transition-colors"
+                        >
+                          Copy URL
+                        </button>
+                        <button
+                          onClick={() => handleRegenerateBanner(b.id)}
+                          className="text-[10px] text-[#6b6b6b] hover:text-accent transition-colors"
+                          title="Re-grab banner"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="23 4 23 10 17 10" />
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleDeactivateBanner(b.id)}
+                          className="text-[10px] text-[#6b6b6b] hover:text-red-400 transition-colors"
+                          title="Deactivate banner"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          </svg>
+                        </button>
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
-
-              {/* Pagination */}
-              {bannersTotalPages > 1 && (
-                <div className="flex items-center justify-center gap-2 pt-2">
-                  <button
-                    onClick={() => { setBannersPage((p) => Math.max(1, p - 1)); loadBanners(selectedSizeId, bannersPage - 1); }}
-                    disabled={bannersPage <= 1}
-                    className="px-3 py-1.5 text-sm rounded-lg bg-[#1e1e1e] text-[#a0a0a0] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Prev
-                  </button>
-                  <span className="text-sm text-[#6b6b6b]">
-                    {bannersPage} / {bannersTotalPages}
-                  </span>
-                  <button
-                    onClick={() => { setBannersPage((p) => Math.min(bannersTotalPages, p + 1)); loadBanners(selectedSizeId, bannersPage + 1); }}
-                    disabled={bannersPage >= bannersTotalPages}
-                    className="px-3 py-1.5 text-sm rounded-lg bg-[#1e1e1e] text-[#a0a0a0] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Next
-                  </button>
                 </div>
-              )}
-            </>
+              ))}
+            </div>
           )}
         </div>
       )}
     </div>
   );
+}
+
+function formatDuration(seconds: number): string {
+  if (!seconds || seconds < 1) return "0s";
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  if (m === 0) return `${s}s`;
+  return `${m}m ${s}s`;
 }
 
 function InfoCard({

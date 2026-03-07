@@ -741,6 +741,52 @@ func (h *AdminHandler) enrichBannerStats(ctx context.Context, banners []store.Ad
 	}
 }
 
+// BatchDeactivateBanners handles POST /api/v1/admin/banners/batch-deactivate
+func (h *AdminHandler) BatchDeactivateBanners(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(input.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "ids are required")
+		return
+	}
+
+	count, err := h.admin.BatchDeactivateBanners(r.Context(), input.IDs)
+	if err != nil {
+		slog.Error("admin: batch deactivate banners", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to deactivate banners")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"deactivated": count})
+}
+
+// BatchRegenerateBanners handles POST /api/v1/admin/banners/batch-regenerate
+func (h *AdminHandler) BatchRegenerateBanners(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(input.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "ids are required")
+		return
+	}
+
+	count, err := h.admin.BatchRegenerateBanners(r.Context(), input.IDs)
+	if err != nil {
+		slog.Error("admin: batch regenerate banners", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to regenerate banners")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"enqueued": count})
+}
+
 // DeactivateBanner handles DELETE /api/v1/admin/banners/{id}
 func (h *AdminHandler) DeactivateBanner(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
@@ -821,6 +867,35 @@ func (h *AdminHandler) UpdateAdSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, source)
+}
+
+// ─── Account Stats ───────────────────────────────────────────────────────────
+
+// GetAccountStats handles GET /api/v1/admin/accounts/{id}/stats
+func (h *AdminHandler) GetAccountStats(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	days := intParam(r, "days", 30)
+	if days < 1 || days > 365 {
+		days = 30
+	}
+
+	stats, err := h.ch.GetAccountFunnelStats(r.Context(), id, days)
+	if err != nil {
+		slog.Error("admin: account stats", "error", err, "account_id", id)
+		writeError(w, http.StatusInternalServerError, "failed to get account stats")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"stats":   stats.Days,
+		"summary": stats.Summary,
+		"days":    days,
+	})
 }
 
 // ─── Banner Funnel Analytics ──────────────────────────────────────────────────

@@ -1373,6 +1373,44 @@ func (s *AdminStore) DeactivateBanner(ctx context.Context, id int64) error {
 	return nil
 }
 
+// BatchDeactivateBanners deactivates multiple banners at once.
+func (s *AdminStore) BatchDeactivateBanners(ctx context.Context, ids []int64) (int64, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE banners SET is_active = false WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return 0, fmt.Errorf("admin_store: batch deactivate banners: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// BatchRegenerateBanners looks up the (account_id, video_id) pairs for the given banner IDs
+// and enqueues one banner_queue job per unique pair.
+func (s *AdminStore) BatchRegenerateBanners(ctx context.Context, ids []int64) (int64, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT account_id, video_id FROM banners WHERE id = ANY($1) AND is_active = true
+	`, ids)
+	if err != nil {
+		return 0, fmt.Errorf("admin_store: batch regenerate lookup: %w", err)
+	}
+	defer rows.Close()
+
+	var count int64
+	for rows.Next() {
+		var accountID, videoID int64
+		if err := rows.Scan(&accountID, &videoID); err != nil {
+			return count, fmt.Errorf("admin_store: batch regenerate scan: %w", err)
+		}
+		_, err := s.pool.Exec(ctx,
+			`INSERT INTO banner_queue (account_id, video_id, status) VALUES ($1, $2, 'pending')`,
+			accountID, &videoID,
+		)
+		if err != nil {
+			return count, fmt.Errorf("admin_store: batch regenerate enqueue: %w", err)
+		}
+		count++
+	}
+	return count, rows.Err()
+}
+
 // EnqueueBannerGeneration inserts a job into banner_queue.
 // videoID=0 means generate for all videos of the account.
 func (s *AdminStore) EnqueueBannerGeneration(ctx context.Context, accountID int64, videoID int64) error {
@@ -1388,6 +1426,16 @@ func (s *AdminStore) EnqueueBannerGeneration(ctx context.Context, accountID int6
 		return fmt.Errorf("admin_store: enqueue banner generation: %w", err)
 	}
 	return nil
+}
+
+// GetVideoThumbnail returns the thumbnail URL for a video.
+func (s *AdminStore) GetVideoThumbnail(ctx context.Context, videoID int64) (string, error) {
+	var url string
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(thumbnail_url,'') FROM videos WHERE id = $1`, videoID).Scan(&url)
+	if err != nil {
+		return "", fmt.Errorf("admin_store: get video thumbnail: %w", err)
+	}
+	return url, nil
 }
 
 // GetBannerByID returns a banner with its image_url for public serving.

@@ -387,6 +387,47 @@ func (h *BannerHandler) selectBestBanner(ctx context.Context, pool []store.Serva
 	return best[rand.Intn(len(best))]
 }
 
+// PreviewBanner handles GET /b/{id}/preview?style=X — renders a specific banner
+// in the chosen style template for admin preview (no impression logging).
+func (h *BannerHandler) PreviewBanner(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	banner, err := h.admin.GetBannerByID(r.Context(), id)
+	if err != nil || banner == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	style := r.URL.Query().Get("style")
+
+	thumbURL := banner.ImageURL
+	// Try to get original thumbnail for better rendering in HTML templates.
+	if tURL, err := h.admin.GetVideoThumbnail(r.Context(), banner.VideoID); err == nil && tURL != "" {
+		thumbURL = tURL
+	}
+
+	tmpl := pickBannerStyle(style)
+	data := bannerTemplateData{
+		ThumbnailURL: thumbURL,
+		Username:     banner.Username,
+		ClickURL:     "#",
+		HoverURL:     "",
+		Width:        banner.Width,
+		Height:       banner.Height,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Del("X-Frame-Options")
+	if err := tmpl.Execute(w, data); err != nil {
+		slog.Error("banner: preview template render", "error", err, "id", id, "style", style)
+	}
+}
+
 // ServeLoader handles GET /b/loader.js — returns the embed script that
 // extracts page context (title, meta, h1) and creates an iframe with keywords.
 func (h *BannerHandler) ServeLoader(w http.ResponseWriter, r *http.Request) {

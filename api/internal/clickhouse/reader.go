@@ -312,3 +312,129 @@ func (r *Reader) GetTotalStats(ctx context.Context) (*TotalSiteStats, error) {
 	}
 	return &stats, nil
 }
+
+// AccountDayStat holds one day of funnel metrics for a single account.
+type AccountDayStat struct {
+	Date             string  `json:"date"`
+	ProfileViews     uint64  `json:"profile_views"`
+	InstagramClicks  uint64  `json:"instagram_clicks"`
+	PaidSiteClicks   uint64  `json:"paid_site_clicks"`
+	VideoClicks      uint64  `json:"video_clicks"`
+	ThumbImpressions uint64  `json:"thumb_impressions"`
+	UniqueSessions   uint64  `json:"unique_sessions"`
+	AvgSessionSec    float64 `json:"avg_session_sec"`
+}
+
+// AccountFunnelResult wraps daily stats with summary totals.
+type AccountFunnelResult struct {
+	Days    []AccountDayStat `json:"days"`
+	Summary AccountDayStat   `json:"summary"`
+}
+
+// GetAccountFunnelStats returns per-day funnel stats for a single account.
+func (r *Reader) GetAccountFunnelStats(ctx context.Context, accountID int64, days int) (*AccountFunnelResult, error) {
+	// Main funnel query.
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			toDate(created_at) AS day,
+			countIf(event_type = 'profile_view') AS profile_views,
+			countIf(event_type = 'social_click' AND source_page IN ('social:instagram', 'social:twitter')) AS instagram_clicks,
+			countIf(event_type = 'social_click' AND source_page NOT IN ('social:instagram', 'social:twitter', '')) AS paid_site_clicks,
+			countIf(event_type = 'profile_thumb_click') AS video_clicks,
+			countIf(event_type = 'profile_thumb_impression') AS thumb_impressions,
+			COUNT(DISTINCT session_id) AS unique_sessions
+		FROM events
+		WHERE account_id = ?
+			AND created_at > now() - toIntervalDay(?)
+			AND event_type IN ('profile_view', 'social_click', 'profile_thumb_click', 'profile_thumb_impression')
+		GROUP BY day
+		ORDER BY day DESC
+	`, accountID, days)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse reader: account funnel: %w", err)
+	}
+	defer rows.Close()
+
+	dayMap := make(map[string]*AccountDayStat)
+	var dayList []AccountDayStat
+
+	for rows.Next() {
+		var s AccountDayStat
+		var day time.Time
+		if err := rows.Scan(&day, &s.ProfileViews, &s.InstagramClicks, &s.PaidSiteClicks, &s.VideoClicks, &s.ThumbImpressions, &s.UniqueSessions); err != nil {
+			return nil, fmt.Errorf("clickhouse reader: scan account funnel: %w", err)
+		}
+		s.Date = day.Format("2006-01-02")
+		dayList = append(dayList, s)
+		dayMap[s.Date] = &dayList[len(dayList)-1]
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("clickhouse reader: account funnel rows: %w", err)
+	}
+
+	// Session duration sub-query.
+	durRows, err := r.conn.Query(ctx, `
+		SELECT
+			toDate(min_ts) AS day,
+			avg(duration) AS avg_session_sec
+		FROM (
+			SELECT
+				session_id,
+				min(created_at) AS min_ts,
+				dateDiff('second', min(created_at), max(created_at)) AS duration
+			FROM events
+			WHERE account_id = ?
+				AND session_id != ''
+				AND created_at > now() - toIntervalDay(?)
+			GROUP BY session_id
+			HAVING duration > 0 AND duration < 7200
+		)
+		GROUP BY day
+		ORDER BY day DESC
+	`, accountID, days)
+	if err != nil {
+		slog.Error("clickhouse: account session duration", "error", err, "account_id", accountID)
+	} else {
+		defer durRows.Close()
+		for durRows.Next() {
+			var day time.Time
+			var avgSec float64
+			if err := durRows.Scan(&day, &avgSec); err != nil {
+				continue
+			}
+			dateStr := day.Format("2006-01-02")
+			if ds, ok := dayMap[dateStr]; ok {
+				ds.AvgSessionSec = math.Round(avgSec*10) / 10
+			}
+		}
+	}
+
+	// Compute summary.
+	var summary AccountDayStat
+	var totalDur float64
+	var durCount int
+	for _, d := range dayList {
+		summary.ProfileViews += d.ProfileViews
+		summary.InstagramClicks += d.InstagramClicks
+		summary.PaidSiteClicks += d.PaidSiteClicks
+		summary.VideoClicks += d.VideoClicks
+		summary.ThumbImpressions += d.ThumbImpressions
+		summary.UniqueSessions += d.UniqueSessions
+		if d.AvgSessionSec > 0 {
+			totalDur += d.AvgSessionSec
+			durCount++
+		}
+	}
+	if durCount > 0 {
+		summary.AvgSessionSec = math.Round(totalDur/float64(durCount)*10) / 10
+	}
+
+	if dayList == nil {
+		dayList = []AccountDayStat{}
+	}
+
+	return &AccountFunnelResult{
+		Days:    dayList,
+		Summary: summary,
+	}, nil
+}
