@@ -1,25 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 
-function requireEnv(key: string): string {
-  const val = process.env[key];
-  if (!val) throw new Error(`${key} environment variable is required`);
+function getAdminPassword(): string {
+  const val = process.env.ADMIN_PASSWORD;
+  if (!val) throw new Error("ADMIN_PASSWORD environment variable is required");
   return val;
 }
 
-const ADMIN_PASSWORD = requireEnv("ADMIN_PASSWORD");
-const ADMIN_TOKEN = requireEnv("ADMIN_TOKEN");
+function getAdminToken(): string {
+  const val = process.env.ADMIN_TOKEN;
+  if (!val) throw new Error("ADMIN_TOKEN environment variable is required");
+  return val;
+}
 
 export async function POST(request: NextRequest) {
+  const adminPassword = getAdminPassword();
+  const adminToken = getAdminToken();
+
   const body = await request.json();
   const { password } = body;
 
-  if (password !== ADMIN_PASSWORD) {
+  if (password !== adminPassword) {
     return NextResponse.json({ error: "Invalid password" }, { status: 401 });
   }
 
   const response = NextResponse.json({ success: true });
 
-  response.cookies.set("admin_token", ADMIN_TOKEN, {
+  response.cookies.set("admin_token", adminToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
