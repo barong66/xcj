@@ -43,7 +43,7 @@ services:
 
   # ── ClickHouse ──────────────────────────────────────────────
   clickhouse:
-    image: clickhouse/clickhouse-server:24.3-alpine
+    image: clickhouse/clickhouse-server:26.2
     container_name: traforama-clickhouse
     restart: unless-stopped
     ports:
