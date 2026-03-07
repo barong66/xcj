@@ -10,6 +10,7 @@ import {
   getAccountBannerSummary,
   getAccountBanners,
   generateAccountBanners,
+  deactivateBanner,
 } from "@/lib/admin-api";
 import type {
   AdminAccount,
@@ -171,6 +172,18 @@ function AccountProfileContent() {
   const handleCopyUrl = (url: string) => {
     navigator.clipboard.writeText(url);
     toast("URL copied");
+  };
+
+  const handleDeactivateBanner = async (bannerId: number) => {
+    if (!confirm("Deactivate this banner? It won't be recreated on next generation.")) return;
+    try {
+      await deactivateBanner(bannerId);
+      setBanners((prev) => prev.filter((b) => b.id !== bannerId));
+      toast("Banner deactivated");
+      loadBannerSummary();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to deactivate", "error");
+    }
   };
 
   if (loading) {
@@ -458,12 +471,24 @@ function AccountProfileContent() {
                         <span className="text-[10px] text-[#6b6b6b]">
                           {b.width}x{b.height}
                         </span>
-                        <button
-                          onClick={() => handleCopyUrl(b.image_url)}
-                          className="text-[10px] text-[#6b6b6b] hover:text-accent transition-colors"
-                        >
-                          Copy URL
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleCopyUrl(b.image_url)}
+                            className="text-[10px] text-[#6b6b6b] hover:text-accent transition-colors"
+                          >
+                            Copy URL
+                          </button>
+                          <button
+                            onClick={() => handleDeactivateBanner(b.id)}
+                            className="text-[10px] text-[#6b6b6b] hover:text-red-400 transition-colors"
+                            title="Deactivate banner"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>

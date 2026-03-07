@@ -57,10 +57,10 @@ function AccountsContent() {
   };
 
   const handleDelete = async (account: AdminAccount) => {
-    if (!confirm(`Deactivate @${account.username}?`)) return;
+    if (!confirm(`Permanently delete @${account.username}? All videos and banners will be removed. This cannot be undone.`)) return;
     try {
       await deleteAdminAccount(account.id);
-      toast(`Account @${account.username} deactivated`);
+      toast(`Account @${account.username} deleted`);
       loadAccounts();
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to delete account", "error");

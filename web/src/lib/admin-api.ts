@@ -617,6 +617,10 @@ export async function getAllBanners(params?: {
   return adminFetch<AdminBannerList>(`/banners${qs ? `?${qs}` : ""}`);
 }
 
+export async function deactivateBanner(id: number): Promise<void> {
+  await adminFetch(`/banners/${id}`, { method: "DELETE" });
+}
+
 // ─── Ad Sources ──────────────────────────────────────────────────────────────
 
 export interface AdSource {

@@ -741,6 +741,23 @@ func (h *AdminHandler) enrichBannerStats(ctx context.Context, banners []store.Ad
 	}
 }
 
+// DeactivateBanner handles DELETE /api/v1/admin/banners/{id}
+func (h *AdminHandler) DeactivateBanner(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid banner id")
+		return
+	}
+
+	if err := h.admin.DeactivateBanner(r.Context(), id); err != nil {
+		slog.Error("admin: deactivate banner", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to deactivate banner")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ─── Ad Sources ───────────────────────────────────────────────────────────────
 
 // ListAdSources handles GET /api/v1/admin/ad-sources

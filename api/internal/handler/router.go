@@ -90,6 +90,7 @@ func NewRouter(
 
 		// Banners (all accounts).
 		r.Get("/banners", adminHandler.ListAllBanners)
+		r.Delete("/banners/{id}", adminHandler.DeactivateBanner)
 
 		// Queue.
 		r.Get("/queue", adminHandler.ListQueue)

@@ -426,7 +426,7 @@ func (s *AdminStore) UpdateAccount(ctx context.Context, id int64, input UpdateAc
 
 func (s *AdminStore) DeleteAccount(ctx context.Context, id int64) error {
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE accounts SET is_active = false, updated_at = NOW() WHERE id = $1`,
+		`DELETE FROM accounts WHERE id = $1`,
 		id,
 	)
 	if err != nil {
@@ -1348,7 +1348,8 @@ func (s *AdminStore) InsertBanner(ctx context.Context, accountID, videoID, banne
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO banners (account_id, video_id, banner_size_id, image_url, width, height)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (video_id, banner_size_id) DO UPDATE SET image_url = EXCLUDED.image_url, is_active = true
+		ON CONFLICT (video_id, banner_size_id) DO UPDATE SET image_url = EXCLUDED.image_url
+			WHERE banners.is_active = true
 		RETURNING id, account_id, video_id, banner_size_id, image_url, width, height, is_active, created_at
 	`, accountID, videoID, bannerSizeID, imageURL, width, height).Scan(
 		&b.ID, &b.AccountID, &b.VideoID, &b.BannerSizeID, &b.ImageURL,
@@ -1358,6 +1359,17 @@ func (s *AdminStore) InsertBanner(ctx context.Context, accountID, videoID, banne
 		return nil, fmt.Errorf("admin_store: insert banner: %w", err)
 	}
 	return &b, nil
+}
+
+func (s *AdminStore) DeactivateBanner(ctx context.Context, id int64) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE banners SET is_active = false WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("admin_store: deactivate banner: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("banner not found")
+	}
+	return nil
 }
 
 // EnqueueBannerGeneration inserts a job into banner_queue.
