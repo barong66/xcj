@@ -4,10 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/xcj/videosite-api/internal/model"
+	s3client "github.com/xcj/videosite-api/internal/s3"
 )
 
 func TestEnrichEvent_ParsesQueryParams(t *testing.T) {
@@ -175,6 +177,95 @@ func TestDeleteAccount_InvalidID(t *testing.T) {
 
 			rr := httptest.NewRecorder()
 			h.DeleteAccount(rr, req)
+			if rr.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", rr.Code, tt.wantStatus)
+			}
+		})
+	}
+}
+
+// newDummyS3 creates an S3 client with fake credentials for testing.
+// minio.New doesn't connect during construction, so this is safe.
+func newDummyS3(t *testing.T) *s3client.Client {
+	t.Helper()
+	c, err := s3client.NewClient("https://fake.r2.dev", "key", "secret", "auto", "bucket", "https://media.example.com")
+	if err != nil {
+		t.Fatalf("newDummyS3: %v", err)
+	}
+	return c
+}
+
+func TestRecropBanner_NoS3(t *testing.T) {
+	h := &AdminHandler{} // s3 is nil
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/banners/1/recrop",
+		strings.NewReader(`{"x":0,"y":0,"width":100,"height":100}`))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rr := httptest.NewRecorder()
+	h.RecropBanner(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestRecropBanner_InvalidID(t *testing.T) {
+	h := &AdminHandler{s3: newDummyS3(t)}
+
+	tests := []struct {
+		name       string
+		idParam    string
+		wantStatus int
+	}{
+		{"non-numeric id", "abc", http.StatusBadRequest},
+		{"empty id", "", http.StatusBadRequest},
+		{"float id", "1.5", http.StatusBadRequest},
+		{"overflow", "99999999999999999999", http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/admin/banners/"+tt.idParam+"/recrop",
+				strings.NewReader(`{"x":0,"y":0,"width":100,"height":100}`))
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", tt.idParam)
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+			rr := httptest.NewRecorder()
+			h.RecropBanner(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func TestRecropBanner_InvalidBody(t *testing.T) {
+	h := &AdminHandler{s3: newDummyS3(t)}
+
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{"empty body", "", http.StatusBadRequest},
+		{"not json", "not-json", http.StatusBadRequest},
+		{"zero width", `{"x":0,"y":0,"width":0,"height":100}`, http.StatusBadRequest},
+		{"negative height", `{"x":0,"y":0,"width":100,"height":-1}`, http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/admin/banners/1/recrop",
+				strings.NewReader(tt.body))
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", "1")
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+			rr := httptest.NewRecorder()
+			h.RecropBanner(rr, req)
 			if rr.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", rr.Code, tt.wantStatus)
 			}
