@@ -83,19 +83,27 @@ func (h *EventHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ip = strings.TrimSpace(parts[0])
 	}
 
+	uaRaw := r.UserAgent()
+	ua := ParseUA(uaRaw)
+	country := r.Header.Get("CF-IPCountry")
+
 	event := model.Event{
 		SiteID:     site.ID,
 		VideoID:    input.VideoID,
 		AccountID:  input.AccountID,
 		Type:       input.Type,
 		SessionID:  input.SessionID,
-		UserAgent:  r.UserAgent(),
+		UserAgent:  uaRaw,
 		IP:         ip,
 		Referrer:   input.Referrer,
 		Extra:      input.Extra,
 		TargetURL:  input.TargetURL,
 		SourcePage: input.SourcePage,
 		Source:     input.Source,
+		Browser:    ua.Browser,
+		OS:         ua.OS,
+		DeviceType: ua.DeviceType,
+		Country:    country,
 		CreatedAt:  time.Now().UTC(),
 	}
 
@@ -138,7 +146,9 @@ func (h *EventHandler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 		parts := strings.SplitN(xff, ",", 2)
 		ip = strings.TrimSpace(parts[0])
 	}
-	ua := r.UserAgent()
+	uaRaw := r.UserAgent()
+	ua := ParseUA(uaRaw)
+	country := r.Header.Get("CF-IPCountry")
 	now := time.Now().UTC()
 
 	accepted := 0
@@ -153,13 +163,17 @@ func (h *EventHandler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 			AccountID:  input.AccountID,
 			Type:       input.Type,
 			SessionID:  input.SessionID,
-			UserAgent:  ua,
+			UserAgent:  uaRaw,
 			IP:         ip,
 			Referrer:   input.Referrer,
 			Extra:      input.Extra,
 			TargetURL:  input.TargetURL,
 			SourcePage: input.SourcePage,
 			Source:     input.Source,
+			Browser:    ua.Browser,
+			OS:         ua.OS,
+			DeviceType: ua.DeviceType,
+			Country:    country,
 			CreatedAt:  now,
 		}
 		h.buffer.Push(event)

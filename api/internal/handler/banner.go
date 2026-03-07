@@ -52,6 +52,7 @@ func enrichEvent(e *model.Event, r *http.Request) {
 	e.Browser = ua.Browser
 	e.OS = ua.OS
 	e.DeviceType = ua.DeviceType
+	e.Country = r.Header.Get("CF-IPCountry")
 
 	q := r.URL.Query()
 	e.ScreenWidth, _ = strconv.Atoi(q.Get("sw"))
@@ -255,6 +256,7 @@ func (h *BannerHandler) HandlePerfBeacon(w http.ResponseWriter, r *http.Request)
 		ScreenWidth:     parseIntParam(q.Get("sw")),
 		ScreenHeight:    parseIntParam(q.Get("sh")),
 		ConnectionType:  q.Get("ct"),
+		Country:         r.Header.Get("CF-IPCountry"),
 	}
 
 	go h.buffer.InsertPerfEvent(context.Background(), &p)
