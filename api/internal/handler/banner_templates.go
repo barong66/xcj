@@ -49,11 +49,10 @@ body{overflow:hidden;background:#000}
   font-family:'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;cursor:pointer;
   border:3px solid #FF2D7B;box-shadow:0 0 20px rgba(255,45,123,.4)}
 .b img{width:100%;height:100%;object-fit:cover;object-position:center 20%;display:block;
-  transition:transform .3s ease}
-.b:hover img{transform:scale(1.05)}
-.b::before{content:'';position:absolute;inset:0;background:rgba(0,0,0,.3);z-index:1}
-.b::after{content:'';position:absolute;bottom:0;left:0;right:0;height:55%;
-  background:linear-gradient(to top,rgba(0,0,0,.85) 0%,rgba(0,0,0,.4) 50%,transparent 100%);z-index:1}
+  transition:transform .3s ease;filter:contrast(1.15) saturate(1.2) brightness(1.05)}
+.b:hover img{transform:scale(1.05);filter:contrast(1.2) saturate(1.3) brightness(1.1)}
+.b::after{content:'';position:absolute;bottom:0;left:0;right:0;height:45%;
+  background:linear-gradient(to top,rgba(0,0,0,.75) 0%,rgba(0,0,0,.2) 60%,transparent 100%);z-index:1}
 .ca{position:absolute;top:-30px;right:-30px;width:60px;height:60px;
   background:linear-gradient(135deg,transparent 50%,rgba(255,45,123,.3) 50%);z-index:2}
 .ct{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;
@@ -80,7 +79,7 @@ body{overflow:hidden;background:#000}
     <span class="un">@{{.Username}}</span>
     <div class="bt">
       <span class="tg">Exclusive Content</span>
-      <span class="cta">Watch Now</span>
+      <span class="cta">Watch Me Now</span>
     </div>
   </div>
 </div>
@@ -100,15 +99,10 @@ body{overflow:hidden;background:#000}
 .b{width:{{.Width}}px;height:{{.Height}}px;position:relative;overflow:hidden;
   background:#000;cursor:pointer}
 .b img{width:100%;height:100%;object-fit:cover;object-position:center 15%;display:block;
-  transition:transform .4s ease}
-.b:hover img{transform:scale(1.04)}
+  transition:transform .4s ease,filter .3s ease;filter:contrast(1.15) saturate(1.2) brightness(1.05)}
+.b:hover img{transform:scale(1.04);filter:contrast(1.2) saturate(1.3) brightness(1.1)}
 .b::before{content:'';position:absolute;inset:0;
-  background:radial-gradient(ellipse at center,transparent 40%,rgba(0,0,0,.5) 100%),
-  linear-gradient(to top,rgba(0,0,0,.9) 0%,rgba(0,0,0,.6) 30%,rgba(0,0,0,.15) 55%,transparent 70%);z-index:1}
-.bz{position:absolute;bottom:0;left:0;right:0;height:45%;
-  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:1;
-  mask-image:linear-gradient(to top,black 40%,transparent 100%);
-  -webkit-mask-image:linear-gradient(to top,black 40%,transparent 100%)}
+  background:linear-gradient(to top,rgba(0,0,0,.7) 0%,rgba(0,0,0,.3) 25%,transparent 55%);z-index:1}
 .ct{position:absolute;bottom:0;left:0;right:0;z-index:3;display:flex;flex-direction:column;
   align-items:center;padding-bottom:clamp(10px,6%,20px)}
 .gl{width:60px;height:1px;background:linear-gradient(90deg,transparent,#C9A96E,transparent);
@@ -130,7 +124,6 @@ body{overflow:hidden;background:#000}
 <a href="{{.ClickURL}}" target="_top" style="text-decoration:none">
 <div class="b" id="bn">
   <img src="{{.ThumbnailURL}}" alt="">
-  <div class="bz"></div>
   <div class="ta"></div>
   <div class="ct">
     <div class="or"></div>
@@ -155,10 +148,10 @@ body{overflow:hidden;background:#000}
 .b{width:{{.Width}}px;height:{{.Height}}px;position:relative;overflow:hidden;
   background:#000;font-family:'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;cursor:pointer}
 .b img{width:100%;height:100%;object-fit:cover;object-position:center 20%;display:block;
-  transition:transform .3s ease}
-.b:hover img{transform:scale(1.03)}
-.b::after{content:'';position:absolute;bottom:0;left:0;right:0;height:40%;
-  background:linear-gradient(to top,rgba(0,0,0,.7) 0%,rgba(0,0,0,.3) 50%,transparent 100%);
+  transition:transform .3s ease,filter .3s ease;filter:contrast(1.15) saturate(1.2) brightness(1.05)}
+.b:hover img{transform:scale(1.03);filter:contrast(1.2) saturate(1.3) brightness(1.1)}
+.b::after{content:'';position:absolute;bottom:0;left:0;right:0;height:35%;
+  background:linear-gradient(to top,rgba(0,0,0,.6) 0%,rgba(0,0,0,.15) 60%,transparent 100%);
   pointer-events:none}
 .ov{position:absolute;bottom:0;left:0;right:0;padding:clamp(8px,4%,14px) clamp(10px,5%,16px);
   z-index:2;display:flex;justify-content:space-between;align-items:flex-end}
@@ -200,8 +193,8 @@ body{overflow:hidden;background:#000}
   box-shadow:0 4px 20px rgba(0,0,0,.4)}
 .ph{position:relative;width:100%;height:75%;overflow:hidden}
 .ph img{width:100%;height:100%;object-fit:cover;object-position:center 20%;display:block;
-  transition:transform .3s ease}
-.b:hover .ph img{transform:scale(1.04)}
+  transition:transform .3s ease,filter .3s ease;filter:contrast(1.15) saturate(1.2) brightness(1.05)}
+.b:hover .ph img{transform:scale(1.04);filter:contrast(1.2) saturate(1.3) brightness(1.1)}
 .ph::after{content:'';position:absolute;bottom:0;left:0;right:0;height:30px;
   background:linear-gradient(to top,#1A1A2E 0%,transparent 100%)}
 .bar{position:relative;height:25%;background:#1A1A2E;display:flex;
