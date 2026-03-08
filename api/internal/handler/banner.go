@@ -526,7 +526,10 @@ func (h *BannerHandler) PreviewBanner(w http.ResponseWriter, r *http.Request) {
 
 	style := r.URL.Query().Get("style")
 
-	thumbURL := banner.ImageURL
+	thumbURL := banner.ThumbnailURL
+	if thumbURL == "" {
+		thumbURL = banner.ImageURL
+	}
 
 	tmpl := pickBannerStyle(style)
 	data := bannerTemplateData{

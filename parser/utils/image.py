@@ -286,7 +286,7 @@ def generate_banner(
             cropped = smart_crop(img, width, height)
             resized = cropped.resize((width, height), Image.LANCZOS)
             enhanced = enhance_image(resized)
-            final = _pillow_overlay(enhanced)
+            final = enhanced
             final.save(dest_path, "JPEG", quality=quality)
             return True
 

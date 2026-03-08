@@ -1157,6 +1157,7 @@ type AdminBanner struct {
 	BannerSizeID   int64     `json:"banner_size_id"`
 	VideoFrameID   *int64    `json:"video_frame_id"`
 	ImageURL       string    `json:"image_url"`
+	ThumbnailURL   string    `json:"thumbnail_url"`
 	SourceImageURL string    `json:"source_image_url"`
 	Width          int       `json:"width"`
 	Height         int       `json:"height"`
@@ -1500,7 +1501,9 @@ func (s *AdminStore) GetVideoThumbnail(ctx context.Context, videoID int64) (stri
 func (s *AdminStore) GetBannerByID(ctx context.Context, id int64) (*AdminBanner, error) {
 	var b AdminBanner
 	err := s.pool.QueryRow(ctx, `
-		SELECT b.id, b.account_id, b.video_id, b.banner_size_id, b.image_url, b.width, b.height, b.is_active, b.created_at,
+		SELECT b.id, b.account_id, b.video_id, b.banner_size_id, b.image_url,
+			COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''),
+			b.width, b.height, b.is_active, b.created_at,
 			COALESCE(v.title,''), COALESCE(a.username,'')
 		FROM banners b
 		JOIN videos v ON v.id = b.video_id
@@ -1508,6 +1511,7 @@ func (s *AdminStore) GetBannerByID(ctx context.Context, id int64) (*AdminBanner,
 		WHERE b.id = $1
 	`, id).Scan(
 		&b.ID, &b.AccountID, &b.VideoID, &b.BannerSizeID, &b.ImageURL,
+		&b.ThumbnailURL,
 		&b.Width, &b.Height, &b.IsActive, &b.CreatedAt, &b.VideoTitle, &b.Username,
 	)
 	if err != nil {

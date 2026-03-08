@@ -53,8 +53,8 @@ body{overflow:hidden;background:#000}
   font-family:'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;cursor:pointer;
   border:3px solid #FF2D7B;box-shadow:0 0 20px rgba(255,45,123,.4)}
 .b img{width:100%;height:100%;object-fit:cover;object-position:center 20%;display:block;
-  transition:transform .3s ease;filter:contrast(1.15) saturate(1.2) brightness(1.05)}
-.b:hover img{transform:scale(1.05);filter:contrast(1.2) saturate(1.3) brightness(1.1)}
+  transition:transform .3s ease}
+.b:hover img{transform:scale(1.05)}
 .b::after{content:'';position:absolute;bottom:0;left:0;right:0;height:45%;
   background:linear-gradient(to top,rgba(0,0,0,.75) 0%,rgba(0,0,0,.2) 60%,transparent 100%);z-index:1}
 .ca{position:absolute;top:-30px;right:-30px;width:60px;height:60px;
@@ -125,8 +125,8 @@ body{overflow:hidden;background:#000}
 .b{width:{{.Width}}px;height:{{.Height}}px;position:relative;overflow:hidden;
   background:#000;cursor:pointer}
 .b img{width:100%;height:100%;object-fit:cover;object-position:center 15%;display:block;
-  transition:transform .4s ease,filter .3s ease;filter:contrast(1.15) saturate(1.2) brightness(1.05)}
-.b:hover img{transform:scale(1.04);filter:contrast(1.2) saturate(1.3) brightness(1.1)}
+  transition:transform .4s ease}
+.b:hover img{transform:scale(1.04)}
 .b::before{content:'';position:absolute;inset:0;
   background:linear-gradient(to top,rgba(0,0,0,.7) 0%,rgba(0,0,0,.3) 25%,transparent 55%);z-index:1}
 .ct{position:absolute;bottom:0;left:0;right:0;z-index:3;display:flex;flex-direction:column;
@@ -196,8 +196,8 @@ body{overflow:hidden;background:#000}
 .b{width:{{.Width}}px;height:{{.Height}}px;position:relative;overflow:hidden;
   background:#000;font-family:'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;cursor:pointer}
 .b img{width:100%;height:100%;object-fit:cover;object-position:center 20%;display:block;
-  transition:transform .3s ease,filter .3s ease;filter:contrast(1.15) saturate(1.2) brightness(1.05)}
-.b:hover img{transform:scale(1.03);filter:contrast(1.2) saturate(1.3) brightness(1.1)}
+  transition:transform .3s ease}
+.b:hover img{transform:scale(1.03)}
 .b::after{content:'';position:absolute;bottom:0;left:0;right:0;height:35%;
   background:linear-gradient(to top,rgba(0,0,0,.6) 0%,rgba(0,0,0,.15) 60%,transparent 100%);
   pointer-events:none}
@@ -263,8 +263,8 @@ body{overflow:hidden;background:#000}
   box-shadow:0 4px 20px rgba(0,0,0,.4)}
 .ph{position:relative;width:100%;height:75%;overflow:hidden}
 .ph img{width:100%;height:100%;object-fit:cover;object-position:center 20%;display:block;
-  transition:transform .3s ease,filter .3s ease;filter:contrast(1.15) saturate(1.2) brightness(1.05)}
-.b:hover .ph img{transform:scale(1.04);filter:contrast(1.2) saturate(1.3) brightness(1.1)}
+  transition:transform .3s ease}
+.b:hover .ph img{transform:scale(1.04)}
 .ph::after{content:'';position:absolute;bottom:0;left:0;right:0;height:30px;
   background:linear-gradient(to top,#1A1A2E 0%,transparent 100%)}
 .bar{position:relative;height:25%;background:#1A1A2E;display:flex;
