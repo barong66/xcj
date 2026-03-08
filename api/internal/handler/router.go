@@ -94,6 +94,8 @@ func NewRouter(
 		r.Get("/accounts/{id}/banners", adminHandler.ListAccountBanners)
 		r.Post("/accounts/{id}/banners/generate", adminHandler.GenerateAccountBanners)
 		r.Get("/accounts/{id}/stats", adminHandler.GetAccountStats)
+		r.Get("/accounts/{id}/conversion-prices", adminHandler.GetAccountConversionPrices)
+		r.Put("/accounts/{id}/conversion-prices", adminHandler.UpsertAccountConversionPrice)
 
 		// Banner Sizes.
 		r.Get("/banner-sizes", adminHandler.ListBannerSizes)

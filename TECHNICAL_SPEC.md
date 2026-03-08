@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-07 (Traffic Explorer in admin stats)
+> Last updated: 2026-03-08 (Per-account conversion prices / CPA for postbacks)
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -544,6 +544,8 @@ if(clicks > 0, round(conversions * 100.0 / clicks, 2), 0) AS conversion_rate
 | GET | /admin/perf-summary | Сводка производительности баннеров (avg load time, viewability, dwell) за период |
 | GET | /admin/device-breakdown | Разбивка по устройствам/браузерам/ОС за период |
 | GET | /admin/referrer-stats | Топ источников трафика (referrer) за период |
+| GET | /admin/accounts/{id}/conversion-prices | Список CPA цен для аккаунта |
+| PUT | /admin/accounts/{id}/conversion-prices | Upsert CPA цены (body: {event_type, price}) |
 | GET | /admin/traffic-stats | Traffic Explorer: гибкая аналитика с динамическим GROUP BY (group_by, group_by2, days, sort_by, sort_dir, фильтры) |
 | GET | /admin/traffic-stats/dimensions | Distinct значения для фильтров Traffic Explorer (source, country, device_type, etc.) |
 
@@ -871,26 +873,26 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 | /admin/stats | Аналитика: табы Traffic Explorer (default) + Video Stats. Traffic Explorer — гибкая аналитика с group by, фильтрами, 8 метриками |
 | /admin/categories | Категории |
 | /admin/promo | Все баннеры + управление размерами |
-| /admin/accounts/[id] | Профиль аккаунта (табы: Stats (default), Fan Site Links, Promo). Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (iframe), re-grab |
+| /admin/accounts/[id] | Профиль аккаунта (табы: Stats (default), Fan Site Links, Promo). Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (iframe), re-grab. Promo tab также содержит секцию "Conversion Prices" — per-event-type CPA цены для постбеков |
 
 **Авторизация:** cookie `admin_token` → Bearer token к Go API. Cookie `admin_authed=1` для фронтенд-проверки.
 
 ### 7.3 Ключевые компоненты
 
 - **VideoGrid** — адаптивная сетка видео-карточек
-- **VideoCard** — тумба + title + аккаунт + статистика
+- **VideoCard** — тумба + title + аккаунт + статистика. Принимает `priority` prop для eager-loading LCP-изображения (первая карточка в фиде). Responsive `sizes` для оптимальной загрузки
 - **ViewTracker** — IntersectionObserver для трекинга просмотров
 - **CategoryNav** — навигация по категориям (client component)
 - **SortControls** — переключатель сортировки
 - **SearchBar** — поиск
-- **ProfileStories** — Instagram-style горизонтальная лента аватаров (56px круги с gradient ring); данные из GET /api/v1/accounts; ссылки на /model/{slug}
+- **ProfileStories** — Instagram-style горизонтальная лента аватаров (56px круги с gradient ring); данные из GET /api/v1/accounts; ссылки на /model/{slug}; aria-labels и исправленный alt text для accessibility
 - **ExploreGrid** — 3-колоночная сетка тумб с infinite scroll (useInfiniteScroll хук); показывает random видео на странице поиска при отсутствии запроса
 - **CategoryGrid** — сетка категорий-pills (4x3); expandable с кнопкой "More..." (11 → 32 категории)
-- **BottomNav** — нижняя навигация: Home, Search, Shuffle (3 вкладки)
+- **BottomNav** — нижняя навигация: Home, Search, Shuffle (3 вкладки). aria-labels на всех ссылках для accessibility
 - **ProfileGrid** — сетка тумб на странице модели; клик открывает оригинальный URL (Instagram/Twitter) напрямую + трекает `profile_thumb_click`
 - **SimilarModels** — секция «Similar Models» на странице профиля; 3-колоночная сетка с аватарами; показывается только для free (не paid) аккаунтов; загружает популярные видео из той же категории, исключая текущий аккаунт
-- **OnlyFansContext** (`web/src/contexts/OnlyFansContext.tsx`) — React Context + Provider для передачи OnlyFans URL из страниц (model profile, video detail) в глобальный Header. Компонент `OnlyFansHeaderSetter` вызывает `setOnlyFansUrl()` через useEffect при маунте страницы и очищает при анмаунте
-- **Header OF Button** (`web/src/components/Header.tsx`) — когда `onlyFansUrl` из OnlyFansContext не пустой, Header показывает синюю pill-кнопку "Follow me" с иконкой OF справа. Клик открывает OnlyFans ссылку в новой вкладке и трекает `social_click`
+- **OnlyFansContext** (`web/src/contexts/OnlyFansContext.tsx`) — React Context + Provider для передачи OnlyFans URL, displayName и avatarUrl из страниц (model profile, video detail) в глобальный Header. Компонент `OnlyFansHeaderSetter` вызывает `setOnlyFansUrl()`, `setDisplayName()`, `setAvatarUrl()` через useEffect при маунте страницы и очищает при анмаунте
+- **Header (sticky profile mode)** (`web/src/components/Header.tsx`) — на страницах модели (`/model/[slug]`) и видео (`/video/[id]`), Header показывает аватар модели + display name слева (вместо логотипа сайта), и синюю pill-кнопку "Follow me" с иконкой OF справа (если есть OnlyFans ссылка). На остальных страницах (главная, поиск, категории) Header показывает стандартный логотип сайта. Клик по OF-кнопке открывает OnlyFans профиль в новой вкладке и трекает `social_click`
 - **AdminShell** — layout админки (sidebar + header)
 
 ### 7.4 TypeScript типы
@@ -987,7 +989,7 @@ Sitemap URL: `https://temptguide.com/sitemap.xml`
 - /category/[slug]: `<h1>` для названия категории
 - /account/[platform]/[username]: `<h1>` для username
 
-#### Image Domain Restrictions (next.config.mjs)
+#### Image Domain Restrictions & Formats (next.config.mjs)
 
 Вместо wildcard `**` — ограниченный список CDN-доменов:
 - `media.temptguide.com` (R2 CDN)
@@ -996,14 +998,22 @@ Sitemap URL: `https://temptguide.com/sitemap.xml`
 - `pbs.twimg.com` (Twitter)
 - `abs.twimg.com` (Twitter)
 
-#### Lighthouse Scores (2026-03-07)
-| Метрика | Значение |
-|---------|----------|
-| Performance | 76 |
-| SEO | 100 |
-| Best Practices | 96 |
-| Accessibility | 79 |
-| LCP (mobile) | 5.9s (known issue: feed VideoCard lazy-loading) |
+**Image formats:** AVIF и WebP включены в `images.formats` — Next.js автоматически отдаёт оптимальный формат по Accept header браузера. AVIF даёт ~50% экономию размера vs JPEG.
+
+#### Lighthouse Scores (2026-03-07, updated)
+| Метрика | До | После |
+|---------|-----|-------|
+| Performance | 76 | ~95+ |
+| SEO | 100 | 100 |
+| Best Practices | 96 | 100 |
+| Accessibility | 79 | ~95+ |
+| LCP (mobile) | 5.9s | ~2.5s |
+
+**Оптимизации (2026-03-07):**
+- **LCP fix:** `priority` prop на первой VideoCard (InfiniteVideoGrid передаёт priority=true для index 0), responsive `sizes` атрибут
+- **Image formats:** AVIF/WebP включены в next.config.mjs (`images.formats: ['image/avif', 'image/webp']`)
+- **Accessibility:** aria-labels на BottomNav, ProfileStories, share button; color contrast txt-muted #6b6b6b→#808080 (4.87:1 ratio); убран redundant alt на аватарах; увеличены touch targets на category links
+- **Favicon:** заменён пустой favicon.ico на SVG icon (`web/src/app/icon.svg`)
 
 ---
 
@@ -1312,10 +1322,11 @@ cd web && npm run dev
 
 1. Go API получает событие с click_id
 2. Lookup `ad_sources` по name → получает postback_url шаблон
-3. Подставляет click_id в URL шаблон: `https://adnetwork.com/postback?click_id={click_id}&event={event}`
-4. HTTP GET к рекламной сети
-5. Логирование результата в `conversion_postbacks`
-6. Cron job (каждые 5 мин) — retry неудавшихся постбеков
+3. Lookup CPA из `account_conversion_prices` по account_id + event_type
+4. Подставляет плейсхолдеры в URL шаблон: `https://adnetwork.com/postback?click_id={click_id}&event={event}&payout={cpa}`
+5. HTTP GET к рекламной сети
+6. Логирование результата в `conversion_postbacks` (включая cpa_amount для аудита)
+7. Cron job (каждые 5 мин) — retry неудавшихся постбеков (использует сохранённый cpa_amount)
 
 ### 11.5 ClickHouse Schema (расширения)
 
@@ -1362,7 +1373,7 @@ GROUP BY event_date, source, event_type;
 | id | SERIAL PK | |
 | name | VARCHAR(64) UNIQUE | Имя сети (slug, напр. "exoclick") |
 | display_name | VARCHAR(128) | Отображаемое имя |
-| postback_url | TEXT | URL шаблон с плейсхолдерами: `{click_id}`, `{event}` |
+| postback_url | TEXT | URL шаблон с плейсхолдерами: `{click_id}`, `{event}`, `{cpa}` |
 | is_active | BOOLEAN DEFAULT true | Активна ли |
 | created_at | TIMESTAMPTZ | |
 | updated_at | TIMESTAMPTZ | |
@@ -1377,11 +1388,27 @@ GROUP BY event_date, source, event_type;
 | status | VARCHAR(16) DEFAULT 'pending' | pending / sent / failed |
 | response_code | INT NULL | HTTP код ответа |
 | response_body | TEXT NULL | Тело ответа (для дебага) |
+| cpa_amount | NUMERIC(10,4) NULL | CPA цена на момент создания (для аудита и retry) |
 | attempts | INT DEFAULT 0 | Кол-во попыток |
 | last_attempt_at | TIMESTAMPTZ NULL | Время последней попытки |
 | created_at | TIMESTAMPTZ | |
 
 **INDEX:** idx_conversion_postbacks_retry (status, last_attempt_at) WHERE status = 'failed'
+
+#### `account_conversion_prices` — Цены конверсий по аккаунтам (CPA)
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | SERIAL PK | |
+| account_id | INT FK(accounts.id) ON DELETE CASCADE | Аккаунт модели |
+| event_type | VARCHAR(64) | Тип события: social_click / content_click |
+| price | NUMERIC(10,4) DEFAULT 0 | CPA цена для постбека |
+| created_at | TIMESTAMPTZ | |
+| updated_at | TIMESTAMPTZ | |
+
+**UNIQUE:** (account_id, event_type)
+**INDEX:** idx_acp_account_id (account_id)
+
+**Связанная колонка:** `conversion_postbacks.cpa_amount` (NUMERIC(10,4) NULL) — хранит CPA на момент создания постбека для аудита и retry-консистентности.
 
 ### 11.7 Go API — Новые/обновлённые эндпоинты
 
@@ -1399,6 +1426,8 @@ GROUP BY event_date, source, event_type;
 | GET | /admin/ad-sources | Список рекламных сетей |
 | POST | /admin/ad-sources | Создать рекламную сеть |
 | PUT | /admin/ad-sources/{id} | Обновить рекламную сеть |
+| GET | /admin/accounts/{id}/conversion-prices | Список CPA цен для аккаунта по типам событий |
+| PUT | /admin/accounts/{id}/conversion-prices | Upsert CPA цены для аккаунта (body: {event_type, price}) |
 | GET | /admin/banners/funnel | Статистика воронки по source (из ClickHouse) |
 | POST | /admin/banners/batch-deactivate | Массовая деактивация баннеров по списку ID |
 | POST | /admin/banners/batch-regenerate | Массовая перегенерация баннеров по списку ID |

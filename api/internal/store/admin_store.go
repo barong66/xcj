@@ -1664,6 +1664,7 @@ type ConversionPostback struct {
 	Status       string     `json:"status"`
 	ResponseCode int        `json:"response_code"`
 	ResponseBody string     `json:"response_body,omitempty"`
+	CpaAmount    *float64   `json:"cpa_amount,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 	SentAt       *time.Time `json:"sent_at,omitempty"`
 }
@@ -1758,10 +1759,10 @@ func (s *AdminStore) UpdateAdSource(ctx context.Context, id int64, input UpdateA
 // CreateConversionPostback inserts a conversion postback record.
 func (s *AdminStore) CreateConversionPostback(ctx context.Context, pb *ConversionPostback) error {
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO conversion_postbacks (ad_source_id, click_id, event_type, account_id, video_id, status)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO conversion_postbacks (ad_source_id, click_id, event_type, account_id, video_id, status, cpa_amount)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at
-	`, pb.AdSourceID, pb.ClickID, pb.EventType, pb.AccountID, pb.VideoID, pb.Status).Scan(&pb.ID, &pb.CreatedAt)
+	`, pb.AdSourceID, pb.ClickID, pb.EventType, pb.AccountID, pb.VideoID, pb.Status, pb.CpaAmount).Scan(&pb.ID, &pb.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("admin_store: create conversion postback: %w", err)
 	}
@@ -1786,7 +1787,7 @@ func (s *AdminStore) ListPendingPostbacks(ctx context.Context, limit int) ([]Con
 	rows, err := s.pool.Query(ctx, `
 		SELECT cp.id, cp.ad_source_id, a.name, cp.click_id, cp.event_type,
 			cp.account_id, cp.video_id, cp.status, cp.response_code, COALESCE(cp.response_body,''),
-			cp.created_at, cp.sent_at
+			cp.cpa_amount, cp.created_at, cp.sent_at
 		FROM conversion_postbacks cp
 		JOIN ad_sources a ON a.id = cp.ad_source_id
 		WHERE cp.status IN ('pending', 'failed')
@@ -1806,7 +1807,7 @@ func (s *AdminStore) ListPendingPostbacks(ctx context.Context, limit int) ([]Con
 		if err := rows.Scan(
 			&pb.ID, &pb.AdSourceID, &pb.AdSourceName, &pb.ClickID, &pb.EventType,
 			&pb.AccountID, &pb.VideoID, &pb.Status, &pb.ResponseCode, &pb.ResponseBody,
-			&pb.CreatedAt, &pb.SentAt,
+			&pb.CpaAmount, &pb.CreatedAt, &pb.SentAt,
 		); err != nil {
 			return nil, fmt.Errorf("admin_store: scan postback: %w", err)
 		}
@@ -1823,7 +1824,7 @@ func (s *AdminStore) ListRecentPostbacks(ctx context.Context, limit int) ([]Conv
 	rows, err := s.pool.Query(ctx, `
 		SELECT cp.id, cp.ad_source_id, a.name, cp.click_id, cp.event_type,
 			cp.account_id, cp.video_id, cp.status, cp.response_code, COALESCE(cp.response_body,''),
-			cp.created_at, cp.sent_at
+			cp.cpa_amount, cp.created_at, cp.sent_at
 		FROM conversion_postbacks cp
 		JOIN ad_sources a ON a.id = cp.ad_source_id
 		ORDER BY cp.created_at DESC
@@ -1840,7 +1841,7 @@ func (s *AdminStore) ListRecentPostbacks(ctx context.Context, limit int) ([]Conv
 		if err := rows.Scan(
 			&pb.ID, &pb.AdSourceID, &pb.AdSourceName, &pb.ClickID, &pb.EventType,
 			&pb.AccountID, &pb.VideoID, &pb.Status, &pb.ResponseCode, &pb.ResponseBody,
-			&pb.CreatedAt, &pb.SentAt,
+			&pb.CpaAmount, &pb.CreatedAt, &pb.SentAt,
 		); err != nil {
 			return nil, fmt.Errorf("admin_store: scan postback: %w", err)
 		}
@@ -1850,4 +1851,74 @@ func (s *AdminStore) ListRecentPostbacks(ctx context.Context, limit int) ([]Conv
 		postbacks = []ConversionPostback{}
 	}
 	return postbacks, rows.Err()
+}
+
+// ─── Account Conversion Prices ────────────────────────────────────────────────
+
+type AccountConversionPrice struct {
+	ID        int64     `json:"id"`
+	AccountID int64     `json:"account_id"`
+	EventType string    `json:"event_type"`
+	Price     float64   `json:"price"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// GetAccountConversionPrices returns all conversion prices for an account.
+func (s *AdminStore) GetAccountConversionPrices(ctx context.Context, accountID int64) ([]AccountConversionPrice, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, account_id, event_type, price, created_at, updated_at
+		FROM account_conversion_prices
+		WHERE account_id = $1
+		ORDER BY event_type
+	`, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: get account conversion prices: %w", err)
+	}
+	defer rows.Close()
+
+	var prices []AccountConversionPrice
+	for rows.Next() {
+		var p AccountConversionPrice
+		if err := rows.Scan(&p.ID, &p.AccountID, &p.EventType, &p.Price, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("admin_store: scan conversion price: %w", err)
+		}
+		prices = append(prices, p)
+	}
+	if prices == nil {
+		prices = []AccountConversionPrice{}
+	}
+	return prices, rows.Err()
+}
+
+// UpsertAccountConversionPrice creates or updates a conversion price for an account+event_type.
+func (s *AdminStore) UpsertAccountConversionPrice(ctx context.Context, accountID int64, eventType string, price float64) (*AccountConversionPrice, error) {
+	var p AccountConversionPrice
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO account_conversion_prices (account_id, event_type, price)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (account_id, event_type)
+		DO UPDATE SET price = $3, updated_at = NOW()
+		RETURNING id, account_id, event_type, price, created_at, updated_at
+	`, accountID, eventType, price).Scan(&p.ID, &p.AccountID, &p.EventType, &p.Price, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: upsert conversion price: %w", err)
+	}
+	return &p, nil
+}
+
+// GetConversionPrice returns the CPA price for an account+event_type. Returns 0 if not configured.
+func (s *AdminStore) GetConversionPrice(ctx context.Context, accountID int64, eventType string) (float64, error) {
+	var price float64
+	err := s.pool.QueryRow(ctx, `
+		SELECT price FROM account_conversion_prices
+		WHERE account_id = $1 AND event_type = $2
+	`, accountID, eventType).Scan(&price)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("admin_store: get conversion price: %w", err)
+	}
+	return price, nil
 }

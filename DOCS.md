@@ -1,6 +1,6 @@
 # xxxaccounter — Документация
 
-> Последнее обновление: 2026-03-07 (Traffic Explorer in admin stats)
+> Последнее обновление: 2026-03-08 (Per-account conversion prices / CPA for postbacks)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
 ---
@@ -50,21 +50,26 @@
 - Сетка видео-тумб аккаунта. Клик по тумбе открывает оригинальный URL (Instagram/Twitter) **напрямую в новой вкладке** (без промежуточной страницы `/video/{id}`). Каждый клик трекается как `profile_thumb_click` в аналитике
 - **Similar Models** (только для бесплатных аккаунтов) — секция внизу страницы, показывающая модели из той же категории. 3-колоночная сетка с аватарами и ссылками на профили
 
-### 2.2 OnlyFans кнопка в хедере
+### 2.2 Sticky profile header с информацией о модели
 
-Когда посетитель просматривает страницу модели (`/model/[slug]`) или страницу видео (`/video/[id]`), и у модели указана ссылка на OnlyFans в `social_links`, в хедере сайта появляется синяя pill-кнопка **"Follow me"** с иконкой OnlyFans.
+Когда посетитель просматривает страницу модели (`/model/[slug]`) или страницу видео (`/video/[id]`), хедер сайта переключается в «profile mode»:
+- **Слева:** аватар модели + display name (вместо логотипа сайта)
+- **Справа:** синяя pill-кнопка **"Follow me"** с иконкой OnlyFans (если у модели есть OnlyFans в `social_links`)
+
+На остальных страницах (главная, поиск, категории) хедер показывает стандартный логотип сайта.
 
 **Как работает:**
-- Кнопка отображается только на страницах конкретной модели или её видео — не на главной, не в поиске, не в категориях
-- При наличии OnlyFans ссылки у аккаунта — кнопка автоматически появляется справа в хедере
+- На страницах модели и видео хедер автоматически показывает аватар и имя текущей модели
+- Кнопка "Follow me" отображается только при наличии OnlyFans ссылки у аккаунта
 - Клик по кнопке открывает OnlyFans профиль модели в новой вкладке
 - Клик трекается как `social_click` в аналитике (ClickHouse)
-- При переходе на другую страницу (главная, поиск, другая модель) — кнопка скрывается или обновляется
+- При переходе на другую страницу (главная, поиск, другая модель) — хедер возвращается к логотипу или обновляется данными новой модели
 
 **Техническая реализация:**
-- React Context (`OnlyFansContext`) передаёт URL из страницы в глобальный Header
+- React Context (`OnlyFansContext`) передаёт URL, displayName и avatarUrl из страницы в глобальный Header
 - `SiteLayout` оборачивает приложение в `OnlyFansProvider`
-- Компонент `OnlyFansHeaderSetter` на страницах модели/видео устанавливает URL при маунте и очищает при анмаунте
+- Компонент `OnlyFansHeaderSetter` на страницах модели/видео устанавливает URL, displayName и avatarUrl при маунте и очищает при анмаунте
+- `Header.tsx` — условный рендеринг: при наличии displayName/avatarUrl в контексте показывает аватар+имя, иначе логотип
 - Go API (`video_store.go`) включает `social_links` аккаунта в ответ для видео-эндпоинтов
 
 ### 3. Мультисайт
@@ -250,13 +255,32 @@
    - **Name** — slug рекламной сети (напр. `exoclick`, `trafficstars`)
    - **Postback URL** — шаблон URL с плейсхолдерами: `https://adnetwork.com/postback?click_id={click_id}&event={event}`
    - **Active** — включить/выключить постбеки
-3. В шаблоне доступны плейсхолдеры: `{click_id}` (ID клика от сети), `{event}` (тип конверсии: social_click / content_click)
+3. В шаблоне доступны плейсхолдеры: `{click_id}` (ID клика от сети), `{event}` (тип конверсии: social_click / content_click), `{cpa}` (CPA цена для данной модели и типа события)
 
 **Как использовать embed-код с трекингом источника:**
 - Стандартный iframe: `<iframe src="https://temptguide.com/b/serve?size=300x250">`
 - С привязкой источника: `<iframe src="https://temptguide.com/b/serve?size=300x250&src=exoclick&click_id={CLICK_ID}">`
 - Рекламные сети подставляют свой макрос вместо `{CLICK_ID}` (например, ExoClick: `{clickid}`, TrafficStars: `{click_id}`)
 - В embed-коде генераторе (Promo → Настройки) можно выбрать рекламную сеть — click_id макрос подставится автоматически
+
+**Per-model Conversion Prices (CPA):**
+
+Для каждой модели (аккаунта) можно задать индивидуальную CPA-цену для каждого типа конверсии. Эта цена автоматически подставляется в `{cpa}` плейсхолдер постбек-URL при отправке S2S постбека в рекламную сеть.
+
+Как настроить:
+1. Перейти на страницу аккаунта: /admin/accounts/{id}
+2. Открыть вкладку **Promo**
+3. В секции **Conversion Prices** указать цену для каждого типа события:
+   - **social_click** — клик на фансайт (OnlyFans и др.)
+   - **content_click** — первый клик на контент за сессию
+4. Сохранить — цена применяется мгновенно ко всем новым постбекам
+
+Пример постбек-URL с CPA:
+```
+https://adnetwork.com/postback?click_id={click_id}&event={event}&payout={cpa}
+```
+
+При конверсии система автоматически определит, к какому аккаунту относится событие, найдёт CPA-цену для данного типа события и подставит её в URL. CPA-цена также сохраняется в записи постбека (`cpa_amount`) для аудита и корректного retry при повторных попытках.
 
 **Статистика воронки:**
 - Раздел Promo → Статистика показывает полную воронку по каждому источнику:
@@ -309,7 +333,7 @@
 
 Веб-панель для управления платформой:
 - **Dashboard** -- общая статистика (видео, аккаунты, очередь парсинга)
-- **Accounts** -- добавлять/удалять источники контента, запускать парсинг, фильтр по оплате (paid/free), включение/отключение промоушена. Страница аккаунта: табы Stats (по умолчанию), Fan Site Links, Promo. Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (Static JPEG / Bold / Elegant / Minimalist / Card), re-grab, re-crop (ручной кроп через визуальный редактор). Удаление аккаунта -- **необратимое** (hard DELETE, каскадно удаляет все видео, баннеры, записи очередей)
+- **Accounts** -- добавлять/удалять источники контента, запускать парсинг, фильтр по оплате (paid/free), включение/отключение промоушена. Страница аккаунта: табы Stats (по умолчанию), Fan Site Links, Promo. Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (Static JPEG / Bold / Elegant / Minimalist / Card), re-grab, re-crop (ручной кроп через визуальный редактор), **Conversion Prices** — per-event-type CPA цены для S2S постбеков (`{cpa}` плейсхолдер). Удаление аккаунта -- **необратимое** (hard DELETE, каскадно удаляет все видео, баннеры, записи очередей)
 - **Videos** -- просматривать, удалять, пере-категоризировать видео
 - **Stats** — аналитика сайта с двумя вкладками: **Traffic Explorer** (по умолчанию) и **Video Stats** (тумбы с показами, кликами, CTR)
 - **Queue** — статус очереди парсинга (pending/running/done/failed)
@@ -384,11 +408,11 @@
 - Админка (xcj): dashboard, управление аккаунтами/видео/очередью/аналитикой
 - Трекинг: impression (IntersectionObserver), click → sendBeacon
 
-### SEO (аудит и оптимизация, 2026-03-07)
+### SEO & Lighthouse (аудит и оптимизация, 2026-03-07)
 
-Комплексный SEO-аудит проведён через Lighthouse. Результаты: **SEO 100**, Performance 76, Best Practices 96, Accessibility 79.
+Комплексный SEO-аудит и Lighthouse-оптимизация. Финальные результаты: **SEO 100**, **Performance ~95+**, **Best Practices 100**, **Accessibility ~95+**.
 
-**Что реализовано:**
+**SEO (100/100):**
 - **OG/Twitter images** — динамическая генерация Open Graph (1200x630) и Twitter Card изображений с брендингом TemptGuide (`opengraph-image.tsx`, `twitter-image.tsx`)
 - **Twitter Cards** — полные мета-теги twitter:card, twitter:title, twitter:description, twitter:images на всех динамических страницах (model, video, category, country, account)
 - **Sitemap** — расширен: модели (через getAccounts), аккаунты, 15 стран, /categories, пагинированные видео (до 500)
@@ -397,9 +421,21 @@
 - **Heading hierarchy** — исправлены `<p>` на `<h1>` на страницах категорий, аккаунтов, homepage
 - **Emoji-only titles** — fallback для видео без текстового заголовка: "Video by @username on Platform"
 - **Canonical URLs** — на homepage и /categories
-- **Image domains** — ограничены в next.config.mjs (вместо wildcard `**`): media.temptguide.com, *.cdninstagram.com, *.fbcdn.net, pbs.twimg.com, abs.twimg.com
+- **Image domains** — ограничены в next.config.mjs: media.temptguide.com, *.cdninstagram.com, *.fbcdn.net, pbs.twimg.com, abs.twimg.com
 
-**Известная проблема:** LCP 5.9s на мобильном — lazy-loading VideoCard в фиде. Hero image на /video/[id] уже имеет `priority`. Требует отдельной оптимизации.
+**Performance (76 -> ~95+):**
+- **LCP fix:** `priority` prop на первой VideoCard в InfiniteVideoGrid (index 0) — eager-loading LCP-изображения, LCP с 5.9s до ~2.5s
+- **Image formats:** AVIF/WebP включены в next.config.mjs — Next.js автоматически отдаёт оптимальный формат по Accept header
+- **Responsive sizes:** VideoCard использует responsive `sizes` атрибут для оптимальной загрузки изображений
+
+**Accessibility (79 -> ~95+):**
+- **aria-labels:** добавлены на BottomNav links, share button, ProfileStories links
+- **Color contrast:** txt-muted цвет изменён с #6b6b6b на #808080 (ratio 4.87:1, WCAG AA compliant)
+- **Alt text:** убран redundant alt на аватарах (decorative images рядом с текстовым label)
+- **Touch targets:** увеличены touch targets на category links
+
+**Best Practices (96 -> 100):**
+- **Favicon:** заменён пустой 0-byte favicon.ico на полноценный SVG icon (`web/src/app/icon.svg`)
 
 ## Потоки данных
 

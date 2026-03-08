@@ -872,3 +872,33 @@ export async function getTrafficDimensions(
   );
   return res.dimensions;
 }
+
+// ─── Account Conversion Prices ────────────────────────────────────────────────
+
+export interface AccountConversionPrice {
+  id: number;
+  account_id: number;
+  event_type: string;
+  price: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getAccountConversionPrices(
+  accountId: number,
+): Promise<AccountConversionPrice[]> {
+  const res = await adminFetch<{ prices: AccountConversionPrice[] }>(
+    `/accounts/${accountId}/conversion-prices`,
+  );
+  return res.prices;
+}
+
+export async function upsertAccountConversionPrice(
+  accountId: number,
+  data: { event_type: string; price: number },
+): Promise<AccountConversionPrice> {
+  return adminFetch<AccountConversionPrice>(
+    `/accounts/${accountId}/conversion-prices`,
+    { method: "PUT", body: JSON.stringify(data) },
+  );
+}

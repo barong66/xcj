@@ -17,14 +17,22 @@ import {
   batchRegenerateBanners,
   recropBanner,
   getAccountStats,
+  getAccountConversionPrices,
+  upsertAccountConversionPrice,
 } from "@/lib/admin-api";
 import type {
   AdminAccount,
   BannerSizeSummary,
   AdminBanner,
   AccountDayStat,
+  AccountConversionPrice,
 } from "@/lib/admin-api";
 import { ToastProvider, useToast } from "../../Toast";
+
+const CONVERSION_EVENTS = [
+  { key: "social_click", label: "Social Click (fansite)" },
+  { key: "content_click", label: "Content Click (IG/Twitter)" },
+] as const;
 
 const FAN_SITES = [
   { key: "onlyfans", label: "OnlyFans", placeholder: "username or full URL", color: "#00AFF0" },
@@ -57,6 +65,11 @@ function AccountProfileContent() {
   const [bannerStyle, setBannerStyle] = useState<string>("bold");
   const [batchActionLoading, setBatchActionLoading] = useState(false);
 
+  // Conversion price state
+  const [conversionPrices, setConversionPrices] = useState<AccountConversionPrice[]>([]);
+  const [convPriceInputs, setConvPriceInputs] = useState<Record<string, string>>({});
+  const [convPriceSaving, setConvPriceSaving] = useState<string | null>(null);
+
   // Crop modal state
   const [cropBanner, setCropBanner] = useState<AdminBanner | null>(null);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
@@ -88,6 +101,20 @@ function AccountProfileContent() {
   }, [loadAccount]);
 
   // Load banner summary when promo tab is active
+  const loadConversionPrices = useCallback(async () => {
+    try {
+      const prices = await getAccountConversionPrices(id);
+      setConversionPrices(prices);
+      const inputs: Record<string, string> = {};
+      for (const p of prices) {
+        inputs[p.event_type] = String(p.price);
+      }
+      setConvPriceInputs((prev) => ({ ...prev, ...inputs }));
+    } catch {
+      // silent
+    }
+  }, [id]);
+
   const loadBannerSummary = useCallback(async () => {
     try {
       const summary = await getAccountBannerSummary(id);
@@ -117,9 +144,10 @@ function AccountProfileContent() {
     if (activeTab === "promo") {
       loadBannerSummary();
       loadBanners(selectedSizeId);
+      loadConversionPrices();
       setSelectedBannerIds(new Set());
     }
-  }, [activeTab, loadBannerSummary, loadBanners, selectedSizeId]);
+  }, [activeTab, loadBannerSummary, loadBanners, loadConversionPrices, selectedSizeId]);
 
   // Load stats when stats tab is active or period changes.
   const loadStats = useCallback(async (d: number) => {
@@ -622,6 +650,65 @@ function AccountProfileContent() {
 
       {activeTab === "promo" && (
         <div className="space-y-4">
+          {/* Conversion Prices */}
+          <div>
+            <h2 className="text-sm font-semibold text-white mb-2">Conversion Prices</h2>
+            <div className="bg-[#141414] rounded-lg border border-[#1e1e1e] p-4 space-y-3">
+              {CONVERSION_EVENTS.map((evt) => {
+                const existing = conversionPrices.find((p) => p.event_type === evt.key);
+                return (
+                  <div key={evt.key} className="flex items-center gap-3">
+                    <div className="w-52 shrink-0">
+                      <span className="text-sm text-[#a0a0a0]">{evt.label}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-[#6b6b6b]">$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={convPriceInputs[evt.key] ?? ""}
+                        onChange={(e) =>
+                          setConvPriceInputs((prev) => ({ ...prev, [evt.key]: e.target.value }))
+                        }
+                        placeholder="0.00"
+                        className="w-28 px-3 py-1.5 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white placeholder-[#4a4a4a] focus:outline-none focus:border-accent transition-colors tabular-nums"
+                      />
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const price = parseFloat(convPriceInputs[evt.key] || "0");
+                        if (isNaN(price) || price < 0) return;
+                        setConvPriceSaving(evt.key);
+                        try {
+                          await upsertAccountConversionPrice(id, { event_type: evt.key, price });
+                          await loadConversionPrices();
+                          toast("Price saved", "success");
+                        } catch {
+                          toast("Failed to save price", "error");
+                        } finally {
+                          setConvPriceSaving(null);
+                        }
+                      }}
+                      disabled={convPriceSaving === evt.key}
+                      className="px-3 py-1.5 text-xs rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+                    >
+                      {convPriceSaving === evt.key ? "..." : "Save"}
+                    </button>
+                    {existing && (
+                      <span className="text-xs text-[#4a4a4a]">
+                        set {new Date(existing.updated_at).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+              <p className="text-xs text-[#4a4a4a] mt-2">
+                CPA price sent as {"{cpa}"} in postback URLs when this model converts.
+              </p>
+            </div>
+          </div>
+
           {/* Toolbar: generate + style selector */}
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-white">Banners</h2>
