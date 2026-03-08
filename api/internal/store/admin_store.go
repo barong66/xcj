@@ -1861,7 +1861,6 @@ type AccountConversionPrice struct {
 	AccountID int64     `json:"account_id"`
 	EventType string    `json:"event_type"`
 	Price     float64   `json:"price"`
-	EventID   int       `json:"event_id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -1869,7 +1868,7 @@ type AccountConversionPrice struct {
 // GetAccountConversionPrices returns all conversion prices for an account.
 func (s *AdminStore) GetAccountConversionPrices(ctx context.Context, accountID int64) ([]AccountConversionPrice, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, account_id, event_type, price, event_id, created_at, updated_at
+		SELECT id, account_id, event_type, price, created_at, updated_at
 		FROM account_conversion_prices
 		WHERE account_id = $1
 		ORDER BY event_type
@@ -1882,7 +1881,7 @@ func (s *AdminStore) GetAccountConversionPrices(ctx context.Context, accountID i
 	var prices []AccountConversionPrice
 	for rows.Next() {
 		var p AccountConversionPrice
-		if err := rows.Scan(&p.ID, &p.AccountID, &p.EventType, &p.Price, &p.EventID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.AccountID, &p.EventType, &p.Price, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("admin_store: scan conversion price: %w", err)
 		}
 		prices = append(prices, p)
@@ -1894,35 +1893,111 @@ func (s *AdminStore) GetAccountConversionPrices(ctx context.Context, accountID i
 }
 
 // UpsertAccountConversionPrice creates or updates a conversion price for an account+event_type.
-func (s *AdminStore) UpsertAccountConversionPrice(ctx context.Context, accountID int64, eventType string, price float64, eventID int) (*AccountConversionPrice, error) {
+func (s *AdminStore) UpsertAccountConversionPrice(ctx context.Context, accountID int64, eventType string, price float64) (*AccountConversionPrice, error) {
 	var p AccountConversionPrice
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO account_conversion_prices (account_id, event_type, price, event_id)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO account_conversion_prices (account_id, event_type, price)
+		VALUES ($1, $2, $3)
 		ON CONFLICT (account_id, event_type)
-		DO UPDATE SET price = $3, event_id = $4, updated_at = NOW()
-		RETURNING id, account_id, event_type, price, event_id, created_at, updated_at
-	`, accountID, eventType, price, eventID).Scan(&p.ID, &p.AccountID, &p.EventType, &p.Price, &p.EventID, &p.CreatedAt, &p.UpdatedAt)
+		DO UPDATE SET price = $3, updated_at = NOW()
+		RETURNING id, account_id, event_type, price, created_at, updated_at
+	`, accountID, eventType, price).Scan(&p.ID, &p.AccountID, &p.EventType, &p.Price, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("admin_store: upsert conversion price: %w", err)
 	}
 	return &p, nil
 }
 
-// GetConversionPriceAndEventID returns the CPA price and event_id for an account+event_type.
-// Returns (0, 1, nil) if not configured.
-func (s *AdminStore) GetConversionPriceAndEventID(ctx context.Context, accountID int64, eventType string) (float64, int, error) {
+// GetConversionPrice returns the CPA price for an account+event_type.
+// Returns (0, nil) if not configured.
+func (s *AdminStore) GetConversionPrice(ctx context.Context, accountID int64, eventType string) (float64, error) {
 	var price float64
-	var eventID int
 	err := s.pool.QueryRow(ctx, `
-		SELECT price, event_id FROM account_conversion_prices
+		SELECT price FROM account_conversion_prices
 		WHERE account_id = $1 AND event_type = $2
-	`, accountID, eventType).Scan(&price, &eventID)
+	`, accountID, eventType).Scan(&price)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return 0, 1, nil
+			return 0, nil
 		}
-		return 0, 1, fmt.Errorf("admin_store: get conversion price: %w", err)
+		return 0, fmt.Errorf("admin_store: get conversion price: %w", err)
 	}
-	return price, eventID, nil
+	return price, nil
+}
+
+// ─── Account Source Event IDs ─────────────────────────────────────────────────
+
+type AccountSourceEventID struct {
+	ID           int64     `json:"id"`
+	AccountID    int64     `json:"account_id"`
+	AdSourceID   int64     `json:"ad_source_id"`
+	AdSourceName string    `json:"ad_source_name,omitempty"`
+	EventType    string    `json:"event_type"`
+	EventID      int       `json:"event_id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// GetAccountSourceEventIDs returns all event_id mappings for an account (with source names).
+func (s *AdminStore) GetAccountSourceEventIDs(ctx context.Context, accountID int64) ([]AccountSourceEventID, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT asei.id, asei.account_id, asei.ad_source_id, ads.name,
+		       asei.event_type, asei.event_id, asei.created_at, asei.updated_at
+		FROM account_source_event_ids asei
+		JOIN ad_sources ads ON ads.id = asei.ad_source_id
+		WHERE asei.account_id = $1
+		ORDER BY ads.name, asei.event_type
+	`, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: get account source event ids: %w", err)
+	}
+	defer rows.Close()
+
+	var items []AccountSourceEventID
+	for rows.Next() {
+		var item AccountSourceEventID
+		if err := rows.Scan(&item.ID, &item.AccountID, &item.AdSourceID, &item.AdSourceName,
+			&item.EventType, &item.EventID, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("admin_store: scan source event id: %w", err)
+		}
+		items = append(items, item)
+	}
+	if items == nil {
+		items = []AccountSourceEventID{}
+	}
+	return items, rows.Err()
+}
+
+// UpsertAccountSourceEventID creates or updates an event_id for a specific account+source+event_type.
+func (s *AdminStore) UpsertAccountSourceEventID(ctx context.Context, accountID, adSourceID int64, eventType string, eventID int) (*AccountSourceEventID, error) {
+	var item AccountSourceEventID
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO account_source_event_ids (account_id, ad_source_id, event_type, event_id)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (account_id, ad_source_id, event_type)
+		DO UPDATE SET event_id = $4, updated_at = NOW()
+		RETURNING id, account_id, ad_source_id, event_type, event_id, created_at, updated_at
+	`, accountID, adSourceID, eventType, eventID).Scan(&item.ID, &item.AccountID, &item.AdSourceID,
+		&item.EventType, &item.EventID, &item.CreatedAt, &item.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("admin_store: upsert source event id: %w", err)
+	}
+	return &item, nil
+}
+
+// GetEventIDForSource returns the event_id for a specific account+source+event_type.
+// Returns 1 if not configured.
+func (s *AdminStore) GetEventIDForSource(ctx context.Context, accountID, adSourceID int64, eventType string) (int, error) {
+	var eventID int
+	err := s.pool.QueryRow(ctx, `
+		SELECT event_id FROM account_source_event_ids
+		WHERE account_id = $1 AND ad_source_id = $2 AND event_type = $3
+	`, accountID, adSourceID, eventType).Scan(&eventID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 1, nil
+		}
+		return 1, fmt.Errorf("admin_store: get event id for source: %w", err)
+	}
+	return eventID, nil
 }

@@ -19,6 +19,9 @@ import {
   getAccountStats,
   getAccountConversionPrices,
   upsertAccountConversionPrice,
+  getAdSources,
+  getAccountSourceEventIDs,
+  upsertAccountSourceEventID,
 } from "@/lib/admin-api";
 import type {
   AdminAccount,
@@ -26,6 +29,8 @@ import type {
   AdminBanner,
   AccountDayStat,
   AccountConversionPrice,
+  AdSource,
+  AccountSourceEventID,
 } from "@/lib/admin-api";
 import { ToastProvider, useToast } from "../../Toast";
 
@@ -68,8 +73,14 @@ function AccountProfileContent() {
   // Conversion price state
   const [conversionPrices, setConversionPrices] = useState<AccountConversionPrice[]>([]);
   const [convPriceInputs, setConvPriceInputs] = useState<Record<string, string>>({});
-  const [convEventIdInputs, setConvEventIdInputs] = useState<Record<string, string>>({});
   const [convPriceSaving, setConvPriceSaving] = useState<string | null>(null);
+
+  // Source event IDs state
+  const [adSources, setAdSources] = useState<AdSource[]>([]);
+  const [sourceEventIDs, setSourceEventIDs] = useState<AccountSourceEventID[]>([]);
+  // Key: "sourceId:eventType", value: event_id string
+  const [srcEventIdInputs, setSrcEventIdInputs] = useState<Record<string, string>>({});
+  const [srcEventIdSaving, setSrcEventIdSaving] = useState<string | null>(null);
 
   // Crop modal state
   const [cropBanner, setCropBanner] = useState<AdminBanner | null>(null);
@@ -107,13 +118,28 @@ function AccountProfileContent() {
       const prices = await getAccountConversionPrices(id);
       setConversionPrices(prices);
       const priceInputs: Record<string, string> = {};
-      const eventIdInputs: Record<string, string> = {};
       for (const p of prices) {
         priceInputs[p.event_type] = String(p.price);
-        eventIdInputs[p.event_type] = String(p.event_id);
       }
       setConvPriceInputs((prev) => ({ ...prev, ...priceInputs }));
-      setConvEventIdInputs((prev) => ({ ...prev, ...eventIdInputs }));
+    } catch {
+      // silent
+    }
+  }, [id]);
+
+  const loadSourceEventIDs = useCallback(async () => {
+    try {
+      const [sources, items] = await Promise.all([
+        getAdSources(),
+        getAccountSourceEventIDs(id),
+      ]);
+      setAdSources(sources.filter((s) => s.is_active));
+      setSourceEventIDs(items);
+      const inputs: Record<string, string> = {};
+      for (const item of items) {
+        inputs[`${item.ad_source_id}:${item.event_type}`] = String(item.event_id);
+      }
+      setSrcEventIdInputs((prev) => ({ ...prev, ...inputs }));
     } catch {
       // silent
     }
@@ -149,9 +175,10 @@ function AccountProfileContent() {
       loadBannerSummary();
       loadBanners(selectedSizeId);
       loadConversionPrices();
+      loadSourceEventIDs();
       setSelectedBannerIds(new Set());
     }
-  }, [activeTab, loadBannerSummary, loadBanners, loadConversionPrices, selectedSizeId]);
+  }, [activeTab, loadBannerSummary, loadBanners, loadConversionPrices, loadSourceEventIDs, selectedSizeId]);
 
   // Load stats when stats tab is active or period changes.
   const loadStats = useCallback(async (d: number) => {
@@ -654,7 +681,7 @@ function AccountProfileContent() {
 
       {activeTab === "promo" && (
         <div className="space-y-4">
-          {/* Conversion Prices */}
+          {/* Conversion Prices (CPA per model) */}
           <div>
             <h2 className="text-sm font-semibold text-white mb-2">Conversion Prices</h2>
             <div className="bg-[#141414] rounded-lg border border-[#1e1e1e] p-4 space-y-3">
@@ -664,19 +691,6 @@ function AccountProfileContent() {
                   <div key={evt.key} className="flex items-center gap-3">
                     <div className="w-52 shrink-0">
                       <span className="text-sm text-[#a0a0a0]">{evt.label}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-[#6b6b6b]">#</span>
-                      <input
-                        type="number"
-                        min="1"
-                        max="9"
-                        value={convEventIdInputs[evt.key] ?? "1"}
-                        onChange={(e) =>
-                          setConvEventIdInputs((prev) => ({ ...prev, [evt.key]: e.target.value }))
-                        }
-                        className="w-14 px-2 py-1.5 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white focus:outline-none focus:border-accent transition-colors tabular-nums text-center"
-                      />
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs text-[#6b6b6b]">$</span>
@@ -695,12 +709,10 @@ function AccountProfileContent() {
                     <button
                       onClick={async () => {
                         const price = parseFloat(convPriceInputs[evt.key] || "0");
-                        const eventId = parseInt(convEventIdInputs[evt.key] || "1", 10);
                         if (isNaN(price) || price < 0) return;
-                        if (isNaN(eventId) || eventId < 1 || eventId > 9) return;
                         setConvPriceSaving(evt.key);
                         try {
-                          await upsertAccountConversionPrice(id, { event_type: evt.key, price, event_id: eventId });
+                          await upsertAccountConversionPrice(id, { event_type: evt.key, price });
                           await loadConversionPrices();
                           toast("Saved", "success");
                         } catch {
@@ -723,10 +735,84 @@ function AccountProfileContent() {
                 );
               })}
               <p className="text-xs text-[#4a4a4a] mt-2">
-                # = event ID (1-9), sent as {"{event_id}"}. $ = CPA price, sent as {"{cpa}"}.
+                CPA price per conversion type, sent as {"{cpa}"} in postback URL.
               </p>
             </div>
           </div>
+
+          {/* Event IDs per Source */}
+          {adSources.length > 0 && (
+            <div>
+              <h2 className="text-sm font-semibold text-white mb-2">Event IDs per Source</h2>
+              <div className="bg-[#141414] rounded-lg border border-[#1e1e1e] p-4 space-y-4">
+                {adSources.map((src) => (
+                  <div key={src.id}>
+                    <div className="text-sm text-accent mb-2">{src.name}</div>
+                    <div className="space-y-2">
+                      {CONVERSION_EVENTS.map((evt) => {
+                        const inputKey = `${src.id}:${evt.key}`;
+                        const existing = sourceEventIDs.find(
+                          (s) => s.ad_source_id === src.id && s.event_type === evt.key,
+                        );
+                        return (
+                          <div key={inputKey} className="flex items-center gap-3">
+                            <div className="w-48 shrink-0">
+                              <span className="text-sm text-[#a0a0a0]">{evt.label}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs text-[#6b6b6b]">#</span>
+                              <input
+                                type="number"
+                                min="1"
+                                max="9"
+                                value={srcEventIdInputs[inputKey] ?? "1"}
+                                onChange={(e) =>
+                                  setSrcEventIdInputs((prev) => ({ ...prev, [inputKey]: e.target.value }))
+                                }
+                                className="w-14 px-2 py-1.5 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white focus:outline-none focus:border-accent transition-colors tabular-nums text-center"
+                              />
+                            </div>
+                            <button
+                              onClick={async () => {
+                                const eventId = parseInt(srcEventIdInputs[inputKey] || "1", 10);
+                                if (isNaN(eventId) || eventId < 1 || eventId > 9) return;
+                                setSrcEventIdSaving(inputKey);
+                                try {
+                                  await upsertAccountSourceEventID(id, {
+                                    ad_source_id: src.id,
+                                    event_type: evt.key,
+                                    event_id: eventId,
+                                  });
+                                  await loadSourceEventIDs();
+                                  toast("Saved", "success");
+                                } catch {
+                                  toast("Failed to save", "error");
+                                } finally {
+                                  setSrcEventIdSaving(null);
+                                }
+                              }}
+                              disabled={srcEventIdSaving === inputKey}
+                              className="px-3 py-1.5 text-xs rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+                            >
+                              {srcEventIdSaving === inputKey ? "..." : "Save"}
+                            </button>
+                            {existing && (
+                              <span className="text-xs text-[#4a4a4a]">
+                                set {new Date(existing.updated_at).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                <p className="text-xs text-[#4a4a4a] mt-2">
+                  Event ID (1-9) per source, sent as {"{event_id}"} in postback URL.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Toolbar: generate + style selector */}
           <div className="flex items-center justify-between gap-3">

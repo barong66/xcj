@@ -1233,7 +1233,6 @@ func (h *AdminHandler) UpsertAccountConversionPrice(w http.ResponseWriter, r *ht
 	var input struct {
 		EventType string  `json:"event_type"`
 		Price     float64 `json:"price"`
-		EventID   int     `json:"event_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1247,15 +1246,70 @@ func (h *AdminHandler) UpsertAccountConversionPrice(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "price must be non-negative")
 		return
 	}
-	if input.EventID < 1 || input.EventID > 9 {
-		input.EventID = 1
-	}
 
-	price, err := h.admin.UpsertAccountConversionPrice(r.Context(), id, input.EventType, input.Price, input.EventID)
+	price, err := h.admin.UpsertAccountConversionPrice(r.Context(), id, input.EventType, input.Price)
 	if err != nil {
 		slog.Error("admin: upsert conversion price", "error", err, "account_id", id)
 		writeError(w, http.StatusInternalServerError, "failed to save conversion price")
 		return
 	}
 	writeJSON(w, http.StatusOK, price)
+}
+
+// ─── Account Source Event IDs ─────────────────────────────────────────────────
+
+// GetAccountSourceEventIDs handles GET /api/v1/admin/accounts/{id}/source-event-ids
+func (h *AdminHandler) GetAccountSourceEventIDs(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	items, err := h.admin.GetAccountSourceEventIDs(r.Context(), id)
+	if err != nil {
+		slog.Error("admin: get source event ids", "error", err, "account_id", id)
+		writeError(w, http.StatusInternalServerError, "failed to get source event ids")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+// UpsertAccountSourceEventID handles PUT /api/v1/admin/accounts/{id}/source-event-ids
+func (h *AdminHandler) UpsertAccountSourceEventID(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	var input struct {
+		AdSourceID int64  `json:"ad_source_id"`
+		EventType  string `json:"event_type"`
+		EventID    int    `json:"event_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if input.AdSourceID <= 0 {
+		writeError(w, http.StatusBadRequest, "ad_source_id is required")
+		return
+	}
+	if !allowedConversionEvents[input.EventType] {
+		writeError(w, http.StatusBadRequest, "invalid event type")
+		return
+	}
+	if input.EventID < 1 || input.EventID > 9 {
+		writeError(w, http.StatusBadRequest, "event_id must be 1-9")
+		return
+	}
+
+	item, err := h.admin.UpsertAccountSourceEventID(r.Context(), id, input.AdSourceID, input.EventType, input.EventID)
+	if err != nil {
+		slog.Error("admin: upsert source event id", "error", err, "account_id", id)
+		writeError(w, http.StatusInternalServerError, "failed to save source event id")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }

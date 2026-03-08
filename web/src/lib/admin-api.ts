@@ -880,7 +880,6 @@ export interface AccountConversionPrice {
   account_id: number;
   event_type: string;
   price: number;
-  event_id: number;
   created_at: string;
   updated_at: string;
 }
@@ -896,10 +895,42 @@ export async function getAccountConversionPrices(
 
 export async function upsertAccountConversionPrice(
   accountId: number,
-  data: { event_type: string; price: number; event_id: number },
+  data: { event_type: string; price: number },
 ): Promise<AccountConversionPrice> {
   return adminFetch<AccountConversionPrice>(
     `/accounts/${accountId}/conversion-prices`,
+    { method: "PUT", body: JSON.stringify(data) },
+  );
+}
+
+// ─── Account Source Event IDs ─────────────────────────────────────────────────
+
+export interface AccountSourceEventID {
+  id: number;
+  account_id: number;
+  ad_source_id: number;
+  ad_source_name?: string;
+  event_type: string;
+  event_id: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getAccountSourceEventIDs(
+  accountId: number,
+): Promise<AccountSourceEventID[]> {
+  const res = await adminFetch<{ items: AccountSourceEventID[] }>(
+    `/accounts/${accountId}/source-event-ids`,
+  );
+  return res.items;
+}
+
+export async function upsertAccountSourceEventID(
+  accountId: number,
+  data: { ad_source_id: number; event_type: string; event_id: number },
+): Promise<AccountSourceEventID> {
+  return adminFetch<AccountSourceEventID>(
+    `/accounts/${accountId}/source-event-ids`,
     { method: "PUT", body: JSON.stringify(data) },
   );
 }

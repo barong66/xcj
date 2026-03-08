@@ -224,8 +224,9 @@ func (h *EventHandler) firePostbackIfConfigured(event model.Event) {
 		return
 	}
 
-	// Look up CPA price and event_id for this account + event type.
-	cpaPrice, eventID, _ := h.admin.GetConversionPriceAndEventID(ctx, event.AccountID, event.Type)
+	// Look up CPA price (per-model) and event_id (per-model-per-source).
+	cpaPrice, _ := h.admin.GetConversionPrice(ctx, event.AccountID, event.Type)
+	eventID, _ := h.admin.GetEventIDForSource(ctx, event.AccountID, adSource.ID, event.Type)
 	cpaStr := "0"
 	if cpaPrice > 0 {
 		cpaStr = strconv.FormatFloat(cpaPrice, 'f', -1, 64)
