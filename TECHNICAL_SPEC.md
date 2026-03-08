@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-08 (Per-account conversion prices / CPA for postbacks)
+> Last updated: 2026-03-08 (HTML-only banner overlay, removed Pillow overlay)
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -217,7 +217,7 @@ xcj/
 
 **InsertBanner upsert поведение:** При ON CONFLICT обновляет только image_url. НЕ сбрасывает is_active — если баннер был деактивирован вручную через админку, повторная генерация не реактивирует его.
 
-**Деактивация:** `DELETE /admin/banners/{id}` ставит `is_active=false`. Деактивированные баннеры не участвуют в ротации (/b/serve) и не возвращаются по idx_banners_serve.
+**Деактивация:** `DELETE /admin/banners/{id}` ставит `is_active=false`. Деактивированные баннеры не участвуют в ротации (/b/serve), не возвращаются по idx_banners_serve, и не отображаются в списке баннеров аккаунта (ListAccountBanners фильтрует `b.is_active = true`).
 
 #### `video_frames` — Фреймы из видео (для баннеров)
 | Поле | Тип | Описание |
@@ -546,6 +546,8 @@ if(clicks > 0, round(conversions * 100.0 / clicks, 2), 0) AS conversion_rate
 | GET | /admin/referrer-stats | Топ источников трафика (referrer) за период |
 | GET | /admin/accounts/{id}/conversion-prices | Список CPA цен для аккаунта |
 | PUT | /admin/accounts/{id}/conversion-prices | Upsert CPA цены (body: {event_type, price}) |
+| GET | /admin/accounts/{id}/source-event-ids | Список event_id по источникам для аккаунта |
+| PUT | /admin/accounts/{id}/source-event-ids | Upsert event_id (body: {ad_source_id, event_type, event_id}) |
 | GET | /admin/traffic-stats | Traffic Explorer: гибкая аналитика с динамическим GROUP BY (group_by, group_by2, days, sort_by, sort_dir, фильтры) |
 | GET | /admin/traffic-stats/dimensions | Distinct значения для фильтров Traffic Explorer (source, country, device_type, etc.) |
 
@@ -556,7 +558,7 @@ if(clicks > 0, round(conversions * 100.0 / clicks, 2), 0) AS conversion_rate
 | GET | /b/serve | Динамический сервинг: интерактивный HTML-баннер с hover-эффектами из пула (iframe embed) |
 | GET | /b/loader.js | Embed-скрипт (~1.5KB) для контекстного таргетинга баннеров |
 | GET | /b/{id} | 302 redirect на R2 URL + banner_impression в ClickHouse |
-| GET | /b/{id}/preview | Admin preview: рендерит баннер в выбранном HTML-стиле (?style=bold/elegant/minimalist/card) |
+| GET | /b/{id}/preview | Admin preview: рендерит баннер в выбранном HTML-стиле (?style=bold/elegant/minimalist/card). Использует ThumbnailURL с fallback на ImageURL |
 | GET | /b/{id}/click | 302 redirect на /model/{slug} + banner_click в ClickHouse |
 | POST | /b/perf | Performance beacon — принимает JSON с метриками производительности баннера (sendBeacon) |
 
@@ -568,6 +570,17 @@ if(clicks > 0, round(conversions * 100.0 / clicks, 2), 0) AS conversion_rate
 | `kw` | string | Категория — treated as category slug, JOIN по video_categories (опционально) |
 | `aid` | int | Account ID (опционально) |
 | `style` | string | Стиль HTML-шаблона баннера: `bold`, `elegant`, `minimalist`, `card` (по умолчанию: случайный) |
+| `ref_domain` | string | Домен реферера (макрос рекламной сети) |
+| `original_ref` | string | Оригинальный реферер (макрос рекламной сети) |
+| `spot_id` | string | ID рекламного места (макрос рекламной сети) |
+| `node_id` | string | ID ноды (макрос рекламной сети) |
+| `auction_price` | string | Цена аукциона (макрос рекламной сети) |
+| `cpv_price` | string | CPV цена (макрос рекламной сети) |
+| `cpc` | string | CPC цена (макрос рекламной сети) |
+| `campaign_id` | string | ID кампании (макрос рекламной сети) |
+| `creative_id` | string | ID креатива (макрос рекламной сети) |
+
+Все ad network параметры автоматически прокидываются через весь pipeline: `/b/serve` -> click URL -> landing page URL -> sessionStorage -> events extra JSON.
 
 Ответ — интерактивная HTML-страница с CSS hover-эффектами (scale, glow, opacity transitions).
 Баннер использует raw thumbnail вместо статического JPEG, отображает @username и CTA-кнопку.
@@ -591,6 +604,15 @@ Headers: `Cache-Control: no-cache, no-store`, без `X-Frame-Options` (разр
 | `data-style` | string | Стиль баннера: `bold`, `elegant`, `minimalist`, `card`. Default: случайный |
 | `data-src` | string | Источник трафика (напр. `adnet1`). Прокидывается как `src` параметр |
 | `data-click-id` | string | Click ID рекламной сети. Прокидывается как `click_id` параметр |
+| `data-ref-domain` | string | Домен реферера (макрос сети). Прокидывается как `ref_domain` |
+| `data-original-ref` | string | Оригинальный реферер (макрос сети). Прокидывается как `original_ref` |
+| `data-spot-id` | string | ID рекламного места (макрос сети). Прокидывается как `spot_id` |
+| `data-node-id` | string | ID ноды (макрос сети). Прокидывается как `node_id` |
+| `data-auction-price` | string | Цена аукциона (макрос сети). Прокидывается как `auction_price` |
+| `data-cpv-price` | string | CPV цена (макрос сети). Прокидывается как `cpv_price` |
+| `data-cpc` | string | CPC цена (макрос сети). Прокидывается как `cpc` |
+| `data-campaign-id` | string | ID кампании (макрос сети). Прокидывается как `campaign_id` |
+| `data-creative-id` | string | ID креатива (макрос сети). Прокидывается как `creative_id` |
 
 Пример использования издателем:
 ```html
@@ -840,12 +862,9 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
    - Color saturation: 1.4 (+40%)
    - Sharpness: 1.5 (+50%)
    - Brightness: 1.05 (+5%)
-4. **_pillow_overlay(img)** — Bold-style overlay:
-   - Dark tint (30% чёрный) + bottom gradient (55% height, 85%→transparent)
-   - Gradient CTA pill (pink→orange) "WATCH ME NOW"
-   - Tagline "EXCLUSIVE CONTENT"
-   - 3px pink border
-5. **generate_banner(src, dest, w, h, quality, username)** — полный пайплайн: OpenCV smart crop → Pillow resize (Lanczos) → Pillow enhance → overlay → JPEG
+4. **generate_banner(src, dest, w, h, quality, username)** — полный пайплайн: OpenCV smart crop → Pillow resize (Lanczos) → Pillow enhance → JPEG (clean photo, no overlay)
+
+**Note:** Overlay (gradient, text, CTA) is rendered exclusively in HTML templates (banner_templates.go), not baked into images. This avoids double-enhancement and allows interactive hover effects.
 
 ---
 
@@ -873,7 +892,7 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 | /admin/stats | Аналитика: табы Traffic Explorer (default) + Video Stats. Traffic Explorer — гибкая аналитика с group by, фильтрами, 8 метриками |
 | /admin/categories | Категории |
 | /admin/promo | Все баннеры + управление размерами |
-| /admin/accounts/[id] | Профиль аккаунта (табы: Stats (default), Fan Site Links, Promo). Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (iframe), re-grab. Promo tab также содержит секцию "Conversion Prices" — per-event-type CPA цены для постбеков |
+| /admin/accounts/[id] | Профиль аккаунта (табы: Stats (default), Fan Site Links, Promo). Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (iframe), re-grab. Promo tab также содержит: секцию "Conversion Prices" — per-event-type CPA цены для постбеков; секцию "Event IDs per Source" — per-source event_id (1-9) для каждого типа события |
 
 **Авторизация:** cookie `admin_token` → Bearer token к Go API. Cookie `admin_authed=1` для фронтенд-проверки.
 
@@ -1063,12 +1082,12 @@ Banner Worker забирает задачу из banner_queue
    1. Получает фреймы из video_frames (0..N extracted frames)
    2. Генерирует баннер из thumbnail (video_frame_id=NULL):
       → Скачать thumbnail_lg_url (810x1440 портрет)
-      → OpenCV face-aware smart crop → Lanczos resize → ImageEnhance → overlay → JPEG q=90
+      → OpenCV face-aware smart crop → Lanczos resize → ImageEnhance → JPEG q=90 (clean photo, no overlay)
       → R2: banners/{account_id}/{video_id}_{w}x{h}.jpg
       → INSERT banners (video_frame_id=NULL)
    3. Генерирует баннер из каждого фрейма (video_frame_id=frame.id):
       → Скачать frame image_url
-      → OpenCV face-aware smart crop → Lanczos resize → ImageEnhance → overlay → JPEG q=90
+      → OpenCV face-aware smart crop → Lanczos resize → ImageEnhance → JPEG q=90 (clean photo, no overlay)
       → R2: banners/{account_id}/{video_id}_f{frame_id}_{w}x{h}.jpg
       → INSERT banners (video_frame_id=frame.id)
 → Результат: до 5 вариантов баннера на видео (1 thumbnail + 4 frames) × N sizes
@@ -1140,8 +1159,8 @@ HTML-шаблоны (banner_templates.go):
   - minimalist: clean overlay + subtle "TemptGuide" watermark + arrow CTA
   - card: dark bottom bar (25%) + photo area (75%) + play button + red accent line
 
-Все шаблоны: CSS filters (contrast 1.15, saturate 1.2, brightness 1.05), на hover ярче.
-Минимальные тёмные градиенты (только снизу для читаемости текста).
+Все шаблоны: no CSS image filters (enhancement applied by Pillow during generation), hover эффекты (scale, glow, opacity).
+Минимальные тёмные градиенты (только снизу для читаемости текста). Overlay (text, CTA, borders) — исключительно в HTML/CSS.
 Каждый шаблон включает: mouseenter hover tracking (JS → 1x1 GIF pixel)
 
 Hot path (cache hit): < 2ms
@@ -1307,14 +1326,33 @@ cd web && npm run dev
 
 ### 11.3 Source Attribution Flow
 
-Параметры `src` (имя рекламной сети) и `click_id` (уникальный ID клика от рекламной сети) прокидываются через всю цепочку:
+Параметры `src` (имя рекламной сети), `click_id` (уникальный ID клика от рекламной сети) и **ad network macro params** прокидываются через всю цепочку:
 
-1. **Iframe embed** — `/b/serve?src=adnet1&click_id=abc123` → Go API записывает source в banner_impression
-2. **JS mouseenter** — hover-пиксель включает src/click_id: `/b/{id}/hover?src=adnet1&click_id=abc123`
-3. **Click redirect** — `/b/{id}/click?src=adnet1&click_id=abc123` → redirect с параметрами на `/model/{slug}?src=adnet1&click_id=abc123`
-4. **Landing page** — `AdLandingTracker` компонент сохраняет src + click_id в `sessionStorage`
-5. **Subsequent events** — `analytics.ts` обогащает все события click_id из sessionStorage
+1. **Iframe embed** — `/b/serve?src=adnet1&click_id=abc123&ref_domain=...&spot_id=...` → Go API записывает source + все ad params в banner_impression extra JSON
+2. **JS mouseenter** — hover-пиксель включает все params: `/b/{id}/hover?src=adnet1&click_id=abc123&ref_domain=...`
+3. **Click redirect** — `/b/{id}/click?src=...&click_id=...&ref_domain=...` → redirect с всеми параметрами на `/model/{slug}?src=...&click_id=...&ref_domain=...`
+4. **Landing page** — `AdLandingTracker` компонент сохраняет src + click_id + все ad network params (как `ad_params` JSON) в `sessionStorage`
+5. **Subsequent events** — `analytics.ts` обогащает все события: click_id + ad_params из sessionStorage → `extra` JSON поле
 6. **Conversion** — при social_click или content_click с source + click_id → S2S постбек
+
+**Поддерживаемые ad network macro params:**
+
+| Параметр | data-* атрибут | Описание |
+|----------|---------------|----------|
+| `ref_domain` | `data-ref-domain` | Домен реферера |
+| `original_ref` | `data-original-ref` | Оригинальный реферер |
+| `spot_id` | `data-spot-id` | ID рекламного места |
+| `node_id` | `data-node-id` | ID ноды |
+| `auction_price` | `data-auction-price` | Цена аукциона |
+| `cpv_price` | `data-cpv-price` | CPV цена |
+| `cpc` | `data-cpc` | CPC цена |
+| `campaign_id` | `data-campaign-id` | ID кампании |
+| `creative_id` | `data-creative-id` | ID креатива |
+
+Параметры хранятся в `extra` JSON поле ClickHouse events. Пример extra:
+```json
+{"banner_id":42,"click_id":"abc123","ref_domain":"example.com","spot_id":"12345","campaign_id":"67890"}
+```
 
 ### 11.4 S2S Postback Mechanism
 
@@ -1323,10 +1361,11 @@ cd web && npm run dev
 1. Go API получает событие с click_id
 2. Lookup `ad_sources` по name → получает postback_url шаблон
 3. Lookup CPA из `account_conversion_prices` по account_id + event_type
-4. Подставляет плейсхолдеры в URL шаблон: `https://adnetwork.com/postback?click_id={click_id}&event={event}&payout={cpa}`
-5. HTTP GET к рекламной сети
-6. Логирование результата в `conversion_postbacks` (включая cpa_amount для аудита)
-7. Cron job (каждые 5 мин) — retry неудавшихся постбеков (использует сохранённый cpa_amount)
+4. Lookup event_id из `account_source_event_ids` по account_id + ad_source_id + event_type (default: 1)
+5. Подставляет плейсхолдеры в URL шаблон: `https://adnetwork.com/postback?click_id={click_id}&event={event}&payout={cpa}&event_id={event_id}`
+6. HTTP GET к рекламной сети
+7. Логирование результата в `conversion_postbacks` (включая cpa_amount и event_id для аудита)
+8. Cron job (каждые 5 мин) — retry неудавшихся постбеков (использует сохранённый cpa_amount и event_id)
 
 ### 11.5 ClickHouse Schema (расширения)
 
@@ -1373,7 +1412,7 @@ GROUP BY event_date, source, event_type;
 | id | SERIAL PK | |
 | name | VARCHAR(64) UNIQUE | Имя сети (slug, напр. "exoclick") |
 | display_name | VARCHAR(128) | Отображаемое имя |
-| postback_url | TEXT | URL шаблон с плейсхолдерами: `{click_id}`, `{event}`, `{cpa}` |
+| postback_url | TEXT | URL шаблон с плейсхолдерами: `{click_id}`, `{event}`, `{cpa}`, `{event_id}` |
 | is_active | BOOLEAN DEFAULT true | Активна ли |
 | created_at | TIMESTAMPTZ | |
 | updated_at | TIMESTAMPTZ | |
@@ -1410,6 +1449,22 @@ GROUP BY event_date, source, event_type;
 
 **Связанная колонка:** `conversion_postbacks.cpa_amount` (NUMERIC(10,4) NULL) — хранит CPA на момент создания постбека для аудита и retry-консистентности.
 
+#### `account_source_event_ids` — Event ID по источнику (per-model-per-source)
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | SERIAL PK | |
+| account_id | INT FK(accounts.id) ON DELETE CASCADE | Аккаунт модели |
+| ad_source_id | INT FK(ad_sources.id) ON DELETE CASCADE | Рекламная сеть |
+| event_type | VARCHAR(64) | Тип события: social_click / content_click |
+| event_id | INT DEFAULT 1 | ID события для постбека (1-9, зависит от рекламной сети) |
+| created_at | TIMESTAMPTZ | |
+| updated_at | TIMESTAMPTZ | |
+
+**UNIQUE:** (account_id, ad_source_id, event_type)
+**INDEX:** idx_asei_account_source (account_id, ad_source_id)
+
+**Зачем:** Разные рекламные сети нумеруют конверсии по-разному (1-9). CPA цена — одна на модель (account_conversion_prices), а event_id — для каждой сети свой. Используется в плейсхолдере `{event_id}` постбек-URL.
+
 ### 11.7 Go API — Новые/обновлённые эндпоинты
 
 #### Публичные баннерные роуты
@@ -1417,7 +1472,7 @@ GROUP BY event_date, source, event_type;
 |-------|------|----------|
 | GET | /b/serve | Обновлён: принимает src, click_id; добавлен JS mouseenter трекер в iframe HTML |
 | GET | /b/{id}/hover | Новый: возвращает 1x1 прозрачный GIF, пишет banner_hover в ClickHouse |
-| GET | /b/{id}/preview | Admin preview: рендерит баннер в HTML-стиле (?style=bold/elegant/minimalist/card) для предпросмотра в админке |
+| GET | /b/{id}/preview | Admin preview: рендерит баннер в HTML-стиле (?style=bold/elegant/minimalist/card). Использует ThumbnailURL (thumbnail_lg_url) с fallback на ImageURL (banner image) |
 | GET | /b/{id}/click | Обновлён: прокидывает src, click_id в redirect URL |
 
 #### Админские эндпоинты
@@ -1428,16 +1483,18 @@ GROUP BY event_date, source, event_type;
 | PUT | /admin/ad-sources/{id} | Обновить рекламную сеть |
 | GET | /admin/accounts/{id}/conversion-prices | Список CPA цен для аккаунта по типам событий |
 | PUT | /admin/accounts/{id}/conversion-prices | Upsert CPA цены для аккаунта (body: {event_type, price}) |
+| GET | /admin/accounts/{id}/source-event-ids | Список event_id по источникам (с названиями ad_source) |
+| PUT | /admin/accounts/{id}/source-event-ids | Upsert event_id для источника (body: {ad_source_id, event_type, event_id}) |
 | GET | /admin/banners/funnel | Статистика воронки по source (из ClickHouse) |
 | POST | /admin/banners/batch-deactivate | Массовая деактивация баннеров по списку ID |
 | POST | /admin/banners/batch-regenerate | Массовая перегенерация баннеров по списку ID |
 
 ### 11.8 Frontend — Новые компоненты
 
-- **AdLandingTracker** (`web/src/components/AdLandingTracker.tsx`) — сохраняет src + click_id из URL в sessionStorage
-- **analytics.ts** (`web/src/lib/analytics.ts`) — обогащает события click_id из sessionStorage; новый event type `content_click` (первый клик за сессию)
-- **Promo: Banners tab** (`web/src/app/admin/promo/page.tsx`) — embed-коды через loader.js `<script>` тег (вместо iframe) с выбором стиля (Bold/Elegant/Minimalist/Card/Random) и источника трафика; preview по-прежнему использует iframe для live-рендеринга
-- **Promo: Settings tab** (`web/src/app/admin/promo/page.tsx`) — форма для conversion tracker
+- **AdLandingTracker** (`web/src/components/AdLandingTracker.tsx`) — сохраняет src + click_id + ad network params (ref_domain, original_ref, spot_id, node_id, auction_price, cpv_price, cpc, campaign_id, creative_id) из URL в sessionStorage (ad_params как JSON)
+- **analytics.ts** (`web/src/lib/analytics.ts`) — обогащает события click_id + ad_params из sessionStorage в extra JSON; новый event type `content_click` (первый клик за сессию)
+- **Promo: Banners tab** (`web/src/app/admin/promo/page.tsx`) — embed-коды через loader.js `<script>` тег (вместо iframe) с выбором стиля (Bold/Elegant/Minimalist/Card/Random) и источника трафика; при выборе источника автоматически добавляются ad network macros (data-ref-domain, data-spot-id и др.) с плейсхолдерами сети; preview по-прежнему использует iframe для live-рендеринга
+- **Promo: Settings tab** (`web/src/app/admin/promo/page.tsx`) — форма для conversion tracker (mentions `{event_id}` placeholder)
 - **Promo: Statistics tab** (`web/src/app/admin/promo/page.tsx`) — воронка по источникам, таблица с CTR/конверсией
 - **Ad Sources management** (`web/src/app/admin/ad-sources/page.tsx`) — CRUD для рекламных сетей
 

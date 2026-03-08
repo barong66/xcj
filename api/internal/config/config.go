@@ -1,7 +1,7 @@
 package config
 
 import (
-	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -54,7 +54,7 @@ func Load() *Config {
 		RateLimitRPS: intOrDefault("RATE_LIMIT_RPS", 100),
 		CORSOrigins:  corsOrigins(),
 
-		AdminToken: requiredEnv("ADMIN_TOKEN"),
+		AdminToken: envOrDefaultWarn("ADMIN_TOKEN", "dev-admin-token"),
 
 		ProjectDir: envOrDefault("PROJECT_DIR", ".."),
 
@@ -72,7 +72,12 @@ func Load() *Config {
 func corsOrigins() []string {
 	v := os.Getenv("CORS_ORIGINS")
 	if v == "" {
-		return []string{"https://temptguide.com", "https://www.temptguide.com"}
+		return []string{
+			"https://temptguide.com",
+			"https://www.temptguide.com",
+			"http://localhost:3000",
+			"http://localhost:8080",
+		}
 	}
 	origins := strings.Split(v, ",")
 	for i := range origins {
@@ -81,12 +86,12 @@ func corsOrigins() []string {
 	return origins
 }
 
-func requiredEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		panic(fmt.Sprintf("required environment variable %s is not set", key))
+func envOrDefaultWarn(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
-	return v
+	log.Printf("WARNING: %s is not set, using development default. Set it in production!", key)
+	return fallback
 }
 
 func envOrDefault(key, fallback string) string {

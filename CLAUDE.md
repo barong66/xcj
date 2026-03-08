@@ -24,7 +24,7 @@ Python parser worker  →  PostgreSQL + Cloudflare R2
 | `api/` | Go API server | Chi router, pgx, see `api/CLAUDE.md` |
 | `web/` | Next.js frontend | App Router SSR, Tailwind, see `web/CLAUDE.md` |
 | `parser/` | Python worker | Scrapers + AI + banners, see `parser/CLAUDE.md` |
-| `scripts/migrations/` | SQL migrations | PostgreSQL (001-013) + ClickHouse |
+| `scripts/migrations/` | SQL migrations | PostgreSQL (001-015) + ClickHouse |
 | `deploy/` | Docker, nginx, systemd | Production infra |
 | `docs/tasks/` | Task documentation | Completed feature specs |
 
@@ -56,7 +56,7 @@ cat scripts/migrations/00X_*.sql | docker exec -i traforama-postgres psql -U xcj
 cat scripts/migrations/00X_*.sql | docker exec -i traforama-clickhouse clickhouse-client --multiquery
 ```
 
-Applied: 001-011. **NOT applied:** 012 (clickhouse_banner_metrics), 013 (account_conversion_prices).
+Applied: 001-011, 013-015. **NOT applied:** 012 (clickhouse_banner_metrics).
 
 ## ClickUp
 
