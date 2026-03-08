@@ -938,7 +938,7 @@ function AccountProfileContent() {
                       />
                     ) : (
                       <iframe
-                        src={`/b/${b.id}/preview?style=${bannerStyle}`}
+                        src={`/b/${b.id}/preview?style=${bannerStyle}&_t=${Date.now()}`}
                         width={b.width}
                         height={b.height}
                         style={{ width: b.width, height: b.height, border: "none" }}

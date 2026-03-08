@@ -530,6 +530,12 @@ func (h *BannerHandler) PreviewBanner(w http.ResponseWriter, r *http.Request) {
 	if thumbURL == "" {
 		thumbURL = banner.ImageURL
 	}
+	// Cache-bust for admin preview — bypass CDN cache
+	sep := "?"
+	if strings.Contains(thumbURL, "?") {
+		sep = "&"
+	}
+	thumbURL += sep + "_t=" + strconv.FormatInt(time.Now().Unix(), 10)
 
 	tmpl := pickBannerStyle(style)
 	data := bannerTemplateData{
