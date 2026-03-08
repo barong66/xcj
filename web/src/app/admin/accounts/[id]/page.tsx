@@ -929,7 +929,7 @@ function AccountProfileContent() {
                     />
                     {bannerStyle === "static" ? (
                       <img
-                        src={b.image_url}
+                        src={`${b.image_url}&_t=${Date.now()}`}
                         alt={b.video_title}
                         width={b.width}
                         height={b.height}
@@ -1028,7 +1028,7 @@ function AccountProfileContent() {
             </div>
             <div className="relative flex-1 min-h-[400px]">
               <Cropper
-                image={cropBanner.source_image_url}
+                image={`${cropBanner.source_image_url}${cropBanner.source_image_url?.includes('?') ? '&' : '?'}_t=${Date.now()}`}
                 crop={crop}
                 zoom={zoom}
                 aspect={cropBanner.width / cropBanner.height}
