@@ -1,6 +1,6 @@
 """Image utilities for banner generation and frame extraction.
 
-Uses OpenCV face detection for smart cropping that preserves faces,
+Uses MediaPipe face detection for smart cropping that preserves faces,
 with center-crop fallback. Banner overlay rendered via Pillow (Bold style).
 """
 from __future__ import annotations
@@ -9,28 +9,29 @@ import logging
 import os
 from typing import List, Tuple
 
-import cv2
 import ffmpeg
 import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 logger = logging.getLogger(__name__)
 
-# Lazy-loaded OpenCV cascades (frontal face → profile face → upper body)
-_cascades: list[cv2.CascadeClassifier] | None = None
+# Lazy-loaded MediaPipe face detector
+_face_detector = None
+
+_MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "blaze_face_short_range.tflite")
 
 
-def _get_cascades() -> list[cv2.CascadeClassifier]:
-    """Lazily load Haar cascades in priority order."""
-    global _cascades
-    if _cascades is None:
-        base = cv2.data.haarcascades
-        _cascades = [
-            cv2.CascadeClassifier(base + "haarcascade_frontalface_default.xml"),
-            cv2.CascadeClassifier(base + "haarcascade_profileface.xml"),
-            cv2.CascadeClassifier(base + "haarcascade_upperbody.xml"),
-        ]
-    return _cascades
+def _get_face_detector():
+    """Lazily initialise MediaPipe FaceDetector."""
+    global _face_detector
+    if _face_detector is None:
+        import mediapipe as mp
+        opts = mp.tasks.vision.FaceDetectorOptions(
+            base_options=mp.tasks.BaseOptions(model_asset_path=_MODEL_PATH),
+            min_detection_confidence=0.5,
+        )
+        _face_detector = mp.tasks.vision.FaceDetector.create_from_options(opts)
+    return _face_detector
 
 
 def _center_crop(img: Image.Image, width: int, height: int) -> Image.Image:
@@ -57,7 +58,7 @@ def _center_crop(img: Image.Image, width: int, height: int) -> Image.Image:
 def _face_crop(img: Image.Image, width: int, height: int) -> Image.Image:
     """Crop image to target aspect ratio, keeping detected faces in frame.
 
-    Uses OpenCV Haar cascade to find faces, then positions the crop
+    Uses MediaPipe Face Detection to find faces, then positions the crop
     window to include as many faces as possible (weighted by size).
     Falls back to center-crop if no faces are detected.
     """
@@ -68,39 +69,34 @@ def _face_crop(img: Image.Image, width: int, height: int) -> Image.Image:
     if abs(src_ratio - target_ratio) < 0.01:
         return img
 
-    # Detect faces/body on a downscaled grayscale image for speed
-    scale = min(1.0, 640 / max(src_w, src_h))
-    small = img.resize((int(src_w * scale), int(src_h * scale)), Image.BILINEAR)
-    gray = cv2.cvtColor(np.array(small), cv2.COLOR_RGB2GRAY)
+    # MediaPipe expects mp.Image
+    import mediapipe as mp
+    mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.array(img))
+    results = _get_face_detector().detect(mp_img)
 
-    # Try cascades in order: frontal face → profile face → upper body
-    faces = np.empty((0, 4), dtype=np.int32)
-    for cascade in _get_cascades():
-        faces = cascade.detectMultiScale(
-            gray, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20),
-        )
-        if len(faces) > 0:
-            break
-
-    if len(faces) == 0:
-        logger.debug("No faces/body detected, using center crop")
+    if not results.detections:
+        logger.debug("No faces detected, using center crop")
         return _center_crop(img, width, height)
 
-    # Scale face coordinates back to original image size
-    faces_orig = faces / scale  # (x, y, w, h) arrays
+    # Extract bounding boxes as (x, y, w, h) in pixel coords
+    faces = []
+    for det in results.detections:
+        bb = det.bounding_box
+        faces.append((bb.origin_x, bb.origin_y, bb.width, bb.height))
+
+    faces = np.array(faces)
 
     # Compute the weighted center of all faces (bigger faces = more weight)
-    face_areas = faces_orig[:, 2] * faces_orig[:, 3]
+    face_areas = faces[:, 2] * faces[:, 3]
     total_area = face_areas.sum()
-    cx = (faces_orig[:, 0] + faces_orig[:, 2] / 2) @ face_areas / total_area
-    cy = (faces_orig[:, 1] + faces_orig[:, 3] / 2) @ face_areas / total_area
+    cx = (faces[:, 0] + faces[:, 2] / 2) @ face_areas / total_area
+    cy = (faces[:, 1] + faces[:, 3] / 2) @ face_areas / total_area
 
     # Determine crop dimensions
     if src_ratio > target_ratio:
         # Image is wider than target — crop width
         crop_w = int(src_h * target_ratio)
         crop_h = src_h
-        # Position crop window horizontally centered on faces
         x0 = int(cx - crop_w / 2)
         x0 = max(0, min(x0, src_w - crop_w))
         return img.crop((x0, 0, x0 + crop_w, src_h))
@@ -108,7 +104,6 @@ def _face_crop(img: Image.Image, width: int, height: int) -> Image.Image:
         # Image is taller than target — crop height
         crop_w = src_w
         crop_h = int(src_w / target_ratio)
-        # Position crop window vertically centered on faces
         y0 = int(cy - crop_h / 2)
         y0 = max(0, min(y0, src_h - crop_h))
         return img.crop((0, y0, src_w, y0 + crop_h))
@@ -117,7 +112,7 @@ def _face_crop(img: Image.Image, width: int, height: int) -> Image.Image:
 def smart_crop(img: Image.Image, width: int, height: int) -> Image.Image:
     """Content-aware crop to target aspect ratio, preserving faces.
 
-    Uses OpenCV face detection, falls back to center-crop.
+    Uses MediaPipe face detection, falls back to center-crop.
     """
     src_w, src_h = img.size
     target_ratio = width / height
