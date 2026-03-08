@@ -40,15 +40,20 @@ func (p *PostbackRetrier) Run(ctx context.Context) error {
 			continue
 		}
 
-		// Use stored CPA amount from the postback record (fallback to 0).
+		// Use stored CPA amount and event_id from the postback record.
 		cpaStr := "0"
 		if pb.CpaAmount != nil && *pb.CpaAmount > 0 {
 			cpaStr = strconv.FormatFloat(*pb.CpaAmount, 'f', -1, 64)
+		}
+		evID := 1
+		if pb.EventID != nil {
+			evID = *pb.EventID
 		}
 
 		postbackURL := strings.ReplaceAll(adSource.PostbackURL, "{click_id}", url.QueryEscape(pb.ClickID))
 		postbackURL = strings.ReplaceAll(postbackURL, "{event}", url.QueryEscape(pb.EventType))
 		postbackURL = strings.ReplaceAll(postbackURL, "{cpa}", url.QueryEscape(cpaStr))
+		postbackURL = strings.ReplaceAll(postbackURL, "{event_id}", strconv.Itoa(evID))
 
 		resp, err := client.Get(postbackURL)
 		if err != nil {

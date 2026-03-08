@@ -68,6 +68,7 @@ function AccountProfileContent() {
   // Conversion price state
   const [conversionPrices, setConversionPrices] = useState<AccountConversionPrice[]>([]);
   const [convPriceInputs, setConvPriceInputs] = useState<Record<string, string>>({});
+  const [convEventIdInputs, setConvEventIdInputs] = useState<Record<string, string>>({});
   const [convPriceSaving, setConvPriceSaving] = useState<string | null>(null);
 
   // Crop modal state
@@ -105,11 +106,14 @@ function AccountProfileContent() {
     try {
       const prices = await getAccountConversionPrices(id);
       setConversionPrices(prices);
-      const inputs: Record<string, string> = {};
+      const priceInputs: Record<string, string> = {};
+      const eventIdInputs: Record<string, string> = {};
       for (const p of prices) {
-        inputs[p.event_type] = String(p.price);
+        priceInputs[p.event_type] = String(p.price);
+        eventIdInputs[p.event_type] = String(p.event_id);
       }
-      setConvPriceInputs((prev) => ({ ...prev, ...inputs }));
+      setConvPriceInputs((prev) => ({ ...prev, ...priceInputs }));
+      setConvEventIdInputs((prev) => ({ ...prev, ...eventIdInputs }));
     } catch {
       // silent
     }
@@ -662,6 +666,19 @@ function AccountProfileContent() {
                       <span className="text-sm text-[#a0a0a0]">{evt.label}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-[#6b6b6b]">#</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="9"
+                        value={convEventIdInputs[evt.key] ?? "1"}
+                        onChange={(e) =>
+                          setConvEventIdInputs((prev) => ({ ...prev, [evt.key]: e.target.value }))
+                        }
+                        className="w-14 px-2 py-1.5 text-sm rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-white focus:outline-none focus:border-accent transition-colors tabular-nums text-center"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
                       <span className="text-xs text-[#6b6b6b]">$</span>
                       <input
                         type="number"
@@ -678,14 +695,16 @@ function AccountProfileContent() {
                     <button
                       onClick={async () => {
                         const price = parseFloat(convPriceInputs[evt.key] || "0");
+                        const eventId = parseInt(convEventIdInputs[evt.key] || "1", 10);
                         if (isNaN(price) || price < 0) return;
+                        if (isNaN(eventId) || eventId < 1 || eventId > 9) return;
                         setConvPriceSaving(evt.key);
                         try {
-                          await upsertAccountConversionPrice(id, { event_type: evt.key, price });
+                          await upsertAccountConversionPrice(id, { event_type: evt.key, price, event_id: eventId });
                           await loadConversionPrices();
-                          toast("Price saved", "success");
+                          toast("Saved", "success");
                         } catch {
-                          toast("Failed to save price", "error");
+                          toast("Failed to save", "error");
                         } finally {
                           setConvPriceSaving(null);
                         }
@@ -704,7 +723,7 @@ function AccountProfileContent() {
                 );
               })}
               <p className="text-xs text-[#4a4a4a] mt-2">
-                CPA price sent as {"{cpa}"} in postback URLs when this model converts.
+                # = event ID (1-9), sent as {"{event_id}"}. $ = CPA price, sent as {"{cpa}"}.
               </p>
             </div>
           </div>

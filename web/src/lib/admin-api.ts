@@ -880,6 +880,7 @@ export interface AccountConversionPrice {
   account_id: number;
   event_type: string;
   price: number;
+  event_id: number;
   created_at: string;
   updated_at: string;
 }
@@ -895,7 +896,7 @@ export async function getAccountConversionPrices(
 
 export async function upsertAccountConversionPrice(
   accountId: number,
-  data: { event_type: string; price: number },
+  data: { event_type: string; price: number; event_id: number },
 ): Promise<AccountConversionPrice> {
   return adminFetch<AccountConversionPrice>(
     `/accounts/${accountId}/conversion-prices`,

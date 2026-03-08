@@ -224,8 +224,8 @@ func (h *EventHandler) firePostbackIfConfigured(event model.Event) {
 		return
 	}
 
-	// Look up CPA price for this account + event type.
-	cpaPrice, _ := h.admin.GetConversionPrice(ctx, event.AccountID, event.Type)
+	// Look up CPA price and event_id for this account + event type.
+	cpaPrice, eventID, _ := h.admin.GetConversionPriceAndEventID(ctx, event.AccountID, event.Type)
 	cpaStr := "0"
 	if cpaPrice > 0 {
 		cpaStr = strconv.FormatFloat(cpaPrice, 'f', -1, 64)
@@ -235,6 +235,7 @@ func (h *EventHandler) firePostbackIfConfigured(event model.Event) {
 	postbackURL := strings.ReplaceAll(adSource.PostbackURL, "{click_id}", url.QueryEscape(clickID))
 	postbackURL = strings.ReplaceAll(postbackURL, "{event}", url.QueryEscape(event.Type))
 	postbackURL = strings.ReplaceAll(postbackURL, "{cpa}", url.QueryEscape(cpaStr))
+	postbackURL = strings.ReplaceAll(postbackURL, "{event_id}", strconv.Itoa(eventID))
 
 	// Create postback record.
 	pb := &store.ConversionPostback{
@@ -245,6 +246,7 @@ func (h *EventHandler) firePostbackIfConfigured(event model.Event) {
 		VideoID:    event.VideoID,
 		Status:     "pending",
 		CpaAmount:  &cpaPrice,
+		EventID:    &eventID,
 	}
 	if err := h.admin.CreateConversionPostback(ctx, pb); err != nil {
 		slog.Error("postback: create record", "error", err)

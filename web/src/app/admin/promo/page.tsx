@@ -775,7 +775,7 @@ function SettingsTab({
           </p>
           <div className="text-xs text-[#6b6b6b] space-y-1.5">
             <div><span className="text-white">Trigger events:</span> social_click (fansite), content_click (first content click per session)</div>
-            <div><span className="text-white">URL placeholders:</span> {"{click_id}"} — ad network click ID, {"{event}"} — event type, {"{cpa}"} — conversion price (per-model)</div>
+            <div><span className="text-white">URL placeholders:</span> {"{click_id}"} — ad network click ID, {"{event}"} — event type, {"{cpa}"} — conversion price, {"{event_id}"} — event number (1-9)</div>
             <div><span className="text-white">Retry:</span> Failed postbacks are retried every 5 minutes, up to 3 attempts</div>
           </div>
         </div>

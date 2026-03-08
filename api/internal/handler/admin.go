@@ -1233,6 +1233,7 @@ func (h *AdminHandler) UpsertAccountConversionPrice(w http.ResponseWriter, r *ht
 	var input struct {
 		EventType string  `json:"event_type"`
 		Price     float64 `json:"price"`
+		EventID   int     `json:"event_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1246,8 +1247,11 @@ func (h *AdminHandler) UpsertAccountConversionPrice(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "price must be non-negative")
 		return
 	}
+	if input.EventID < 1 || input.EventID > 9 {
+		input.EventID = 1
+	}
 
-	price, err := h.admin.UpsertAccountConversionPrice(r.Context(), id, input.EventType, input.Price)
+	price, err := h.admin.UpsertAccountConversionPrice(r.Context(), id, input.EventType, input.Price, input.EventID)
 	if err != nil {
 		slog.Error("admin: upsert conversion price", "error", err, "account_id", id)
 		writeError(w, http.StatusInternalServerError, "failed to save conversion price")
