@@ -56,12 +56,54 @@ function EmbedCodeSection({
     return `${origin}/b/serve?${params.toString()}`;
   };
 
+  // Ad network macros to include in embed code when a source is selected.
+  const adNetworkMacros: Record<string, Record<string, string>> = {
+    traforama: {
+      "click-id": "%ID%",
+      "ref-domain": "%REFDOMAIN%",
+      "original-ref": "%ORIGINALREF%",
+      "spot-id": "%SPOTID%",
+      "node-id": "%NODEID%",
+      "auction-price": "%AUCTIONPRICE%",
+      "cpv-price": "%CPVPRICE%",
+      cpc: "%CPC%",
+      "campaign-id": "%CAMPAIGNID%",
+      "creative-id": "%CREATIVEID%",
+    },
+  };
+
   const buildCode = (size: BannerSize) => {
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     const attrs = [`data-size="${size.width}x${size.height}"`];
     if (selectedSource) attrs.push(`data-src="${selectedSource}"`);
     if (selectedStyle) attrs.push(`data-style="${selectedStyle}"`);
+    // Add ad network macros if available for the selected source.
+    const macros = selectedSource ? adNetworkMacros[selectedSource] : null;
+    if (macros) {
+      for (const [attr, macro] of Object.entries(macros)) {
+        attrs.push(`data-${attr}="${macro}"`);
+      }
+    }
     return `<script async src="${origin}/b/loader.js" ${attrs.join(" ")}></script>`;
+  };
+
+  const buildIframeUrl = (size: BannerSize) => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    let u = `${origin}/b/serve?size=${size.width}x${size.height}`;
+    if (selectedSource) u += `&src=${selectedSource}`;
+    if (selectedStyle) u += `&style=${selectedStyle}`;
+    const macros = selectedSource ? adNetworkMacros[selectedSource] : null;
+    if (macros) {
+      const paramMap: Record<string, string> = {
+        "click-id": "click_id", "ref-domain": "ref_domain", "original-ref": "original_ref",
+        "spot-id": "spot_id", "node-id": "node_id", "auction-price": "auction_price",
+        "cpv-price": "cpv_price", cpc: "cpc", "campaign-id": "campaign_id", "creative-id": "creative_id",
+      };
+      for (const [attr, macro] of Object.entries(macros)) {
+        u += `&${paramMap[attr] || attr}=${macro}`;
+      }
+    }
+    return u;
   };
 
   const handleCopy = (code: string) => {
@@ -130,13 +172,26 @@ function EmbedCodeSection({
                   onClick={() => handleCopy(buildCode(size))}
                   className="px-2 py-1 text-[10px] rounded bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525] transition-colors"
                 >
-                  Copy
+                  Copy JS
                 </button>
+                {selectedSource && adNetworkMacros[selectedSource] && (
+                  <button
+                    onClick={() => handleCopy(buildIframeUrl(size))}
+                    className="px-2 py-1 text-[10px] rounded bg-[#1e1e1e] text-[#a0a0a0] hover:text-white hover:bg-[#252525] transition-colors"
+                  >
+                    Copy URL
+                  </button>
+                )}
               </div>
             </div>
             <pre className="text-[11px] text-[#6b6b6b] bg-[#0a0a0a] rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">
               {buildCode(size)}
             </pre>
+            {selectedSource && adNetworkMacros[selectedSource] && (
+              <pre className="text-[11px] text-[#6b6b6b] bg-[#0a0a0a] rounded p-2 overflow-x-auto whitespace-pre-wrap break-all mt-1">
+                {buildIframeUrl(size)}
+              </pre>
+            )}
             {previewSizeId === size.id && (
               <div className="mt-3 pt-3 border-t border-[#1e1e1e]">
                 <div className="flex items-center justify-between mb-2">

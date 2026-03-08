@@ -38,12 +38,45 @@ func clientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-// bannerExtra builds the JSON extra field for banner events.
-func bannerExtra(bannerID int64, clickID string) string {
-	if clickID != "" {
-		return fmt.Sprintf(`{"banner_id":%d,"click_id":%q}`, bannerID, clickID)
+// adNetworkParamKeys are the query param names for ad network macros we propagate.
+var adNetworkParamKeys = []string{
+	"ref_domain", "original_ref", "spot_id", "node_id",
+	"auction_price", "cpv_price", "cpc", "campaign_id", "creative_id",
+}
+
+// readAdNetworkParams reads ad network macro params from the request query string.
+func readAdNetworkParams(r *http.Request) map[string]string {
+	q := r.URL.Query()
+	params := make(map[string]string)
+	for _, k := range adNetworkParamKeys {
+		if v := q.Get(k); v != "" {
+			params[k] = v
+		}
 	}
-	return fmt.Sprintf(`{"banner_id":%d}`, bannerID)
+	return params
+}
+
+// bannerExtra builds the JSON extra field for banner events.
+func bannerExtra(bannerID int64, clickID string, adParams map[string]string) string {
+	parts := []string{fmt.Sprintf(`"banner_id":%d`, bannerID)}
+	if clickID != "" {
+		parts = append(parts, fmt.Sprintf(`"click_id":%q`, clickID))
+	}
+	for _, k := range adNetworkParamKeys {
+		if v, ok := adParams[k]; ok {
+			parts = append(parts, fmt.Sprintf(`%q:%q`, k, v))
+		}
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
+// appendAdNetworkParams adds ad network params to a url.Values.
+func appendAdNetworkParams(params url.Values, adParams map[string]string) {
+	for _, k := range adNetworkParamKeys {
+		if v, ok := adParams[k]; ok {
+			params.Set(k, v)
+		}
+	}
 }
 
 // enrichEvent fills parsed UA and client context fields on an event from the request.
@@ -113,6 +146,7 @@ func (h *BannerHandler) ServeBanner(w http.ResponseWriter, r *http.Request) {
 
 	src := r.URL.Query().Get("src")
 	clickID := r.URL.Query().Get("click_id")
+	adParams := readAdNetworkParams(r)
 
 	ev := model.Event{
 		SiteID:    0,
@@ -122,7 +156,7 @@ func (h *BannerHandler) ServeBanner(w http.ResponseWriter, r *http.Request) {
 		UserAgent: r.UserAgent(),
 		IP:        clientIP(r),
 		Referrer:  r.Referer(),
-		Extra:     bannerExtra(banner.ID, clickID),
+		Extra:     bannerExtra(banner.ID, clickID, adParams),
 		Source:    src,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -153,6 +187,7 @@ func (h *BannerHandler) ClickBanner(w http.ResponseWriter, r *http.Request) {
 
 	src := r.URL.Query().Get("src")
 	clickID := r.URL.Query().Get("click_id")
+	adParams := readAdNetworkParams(r)
 
 	ev := model.Event{
 		SiteID:    0,
@@ -162,7 +197,7 @@ func (h *BannerHandler) ClickBanner(w http.ResponseWriter, r *http.Request) {
 		UserAgent: r.UserAgent(),
 		IP:        clientIP(r),
 		Referrer:  r.Referer(),
-		Extra:     bannerExtra(banner.ID, clickID),
+		Extra:     bannerExtra(banner.ID, clickID, adParams),
 		Source:    src,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -175,15 +210,16 @@ func (h *BannerHandler) ClickBanner(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetURL := fmt.Sprintf("/model/%s", slug)
-	// Propagate source params to the landing page.
-	if src != "" || clickID != "" {
-		params := url.Values{}
-		if src != "" {
-			params.Set("src", src)
-		}
-		if clickID != "" {
-			params.Set("click_id", clickID)
-		}
+	// Propagate source + ad network params to the landing page.
+	params := url.Values{}
+	if src != "" {
+		params.Set("src", src)
+	}
+	if clickID != "" {
+		params.Set("click_id", clickID)
+	}
+	appendAdNetworkParams(params, adParams)
+	if len(params) > 0 {
 		targetURL += "?" + params.Encode()
 	}
 	// Scroll to the specific video thumbnail on the profile page.
@@ -210,6 +246,7 @@ func (h *BannerHandler) HoverBanner(w http.ResponseWriter, r *http.Request) {
 
 	src := r.URL.Query().Get("src")
 	clickID := r.URL.Query().Get("click_id")
+	adParams := readAdNetworkParams(r)
 
 	ev := model.Event{
 		SiteID:    0,
@@ -219,7 +256,7 @@ func (h *BannerHandler) HoverBanner(w http.ResponseWriter, r *http.Request) {
 		UserAgent: r.UserAgent(),
 		IP:        clientIP(r),
 		Referrer:  r.Referer(),
-		Extra:     bannerExtra(banner.ID, clickID),
+		Extra:     bannerExtra(banner.ID, clickID, adParams),
 		Source:    src,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -287,6 +324,7 @@ func (h *BannerHandler) ServeDynamic(w http.ResponseWriter, r *http.Request) {
 	src := r.URL.Query().Get("src")
 	clickID := r.URL.Query().Get("click_id")
 	style := r.URL.Query().Get("style")
+	adParams := readAdNetworkParams(r)
 
 	pool := h.getBannerPool(r, width, height, cat, kw, aid)
 
@@ -320,24 +358,25 @@ func (h *BannerHandler) ServeDynamic(w http.ResponseWriter, r *http.Request) {
 		UserAgent: r.UserAgent(),
 		IP:        clientIP(r),
 		Referrer:  r.Referer(),
-		Extra:     bannerExtra(banner.ID, clickID),
+		Extra:     bannerExtra(banner.ID, clickID, adParams),
 		Source:    eventSource,
 		CreatedAt: time.Now().UTC(),
 	}
 	enrichEvent(&ev, r)
 	h.buffer.Push(ev)
 
-	// Build click URL with source params.
+	// Build click URL with source + ad network params.
 	clickURL := fmt.Sprintf("/b/%d/click", banner.ID)
-	if src != "" || clickID != "" {
-		params := url.Values{}
-		if src != "" {
-			params.Set("src", src)
-		}
-		if clickID != "" {
-			params.Set("click_id", clickID)
-		}
-		clickURL += "?" + params.Encode()
+	clickParams := url.Values{}
+	if src != "" {
+		clickParams.Set("src", src)
+	}
+	if clickID != "" {
+		clickParams.Set("click_id", clickID)
+	}
+	appendAdNetworkParams(clickParams, adParams)
+	if len(clickParams) > 0 {
+		clickURL += "?" + clickParams.Encode()
 	}
 	if h.siteBaseURL != "" {
 		clickURL = h.siteBaseURL + clickURL
@@ -345,15 +384,16 @@ func (h *BannerHandler) ServeDynamic(w http.ResponseWriter, r *http.Request) {
 
 	// Build hover pixel URL.
 	hoverURL := fmt.Sprintf("/b/%d/hover", banner.ID)
-	if src != "" || clickID != "" {
-		params := url.Values{}
-		if src != "" {
-			params.Set("src", src)
-		}
-		if clickID != "" {
-			params.Set("click_id", clickID)
-		}
-		hoverURL += "?" + params.Encode()
+	hoverParams := url.Values{}
+	if src != "" {
+		hoverParams.Set("src", src)
+	}
+	if clickID != "" {
+		hoverParams.Set("click_id", clickID)
+	}
+	appendAdNetworkParams(hoverParams, adParams)
+	if len(hoverParams) > 0 {
+		hoverURL += "?" + hoverParams.Encode()
 	}
 	if h.siteBaseURL != "" {
 		hoverURL = h.siteBaseURL + hoverURL
@@ -551,9 +591,11 @@ var pu=encodeURIComponent(location.href);
 var ups=new URLSearchParams(location.search);
 var us=ups.get('utm_source')||'';var um=ups.get('utm_medium')||'';var uc=ups.get('utm_campaign')||'';
 var ref=encodeURIComponent(document.referrer);
+var adKeys=['ref_domain','original_ref','spot_id','node_id','auction_price','cpv_price','cpc','campaign_id','creative_id'];
+var ad='';for(var i=0;i<adKeys.length;i++){var ak=adKeys[i];var av=s.getAttribute('data-'+ak.replace(/_/g,'-'))||'';if(av)ad+='&'+ak+'='+encodeURIComponent(av)}
 var p=sz.split('x');
 var base='%s';
-var url=base+'/b/serve?size='+sz+(kw?'&kw='+encodeURIComponent(kw):'')+(src?'&src='+encodeURIComponent(src):'')+(cid?'&click_id='+encodeURIComponent(cid):'')+(st?'&style='+encodeURIComponent(st):'')+'&sw='+sw+'&sh='+sh+'&vw='+vw+'&vh='+vh+'&lang='+encodeURIComponent(lang)+'&ct='+encodeURIComponent(ct)+'&pu='+pu+'&ref='+ref+(us?'&utm_source='+encodeURIComponent(us):'')+(um?'&utm_medium='+encodeURIComponent(um):'')+(uc?'&utm_campaign='+encodeURIComponent(uc):'')+'&t0='+Date.now();
+var url=base+'/b/serve?size='+sz+(kw?'&kw='+encodeURIComponent(kw):'')+(src?'&src='+encodeURIComponent(src):'')+(cid?'&click_id='+encodeURIComponent(cid):'')+(st?'&style='+encodeURIComponent(st):'')+'&sw='+sw+'&sh='+sh+'&vw='+vw+'&vh='+vh+'&lang='+encodeURIComponent(lang)+'&ct='+encodeURIComponent(ct)+'&pu='+pu+'&ref='+ref+(us?'&utm_source='+encodeURIComponent(us):'')+(um?'&utm_medium='+encodeURIComponent(um):'')+(uc?'&utm_campaign='+encodeURIComponent(uc):'')+ad+'&t0='+Date.now();
 var div=document.createElement('div');
 div.style.cssText='width:'+p[0]+'px;height:'+p[1]+'px;display:inline-block';
 s.parentNode.insertBefore(div,s);

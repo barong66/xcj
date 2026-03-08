@@ -43,16 +43,27 @@ function ensureFlushLoop(): void {
 function pushEvent(event: AnalyticsEvent): void {
   ensureFlushLoop();
 
-  // Enrich with ad source and click_id from sessionStorage if available.
+  // Enrich with ad source, click_id, and ad network params from sessionStorage.
   const enriched = { ...event, timestamp: Date.now() };
   if (typeof sessionStorage !== "undefined") {
     const adSource = sessionStorage.getItem("ad_source");
     if (adSource && !enriched.source) {
       enriched.source = adSource;
     }
-    const clickId = sessionStorage.getItem("ad_click_id");
-    if (clickId && !enriched.extra) {
-      enriched.extra = JSON.stringify({ click_id: clickId });
+    if (!enriched.extra) {
+      const extraObj: Record<string, string> = {};
+      const clickId = sessionStorage.getItem("ad_click_id");
+      if (clickId) extraObj.click_id = clickId;
+      const adParamsRaw = sessionStorage.getItem("ad_params");
+      if (adParamsRaw) {
+        try {
+          const adParams = JSON.parse(adParamsRaw);
+          Object.assign(extraObj, adParams);
+        } catch { /* ignore */ }
+      }
+      if (Object.keys(extraObj).length > 0) {
+        enriched.extra = JSON.stringify(extraObj);
+      }
     }
   }
 

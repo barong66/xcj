@@ -82,7 +82,7 @@ func TestBannerExtra(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := bannerExtra(tt.bannerID, tt.clickID)
+			got := bannerExtra(tt.bannerID, tt.clickID, nil)
 			if got != tt.want {
 				t.Errorf("bannerExtra(%d, %q) = %q, want %q", tt.bannerID, tt.clickID, got, tt.want)
 			}
