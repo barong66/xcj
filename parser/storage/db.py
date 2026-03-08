@@ -434,7 +434,7 @@ async def insert_banner(
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (video_id, banner_size_id, video_frame_id)
                 WHERE video_frame_id IS NOT NULL
-                DO UPDATE SET image_url = EXCLUDED.image_url, is_active = true
+                DO UPDATE SET image_url = EXCLUDED.image_url
             RETURNING id
             """,
             account_id, video_id, banner_size_id, image_url, width, height, video_frame_id,
@@ -446,7 +446,7 @@ async def insert_banner(
             VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (video_id, banner_size_id)
                 WHERE video_frame_id IS NULL
-                DO UPDATE SET image_url = EXCLUDED.image_url, is_active = true
+                DO UPDATE SET image_url = EXCLUDED.image_url
             RETURNING id
             """,
             account_id, video_id, banner_size_id, image_url, width, height,

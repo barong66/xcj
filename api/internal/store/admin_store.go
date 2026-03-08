@@ -1223,7 +1223,7 @@ func (s *AdminStore) ListAccountBanners(ctx context.Context, accountID int64, si
 		perPage = 20
 	}
 
-	conditions := []string{"b.account_id = $1"}
+	conditions := []string{"b.account_id = $1", "b.is_active = true"}
 	args := []interface{}{accountID}
 	argIdx := 1
 
