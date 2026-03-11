@@ -90,8 +90,14 @@ class Settings(BaseSettings):
     banner_poll_interval_sec: int = 10
 
     # ── Frame extraction ──────────────────────────────────────────
-    frame_extraction_count: int = 4       # frames to extract per video
+    frame_extraction_count: int = 10      # frames to extract per video
     frame_extraction_quality: int = 92    # JPEG quality for frame images
+
+    # ── NeuroScore (frame quality scoring) ────────────────────────
+    neuroscore_api_key: Optional[str] = None          # UUID API key; None = disabled
+    neuroscore_api_url: str = "https://api.neuroscore.ai/api/v1"
+    neuroscore_poll_interval_sec: int = 3             # seconds between poll attempts
+    neuroscore_max_poll_retries: int = 40             # max polls (40 * 3s = 120s timeout)
 
     # ── Logging ──────────────────────────────────────────────────
     log_level: str = "INFO"

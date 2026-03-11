@@ -42,21 +42,6 @@ def _download_thumbnail(thumb_url: str, dest_path: str) -> bool:
         return False
 
 
-def _crop_to_ratio(img: Image.Image, target_ratio: float) -> Image.Image:
-    """Crop image to match *target_ratio* (width/height), centered."""
-    src_w, src_h = img.size
-    src_ratio = src_w / src_h
-    if src_ratio > target_ratio:
-        new_w = int(src_h * target_ratio)
-        offset = (src_w - new_w) // 2
-        return img.crop((offset, 0, offset + new_w, src_h))
-    elif src_ratio < target_ratio:
-        new_h = int(src_w / target_ratio)
-        offset = (src_h - new_h) // 2
-        return img.crop((0, offset, src_w, offset + new_h))
-    return img
-
-
 def _resize_thumbnails(
     src_path: str,
     sm_path: str,
@@ -64,54 +49,9 @@ def _resize_thumbnails(
     *,
     is_portrait: bool,
 ) -> tuple[bool, bool]:
-    """Generate small and large thumbnails from a source image.
-
-    Returns (sm_ok, lg_ok).  Never upscales beyond the source resolution.
-    """
-    try:
-        with Image.open(src_path) as img:
-            img = img.convert("RGB")
-
-            if is_portrait:
-                sm_w, sm_h = settings.thumbnail_sm_width, settings.thumbnail_sm_height
-                lg_w, lg_h = settings.thumbnail_lg_width, settings.thumbnail_lg_height
-            else:
-                sm_w, sm_h = settings.thumbnail_sm_landscape_width, settings.thumbnail_sm_landscape_height
-                lg_w, lg_h = settings.thumbnail_lg_landscape_width, settings.thumbnail_lg_landscape_height
-
-            target_ratio = sm_w / sm_h  # same ratio for both sm and lg
-            cropped = _crop_to_ratio(img, target_ratio)
-
-            # Large thumbnail
-            lg_ok = False
-            try:
-                cur_w, cur_h = cropped.size
-                if cur_w > lg_w or cur_h > lg_h:
-                    lg_img = cropped.resize((lg_w, lg_h), Image.LANCZOS)
-                else:
-                    lg_img = cropped.copy()
-                lg_img.save(lg_path, "JPEG", quality=settings.thumbnail_lg_quality)
-                lg_ok = True
-            except Exception:
-                logger.warning("Failed to create lg thumbnail %s", src_path, exc_info=True)
-
-            # Small thumbnail
-            sm_ok = False
-            try:
-                cur_w, cur_h = cropped.size
-                if cur_w > sm_w or cur_h > sm_h:
-                    sm_img = cropped.resize((sm_w, sm_h), Image.LANCZOS)
-                else:
-                    sm_img = cropped.copy()
-                sm_img.save(sm_path, "JPEG", quality=settings.thumbnail_sm_quality)
-                sm_ok = True
-            except Exception:
-                logger.warning("Failed to create sm thumbnail %s", src_path, exc_info=True)
-
-            return sm_ok, lg_ok
-    except Exception:
-        logger.warning("Failed to process thumbnail %s", src_path, exc_info=True)
-        return False, False
+    """Generate small and large thumbnails. Delegates to shared utility."""
+    from parser.utils.image import resize_thumbnails
+    return resize_thumbnails(src_path, sm_path, lg_path, is_portrait=is_portrait)
 
 
 def _generate_preview(

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 import signal
+import tempfile
 import traceback
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 from parser.config.settings import settings
 from parser.parsers import get_parser
@@ -68,6 +70,89 @@ async def _upload_avatar_to_r2(
                 pass
 
 
+async def _score_frames(
+    frame_urls: List[str],
+) -> Tuple[Dict[str, float], Optional[int]]:
+    """Score frame URLs via NeuroScore.
+
+    Returns (url_to_score_dict, best_frame_index) or ({}, fallback) on failure.
+    When NeuroScore is not configured, defaults to first frame.
+    """
+    from parser.services.neuroscore import NeuroScoreClient
+
+    client = NeuroScoreClient()
+    if not client.is_configured:
+        logger.debug("NeuroScore not configured, using first frame as thumbnail")
+        return {}, 0 if frame_urls else None
+
+    loop = asyncio.get_running_loop()
+    try:
+        scores = await loop.run_in_executor(None, client.score_urls, frame_urls)
+
+        url_to_score = {fs.url: fs.score for fs in scores}
+
+        if scores:
+            best_url = scores[0].url  # already sorted desc
+            try:
+                best_idx = frame_urls.index(best_url)
+            except ValueError:
+                best_idx = 0
+            return url_to_score, best_idx
+
+        return url_to_score, 0  # fallback to first frame
+
+    except Exception:
+        logger.warning("NeuroScore scoring failed, falling back to first frame", exc_info=True)
+        return {}, 0 if frame_urls else None
+
+
+async def _generate_thumbnails_from_frame(
+    frame_path: str,
+    platform: str,
+    platform_id: str,
+    is_portrait: bool,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Generate SM/LG thumbnails from a frame image and upload to R2.
+
+    Returns (thumb_sm_url, thumb_lg_url).
+    """
+    from parser.utils.image import resize_thumbnails
+
+    loop = asyncio.get_running_loop()
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        sm_path = os.path.join(tmp_dir, f"{platform_id}_thumb_sm.jpg")
+        lg_path = os.path.join(tmp_dir, f"{platform_id}_thumb_lg.jpg")
+
+        sm_ok, lg_ok = await loop.run_in_executor(
+            None,
+            lambda: resize_thumbnails(
+                frame_path, sm_path, lg_path, is_portrait=is_portrait,
+            ),
+        )
+
+        thumb_sm_url: Optional[str] = None
+        thumb_lg_url: Optional[str] = None
+
+        if sm_ok:
+            try:
+                thumb_sm_url = await loop.run_in_executor(
+                    None, s3.upload_thumbnail, sm_path, platform, platform_id + "_sm",
+                )
+            except Exception:
+                logger.warning("S3 thumbnail_sm upload failed for %s", platform_id, exc_info=True)
+
+        if lg_ok:
+            try:
+                thumb_lg_url = await loop.run_in_executor(
+                    None, s3.upload_thumbnail, lg_path, platform, platform_id + "_lg",
+                )
+            except Exception:
+                logger.warning("S3 thumbnail_lg upload failed for %s", platform_id, exc_info=True)
+
+        return thumb_sm_url, thumb_lg_url
+
+
 async def _upload_and_save(
     parsed: ParsedVideo,
     *,
@@ -77,7 +162,7 @@ async def _upload_and_save(
     """Upload media to S3 and insert the video row.  Returns video DB id."""
     loop = asyncio.get_running_loop()
 
-    # Upload small thumbnail.
+    # ── Step 1: Upload platform thumbnails as fallback ────────────
     thumb_sm_url: Optional[str] = None
     if parsed.thumbnail_sm_path:
         try:
@@ -91,7 +176,6 @@ async def _upload_and_save(
         except Exception:
             logger.warning("S3 thumbnail_sm upload failed for %s", parsed.platform_id, exc_info=True)
 
-    # Upload large thumbnail.
     thumb_lg_url: Optional[str] = None
     if parsed.thumbnail_lg_path:
         try:
@@ -105,7 +189,7 @@ async def _upload_and_save(
         except Exception:
             logger.warning("S3 thumbnail_lg upload failed for %s", parsed.platform_id, exc_info=True)
 
-    # Upload preview clip.
+    # ── Step 2: Upload preview clip ───────────────────────────────
     preview_url: Optional[str] = None
     if parsed.preview_path:
         try:
@@ -119,7 +203,55 @@ async def _upload_and_save(
         except Exception:
             logger.warning("S3 preview upload failed for %s", parsed.platform_id, exc_info=True)
 
-    # Persist to DB.
+    # ── Step 3: Upload frames to R2 (need public URLs for scoring) ─
+    frame_records: List[Tuple[int, int, str, str]] = []  # (index, ts_ms, r2_url, local_path)
+    for i, (frame_path, ts_ms) in enumerate(parsed.frame_paths):
+        try:
+            frame_url = await loop.run_in_executor(
+                None,
+                s3.upload_frame,
+                frame_path,
+                platform,
+                parsed.platform_id,
+                i,
+            )
+            frame_records.append((i, ts_ms, frame_url, frame_path))
+        except Exception:
+            logger.warning("Failed to upload frame %d for %s", i, parsed.platform_id, exc_info=True)
+
+    # ── Step 4: Score frames via NeuroScore ───────────────────────
+    frame_scores: Dict[str, float] = {}
+    best_frame_idx: Optional[int] = None
+
+    if frame_records:
+        frame_urls = [r[2] for r in frame_records]
+        frame_scores, best_frame_idx = await _score_frames(frame_urls)
+
+    # ── Step 5: Generate thumbnails from best frame ───────────────
+    if best_frame_idx is not None and best_frame_idx < len(frame_records):
+        best_local_path = frame_records[best_frame_idx][3]
+        if os.path.isfile(best_local_path):
+            src_w = parsed.width or 0
+            src_h = parsed.height or 0
+            is_portrait = src_h > src_w and src_w > 0
+
+            frame_sm, frame_lg = await _generate_thumbnails_from_frame(
+                best_local_path, platform, parsed.platform_id, is_portrait,
+            )
+            # Overwrite platform thumbnails with frame-based ones
+            if frame_sm:
+                thumb_sm_url = frame_sm
+            if frame_lg:
+                thumb_lg_url = frame_lg
+
+            logger.info(
+                "Using frame %d (score=%.3f) as thumbnail for %s",
+                best_frame_idx,
+                frame_scores.get(frame_records[best_frame_idx][2], 0.0),
+                parsed.platform_id,
+            )
+
+    # ── Step 6: Insert video row ──────────────────────────────────
     video_id = await db.insert_video(
         account_id=account_id,
         platform=platform,
@@ -137,22 +269,20 @@ async def _upload_and_save(
         media_type=parsed.media_type,
     )
 
-    # Upload extracted frames to R2 and store in DB.
-    for i, (frame_path, ts_ms) in enumerate(parsed.frame_paths):
+    # ── Step 7: Insert frame rows with scores ─────────────────────
+    best_frame_url = frame_records[best_frame_idx][2] if best_frame_idx is not None and best_frame_idx < len(frame_records) else None
+    for i, ts_ms, frame_url, _ in frame_records:
+        score = frame_scores.get(frame_url)
+        is_selected = (frame_url == best_frame_url) if best_frame_url else False
         try:
-            frame_url = await loop.run_in_executor(
-                None,
-                s3.upload_frame,
-                frame_path,
-                platform,
-                parsed.platform_id,
-                i,
+            await db.insert_video_frame(
+                video_id, i, ts_ms, frame_url,
+                score=score, is_selected=is_selected,
             )
-            await db.insert_video_frame(video_id, i, ts_ms, frame_url)
         except Exception:
-            logger.warning("Failed to upload/store frame %d for %s", i, parsed.platform_id, exc_info=True)
+            logger.warning("Failed to store frame %d for %s", i, parsed.platform_id, exc_info=True)
 
-    # Link the video to all active sites so it appears on the storefront.
+    # ── Step 8: Link to sites ─────────────────────────────────────
     await db.link_video_to_sites(video_id)
 
     return video_id

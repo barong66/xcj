@@ -290,6 +290,74 @@ def generate_banner(
         return False
 
 
+def resize_thumbnails(
+    src_path: str,
+    sm_path: str,
+    lg_path: str,
+    *,
+    is_portrait: bool,
+) -> tuple[bool, bool]:
+    """Generate small and large thumbnails from a source image.
+
+    Returns (sm_ok, lg_ok).  Never upscales beyond the source resolution.
+    """
+    from parser.config.settings import settings
+
+    try:
+        with Image.open(src_path) as img:
+            img = img.convert("RGB")
+
+            if is_portrait:
+                sm_w, sm_h = settings.thumbnail_sm_width, settings.thumbnail_sm_height
+                lg_w, lg_h = settings.thumbnail_lg_width, settings.thumbnail_lg_height
+            else:
+                sm_w, sm_h = settings.thumbnail_sm_landscape_width, settings.thumbnail_sm_landscape_height
+                lg_w, lg_h = settings.thumbnail_lg_landscape_width, settings.thumbnail_lg_landscape_height
+
+            target_ratio = sm_w / sm_h
+            src_w, src_h = img.size
+            src_ratio = src_w / src_h
+            if src_ratio > target_ratio:
+                new_w = int(src_h * target_ratio)
+                offset = (src_w - new_w) // 2
+                cropped = img.crop((offset, 0, offset + new_w, src_h))
+            elif src_ratio < target_ratio:
+                new_h = int(src_w / target_ratio)
+                offset = (src_h - new_h) // 2
+                cropped = img.crop((0, offset, src_w, offset + new_h))
+            else:
+                cropped = img
+
+            lg_ok = False
+            try:
+                cur_w, cur_h = cropped.size
+                if cur_w > lg_w or cur_h > lg_h:
+                    lg_img = cropped.resize((lg_w, lg_h), Image.LANCZOS)
+                else:
+                    lg_img = cropped.copy()
+                lg_img.save(lg_path, "JPEG", quality=settings.thumbnail_lg_quality)
+                lg_ok = True
+            except Exception:
+                logger.warning("Failed to create lg thumbnail %s", src_path, exc_info=True)
+
+            sm_ok = False
+            try:
+                cur_w, cur_h = cropped.size
+                if cur_w > sm_w or cur_h > sm_h:
+                    sm_img = cropped.resize((sm_w, sm_h), Image.LANCZOS)
+                else:
+                    sm_img = cropped.copy()
+                sm_img.save(sm_path, "JPEG", quality=settings.thumbnail_sm_quality)
+                sm_ok = True
+            except Exception:
+                logger.warning("Failed to create sm thumbnail %s", src_path, exc_info=True)
+
+            return sm_ok, lg_ok
+    except Exception:
+        logger.warning("Failed to process thumbnail %s", src_path, exc_info=True)
+        return False, False
+
+
 def extract_frames(
     video_path: str,
     output_dir: str,

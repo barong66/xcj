@@ -459,20 +459,44 @@ async def insert_video_frame(
     frame_index: int,
     timestamp_ms: int,
     image_url: str,
+    *,
+    score: Optional[float] = None,
+    is_selected: bool = False,
 ) -> int:
     """Insert a video frame row. Returns the frame id."""
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        INSERT INTO video_frames (video_id, frame_index, timestamp_ms, image_url)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO video_frames (video_id, frame_index, timestamp_ms, image_url, score, is_selected)
+        VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (video_id, frame_index) DO UPDATE
-            SET image_url = EXCLUDED.image_url
+            SET image_url = EXCLUDED.image_url,
+                score = EXCLUDED.score,
+                is_selected = EXCLUDED.is_selected
         RETURNING id
         """,
-        video_id, frame_index, timestamp_ms, image_url,
+        video_id, frame_index, timestamp_ms, image_url, score, is_selected,
     )
     return row["id"]
+
+
+async def update_video_thumbnails(
+    video_id: int,
+    thumbnail_url: Optional[str],
+    thumbnail_lg_url: Optional[str],
+) -> None:
+    """Overwrite thumbnail URLs on a video row (e.g. after frame scoring)."""
+    pool = await get_pool()
+    await pool.execute(
+        """
+        UPDATE videos
+        SET thumbnail_url = COALESCE($2, thumbnail_url),
+            thumbnail_lg_url = COALESCE($3, thumbnail_lg_url),
+            updated_at = NOW()
+        WHERE id = $1
+        """,
+        video_id, thumbnail_url, thumbnail_lg_url,
+    )
 
 
 async def get_video_frames(video_id: int) -> list[asyncpg.Record]:
