@@ -149,8 +149,8 @@ async def _process_banner_job(job) -> None:
                     video_frame_id=None,
                 )
 
-            # 2. Generate banners from each extracted frame.
-            frames = await db.get_video_frames(vid_id)
+            # 2. Generate banner from the NeuroScore-selected frame only.
+            frames = await db.get_video_frames(vid_id, selected_only=True)
             for frame in frames:
                 generated += await _generate_banners_from_source(
                     loop, frame["image_url"], vid_id, account_id, username, sizes,

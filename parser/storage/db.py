@@ -499,11 +499,20 @@ async def update_video_thumbnails(
     )
 
 
-async def get_video_frames(video_id: int) -> list[asyncpg.Record]:
-    """Return all frames for a video, ordered by frame_index."""
+async def get_video_frames(video_id: int, *, selected_only: bool = False) -> list[asyncpg.Record]:
+    """Return frames for a video, ordered by frame_index.
+
+    Args:
+        selected_only: If True, return only the NeuroScore-selected frame(s).
+    """
     pool = await get_pool()
+    if selected_only:
+        return await pool.fetch(
+            "SELECT id, frame_index, timestamp_ms, image_url, is_selected FROM video_frames WHERE video_id = $1 AND is_selected = true ORDER BY frame_index",
+            video_id,
+        )
     return await pool.fetch(
-        "SELECT id, frame_index, timestamp_ms, image_url FROM video_frames WHERE video_id = $1 ORDER BY frame_index",
+        "SELECT id, frame_index, timestamp_ms, image_url, is_selected FROM video_frames WHERE video_id = $1 ORDER BY frame_index",
         video_id,
     )
 
