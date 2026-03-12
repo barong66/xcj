@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -2004,4 +2006,261 @@ func (s *AdminStore) GetEventIDForSource(ctx context.Context, accountID, adSourc
 		return 1, fmt.Errorf("admin_store: get event id for source: %w", err)
 	}
 	return eventID, nil
+}
+
+// ─── Content (frame management) ──────────────────────────────────────────────
+
+// ContentFrame is a single extracted frame of a video.
+type ContentFrame struct {
+	ID          int64    `json:"id"`
+	FrameIndex  int      `json:"frame_index"`
+	ImageURL    string   `json:"image_url"`
+	Score       *float64 `json:"score"`
+	IsSelected  bool     `json:"is_selected"`
+	TimestampMS int      `json:"timestamp_ms"`
+}
+
+// ContentVideo is a video with all its frames, for the content admin page.
+type ContentVideo struct {
+	ID           int64          `json:"id"`
+	AccountID    int64          `json:"account_id"`
+	Username     string         `json:"username"`
+	Platform     string         `json:"platform"`
+	MediaType    string         `json:"media_type"`
+	Width        *int           `json:"width"`
+	Height       *int           `json:"height"`
+	ViewCount    int64          `json:"view_count"`
+	CreatedAt    time.Time      `json:"created_at"`
+	ThumbnailURL string         `json:"thumbnail_url"`
+	Categories   []string       `json:"categories"`
+	Sites        []string       `json:"sites"`
+	Frames       []ContentFrame `json:"frames"`
+}
+
+// ContentListResult is the paginated result for ListContentVideos.
+type ContentListResult struct {
+	Videos  []ContentVideo `json:"videos"`
+	Total   int            `json:"total"`
+	Page    int            `json:"page"`
+	PerPage int            `json:"per_page"`
+}
+
+// ContentFilter holds filter parameters for ListContentVideos.
+type ContentFilter struct {
+	Platform     string // "instagram" | "twitter" | ""
+	AccountID    int64  // 0 = all
+	CategorySlug string // "" = all
+	SiteID       int64  // 0 = all
+	AspectRatio  string // "9:16" | "16:9" | "" = all
+	Page         int    // 1-based
+	PerPage      int    // default 20
+}
+
+// ListContentVideos returns paginated videos with all their frames, applying filters.
+func (s *AdminStore) ListContentVideos(ctx context.Context, f ContentFilter) (*ContentListResult, error) {
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PerPage < 1 || f.PerPage > 100 {
+		f.PerPage = 20
+	}
+	offset := (f.Page - 1) * f.PerPage
+
+	// Build WHERE clauses dynamically
+	args := []any{}
+	where := []string{"v.is_active = true"}
+	argN := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+
+	if f.Platform != "" {
+		where = append(where, "a.platform = "+argN(f.Platform))
+	}
+	if f.AccountID > 0 {
+		where = append(where, "v.account_id = "+argN(f.AccountID))
+	}
+
+	// Category filter via subquery
+	categoryJoin := ""
+	if f.CategorySlug != "" {
+		categoryJoin = `JOIN video_categories vc ON vc.video_id = v.id
+		JOIN categories cat ON cat.id = vc.category_id AND cat.slug = ` + argN(f.CategorySlug)
+	}
+
+	// Site filter via subquery
+	siteJoin := ""
+	if f.SiteID > 0 {
+		siteJoin = `JOIN video_sites vs ON vs.video_id = v.id AND vs.site_id = ` + argN(f.SiteID)
+	}
+
+	// Aspect ratio filter
+	if f.AspectRatio != "" {
+		parts := strings.SplitN(f.AspectRatio, ":", 2)
+		if len(parts) == 2 {
+			aw, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+			ah, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+			if err1 == nil && err2 == nil && ah > 0 && aw > 0 {
+				ratio := aw / ah
+				lo := ratio * 0.92
+				hi := ratio * 1.08
+				where = append(where, fmt.Sprintf(
+					"v.width IS NOT NULL AND v.height IS NOT NULL AND v.height > 0 AND (v.width::float/v.height::float) BETWEEN %s AND %s",
+					argN(lo), argN(hi),
+				))
+			}
+		}
+	}
+
+	whereClause := "WHERE " + strings.Join(where, " AND ")
+
+	// Count query
+	countSQL := fmt.Sprintf(`
+		SELECT COUNT(DISTINCT v.id)
+		FROM videos v
+		JOIN accounts a ON a.id = v.account_id
+		%s %s
+		%s`, categoryJoin, siteJoin, whereClause)
+
+	var total int
+	if err := s.pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count content videos: %w", err)
+	}
+
+	if total == 0 {
+		return &ContentListResult{Videos: []ContentVideo{}, Total: 0, Page: f.Page, PerPage: f.PerPage}, nil
+	}
+
+	// IDs query (paginated)
+	limitArg := argN(f.PerPage)
+	offsetArg := argN(offset)
+	idsSQL := fmt.Sprintf(`
+		SELECT DISTINCT v.id
+		FROM videos v
+		JOIN accounts a ON a.id = v.account_id
+		%s %s
+		%s
+		ORDER BY v.id DESC
+		LIMIT %s OFFSET %s`, categoryJoin, siteJoin, whereClause, limitArg, offsetArg)
+
+	rows, err := s.pool.Query(ctx, idsSQL, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query content video ids: %w", err)
+	}
+	var videoIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		videoIDs = append(videoIDs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(videoIDs) == 0 {
+		return &ContentListResult{Videos: []ContentVideo{}, Total: total, Page: f.Page, PerPage: f.PerPage}, nil
+	}
+
+	// Fetch videos + frames for the page
+	dataSQL := `
+		SELECT
+			v.id, v.account_id, v.media_type,
+			v.width, v.height, v.view_count, v.created_at, v.thumbnail_url,
+			a.username, a.platform,
+			COALESCE((
+				SELECT STRING_AGG(c.slug, ',' ORDER BY c.slug)
+				FROM video_categories vc2
+				JOIN categories c ON c.id = vc2.category_id
+				WHERE vc2.video_id = v.id
+			), '') AS categories,
+			COALESCE((
+				SELECT STRING_AGG(s.domain, ',' ORDER BY s.domain)
+				FROM video_sites vs2
+				JOIN sites s ON s.id = vs2.site_id
+				WHERE vs2.video_id = v.id
+			), '') AS sites,
+			vf.id, vf.frame_index, vf.image_url, vf.score, vf.is_selected, vf.timestamp_ms
+		FROM videos v
+		JOIN accounts a ON a.id = v.account_id
+		LEFT JOIN video_frames vf ON vf.video_id = v.id
+		WHERE v.id = ANY($1)
+		ORDER BY v.id DESC, vf.score DESC NULLS LAST, vf.frame_index ASC`
+
+	rows2, err := s.pool.Query(ctx, dataSQL, videoIDs)
+	if err != nil {
+		return nil, fmt.Errorf("query content videos data: %w", err)
+	}
+	defer rows2.Close()
+
+	videoMap := make(map[int64]*ContentVideo)
+	videoOrder := make([]int64, 0, len(videoIDs))
+
+	for rows2.Next() {
+		var (
+			v             ContentVideo
+			categoriesCSV string
+			sitesCSV      string
+			frameID       *int64
+			frameIndex    *int
+			frameURL      *string
+			frameScore    *float64
+			frameSelected *bool
+			frameTS       *int
+		)
+		if err := rows2.Scan(
+			&v.ID, &v.AccountID, &v.MediaType,
+			&v.Width, &v.Height, &v.ViewCount, &v.CreatedAt, &v.ThumbnailURL,
+			&v.Username, &v.Platform,
+			&categoriesCSV, &sitesCSV,
+			&frameID, &frameIndex, &frameURL, &frameScore, &frameSelected, &frameTS,
+		); err != nil {
+			return nil, fmt.Errorf("scan content video row: %w", err)
+		}
+
+		if _, exists := videoMap[v.ID]; !exists {
+			v.Categories = splitCSV(categoriesCSV)
+			v.Sites = splitCSV(sitesCSV)
+			v.Frames = []ContentFrame{}
+			videoMap[v.ID] = &v
+			videoOrder = append(videoOrder, v.ID)
+		}
+
+		if frameID != nil && frameIndex != nil && frameURL != nil && frameSelected != nil && frameTS != nil {
+			frame := ContentFrame{
+				ID:          *frameID,
+				FrameIndex:  *frameIndex,
+				ImageURL:    *frameURL,
+				Score:       frameScore,
+				IsSelected:  *frameSelected,
+				TimestampMS: *frameTS,
+			}
+			videoMap[v.ID].Frames = append(videoMap[v.ID].Frames, frame)
+		}
+	}
+	if err := rows2.Err(); err != nil {
+		return nil, err
+	}
+
+	videos := make([]ContentVideo, 0, len(videoOrder))
+	for _, id := range videoOrder {
+		videos = append(videos, *videoMap[id])
+	}
+
+	return &ContentListResult{
+		Videos:  videos,
+		Total:   total,
+		Page:    f.Page,
+		PerPage: f.PerPage,
+	}, nil
+}
+
+// splitCSV splits a comma-separated string into a slice, returning empty slice for "".
+func splitCSV(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	return strings.Split(s, ",")
 }
