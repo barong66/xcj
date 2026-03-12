@@ -2264,3 +2264,55 @@ func splitCSV(s string) []string {
 	}
 	return strings.Split(s, ",")
 }
+
+// SelectFrame sets is_selected=true for the given frame and false for all other
+// frames of the same video. Returns "frame not found" if the frame doesn't exist.
+func (s *AdminStore) SelectFrame(ctx context.Context, frameID int64) error {
+	// Get video_id for the frame
+	var videoID int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT video_id FROM video_frames WHERE id = $1`, frameID,
+	).Scan(&videoID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("frame not found")
+		}
+		return fmt.Errorf("get frame video_id: %w", err)
+	}
+
+	// Update all frames of this video in one statement
+	_, err = s.pool.Exec(ctx,
+		`UPDATE video_frames SET is_selected = (id = $1) WHERE video_id = $2`,
+		frameID, videoID,
+	)
+	if err != nil {
+		return fmt.Errorf("select frame: %w", err)
+	}
+	return nil
+}
+
+// DeleteFrame removes a frame from video_frames and returns its image_url for
+// optional R2 cleanup. Returns "frame not found" if id doesn't exist.
+func (s *AdminStore) DeleteFrame(ctx context.Context, frameID int64) (imageURL string, err error) {
+	err = s.pool.QueryRow(ctx,
+		`DELETE FROM video_frames WHERE id = $1 RETURNING image_url`, frameID,
+	).Scan(&imageURL)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", fmt.Errorf("frame not found")
+		}
+		return "", fmt.Errorf("delete frame: %w", err)
+	}
+	return imageURL, nil
+}
+
+// BulkDeleteFrames removes multiple frames. Returns the count of deleted rows.
+func (s *AdminStore) BulkDeleteFrames(ctx context.Context, ids []int64) (int64, error) {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM video_frames WHERE id = ANY($1)`, ids,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("bulk delete frames: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
