@@ -1,6 +1,6 @@
 # xxxaccounter — Документация
 
-> Последнее обновление: 2026-03-08 (HTML-only banner overlay, removed Pillow overlay)
+> Последнее обновление: 2026-03-12 (Admin Content page for frame management)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
 ---
@@ -147,10 +147,10 @@
 - Аналитика: banner_impression (показ) и banner_click (клик) в ClickHouse; Imprs/Clicks/CTR отображаются в админке
 
 **Качество баннеров:**
-- **OpenCV face-aware smart crop** — Haar cascade (frontal face → profile face → upper body) определяет лица и позиционирует кроп вокруг них. Fallback — center-crop с upper-third bias
+- **MediaPipe face-aware smart crop** — Google MediaPipe BlazeFace модель (230KB, bundled) определяет лица и позиционирует кроп вокруг них. Fallback — center-crop с upper-third bias. Заменил OpenCV Haar cascades (2026-03-08) для лучшей точности детекции
 - **Pillow ImageEnhance** — программное улучшение цвета после resize: contrast +35%, color saturation +40%, sharpness +50%, brightness +5%
 - **HTML overlay** — градиент, @username и CTA ("Watch Me Now" и т.д.) рендерятся исключительно в HTML-шаблонах (не запекаются в изображение), что позволяет использовать hover-эффекты и интерактивность
-- Полный пайплайн: OpenCV smart crop → Pillow Lanczos resize → Pillow enhance → JPEG q=90 (чистое фото, без overlay)
+- Полный пайплайн: MediaPipe smart crop → Pillow Lanczos resize → Pillow enhance → JPEG q=90 (чистое фото, без overlay)
 
 **Размеры (настраиваемые):**
 - 300x250 (Medium Rectangle) — дефолтный
@@ -360,6 +360,7 @@ https://adnetwork.com/postback?click_id={click_id}&event={event}&payout={cpa}&ev
 - **Dashboard** -- общая статистика (видео, аккаунты, очередь парсинга)
 - **Accounts** -- добавлять/удалять источники контента, запускать парсинг, фильтр по оплате (paid/free), включение/отключение промоушена. Страница аккаунта: табы Stats (по умолчанию), Fan Site Links, Promo. Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (Static JPEG / Bold / Elegant / Minimalist / Card), re-grab, re-crop (ручной кроп через визуальный редактор), **Conversion Prices** — per-event-type CPA цены для S2S постбеков (`{cpa}` плейсхолдер), **Event IDs per Source** — per-source event_id (1-9) для каждого типа события (`{event_id}` плейсхолдер). Удаление аккаунта -- **необратимое** (hard DELETE, каскадно удаляет все видео, баннеры, записи очередей)
 - **Videos** -- просматривать, удалять, пере-категоризировать видео
+- **Content** -- курирование фреймов видео: accordion-список всех видео с извлечёнными фреймами, выбор лучшего фрейма на видео, удаление лишних фреймов (по одному или массово). Фильтры по источнику (Instagram/Twitter) и aspect ratio (9:16, 16:9, 4:5, 1:1). Карточки фреймов 202×360px с NeuroScore
 - **Stats** — аналитика сайта с двумя вкладками: **Traffic Explorer** (по умолчанию) и **Video Stats** (тумбы с показами, кликами, CTR)
 - **Queue** — статус очереди парсинга (pending/running/done/failed)
 - **Promo** — все баннеры по всем paid-аккаунтам, управление размерами баннеров, embed-код для внешних сайтов. Четыре вкладки: Баннеры (список с hovers + source breakdown + embed-код через loader.js `<script>` тег с выбором стиля), Настройки (conversion tracker + ad sources), Статистика (воронка по источникам), Performance (overview cards, device breakdown, top referrers)
@@ -423,7 +424,7 @@ https://adnetwork.com/postback?click_id={click_id}&event={event}&payout={cpa}&ev
 - AI категоризация через OpenAI GPT-4o Vision API (пачками по 50 видео)
 - Работает как фоновый воркер, опрашивая очередь в PostgreSQL
 - **Worker loop** запускает 3 корутины через `asyncio.gather`: parse_worker, banner_worker, categorizer_worker
-- **Banner Worker** — генерирует баннеры из тумб + извлечённых фреймов для платных аккаунтов: до 5 вариантов на видео (1 thumbnail + 4 frames). OpenCV face-aware smart crop → Lanczos resize → Pillow ImageEnhance → JPEG q=90 (clean photo, no overlay) → R2. Overlay рендерится исключительно в HTML-шаблонах. CTR-based selection выбирает лучший вариант
+- **Banner Worker** — генерирует баннеры из тумб + извлечённых фреймов для платных аккаунтов: до 5 вариантов на видео (1 thumbnail + 4 frames). MediaPipe face-aware smart crop → Lanczos resize → Pillow ImageEnhance → JPEG q=90 (clean photo, no overlay) → R2. Overlay рендерится исключительно в HTML-шаблонах. CTR-based selection выбирает лучший вариант
 - **Categorizer Worker** — фоновый цикл, берёт uncategorized видео, отправляет thumbnail в OpenAI GPT-4o Vision, сохраняет категории с confidence
 
 ### Next.js Frontend
@@ -591,18 +592,18 @@ curl -X POST http://localhost:8080/api/v1/admin/videos/recategorize \
 - Результаты первого прогона: 370 видео обработано, 41 категория создана, 1649 связей video_categories
 - Мониторинг: ClickUp task https://app.clickup.com/t/869ccek1u
 
-## Banner Worker (Multi-Frame + OpenCV Smart Crop)
+## Banner Worker (Multi-Frame + MediaPipe Smart Crop)
 
 ### Как работает
 Banner Worker генерирует рекламные баннеры для платных аккаунтов. Использует два источника изображений:
 1. **Thumbnail** — стандартный баннер из thumbnail видео (как раньше)
 2. **Extracted frames** — до 4 дополнительных фреймов из видео (или изображений из carousel/photo posts)
 
-Для каждого источника применяется OpenCV Haar cascade для face-aware кропа и Pillow ImageEnhance для улучшения цвета. Overlay (gradient, text, CTA) не запекается в изображение — рендерится исключительно в HTML-шаблонах на Go API. В итоге на одно видео может быть до 5 вариантов баннера. CTR-based selection при показе автоматически выбирает лучший вариант.
+Для каждого источника применяется MediaPipe BlazeFace для face-aware кропа и Pillow ImageEnhance для улучшения цвета. Overlay (gradient, text, CTA) не запекается в изображение — рендерится исключительно в HTML-шаблонах на Go API. В итоге на одно видео может быть до 5 вариантов баннера. CTR-based selection при показе автоматически выбирает лучший вариант.
 
 ### Пайплайн (на каждый источник изображения)
 ```
-image (thumbnail / frame) → скачать → OpenCV face-aware smart crop → Pillow Lanczos resize → Pillow ImageEnhance (contrast 1.35, color 1.4, sharpness 1.5, brightness 1.05) → JPEG q=90 (clean photo) → R2
+image (thumbnail / frame) → скачать → MediaPipe face-aware smart crop → Pillow Lanczos resize → Pillow ImageEnhance (contrast 1.35, color 1.4, sharpness 1.5, brightness 1.05) → JPEG q=90 (clean photo) → R2
 ```
 
 ### Источники фреймов
