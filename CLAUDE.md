@@ -4,6 +4,8 @@ Video aggregation platform for social media account promotion. Collects videos f
 
 **Public brand:** TemptGuide (temptguide.com). Never use "traforama" in conversation.
 
+**Language:** All code, UI text, comments, and communication must be in **English**. No Russian or other languages in source code, UI labels, buttons, or comments.
+
 ## Architecture
 
 ```
@@ -64,13 +66,21 @@ Space: XXCJ (ID: 90126473643). After completing a task:
 - Mark task as done + add comment describing changes and modified files
 - Create new tasks for discovered bugs/TODOs
 
-## Workflow: Project Manager Agent
+## Workflow: Superpowers + Project Manager
 
-Always run PM agent after completing any task. PM does TWO things:
+This project uses the **superpowers** plugin for development workflow. Follow the superpowers skills:
+1. **Brainstorming** → clarify requirements before coding
+2. **Git worktrees** → isolate work in feature branches
+3. **Writing plans** → break into small tasks with specs
+4. **Subagent-driven development** → dispatch implementer per task with TDD
+5. **Code review** → spec compliance + quality review
+6. **Finishing branch** → verify tests, merge/PR
+
+**After completing any task — ALWAYS run project-manager agent.** PM does TWO things:
 1. **ClickUp** — find/create task, mark done, add comment, create follow-ups
 2. **MD files** — update TECHNICAL_SPEC.md, DOCS.md, docs/tasks/*.md
 
-Both steps are mandatory.
+Both steps are mandatory. PM is the final step after superpowers finishing-a-development-branch.
 
 ## Common Pitfalls
 

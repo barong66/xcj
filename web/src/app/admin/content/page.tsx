@@ -82,7 +82,7 @@ function FrameCard({
       >
         {frame.is_selected ? (
           <span className="bg-green-900/30 text-green-400 border border-green-700/50 rounded-full px-2.5 py-1 text-xs font-bold backdrop-blur-sm">
-            ★ выбран
+            ★ selected
           </span>
         ) : (
           <div
@@ -107,7 +107,7 @@ function FrameCard({
       )}
       {frame.score === null && (
         <div className="absolute top-2 right-2 z-10 rounded-full px-2.5 py-1 text-xs text-neutral-700 backdrop-blur-sm pointer-events-none">
-          фото {frame.frame_index + 1}
+          photo {frame.frame_index + 1}
         </div>
       )}
 
@@ -126,14 +126,14 @@ function FrameCard({
             className="flex-1 h-9 rounded-lg text-xs font-semibold text-green-400 border border-green-800/40 bg-green-900/25 backdrop-blur-sm hover:bg-green-900/40 transition-colors"
             onClick={() => onSelect(frame.id)}
           >
-            ★ Выбрать
+            ★ Select
           </button>
         )}
         <button
           className="flex-1 h-9 rounded-lg text-xs font-semibold text-red-400 border border-red-900/40 bg-red-950/20 backdrop-blur-sm hover:bg-red-950/40 transition-colors"
           onClick={() => onDelete(frame.id)}
         >
-          🗑 Удалить
+          🗑 Delete
         </button>
       </div>
     </div>
@@ -189,9 +189,9 @@ function VideoCard({
             {ratio && <Badge color="yellow">{ratio}</Badge>}
           </div>
           <div className="text-xs text-neutral-700">
-            {new Date(video.created_at).toLocaleDateString("ru-RU")} ·{" "}
+            {new Date(video.created_at).toLocaleDateString("en-US")} ·{" "}
             {video.view_count > 0
-              ? `${(video.view_count / 1_000_000).toFixed(1)}M просмотров · `
+              ? `${(video.view_count / 1_000_000).toFixed(1)}M views · `
               : ""}
             ID {video.id}
           </div>
@@ -202,7 +202,7 @@ function VideoCard({
               className="text-xs text-neutral-600 px-3 py-1.5 border border-[#1e1e1e] rounded-full hover:text-neutral-400 hover:border-[#333] transition-colors"
               onClick={() => onSelectAll(video.id)}
             >
-              ☑ все
+              ☑ all
             </button>
           )}
           <button
@@ -213,7 +213,7 @@ function VideoCard({
             }`}
             onClick={() => onToggleExpand(video.id)}
           >
-            {isExpanded ? "✕ Свернуть" : "✏ Ред."}
+            {isExpanded ? "✕ Collapse" : "✏ Edit"}
           </button>
         </div>
       </div>
@@ -236,13 +236,13 @@ function VideoCard({
               )}
               <div className="absolute top-2 left-2">
                 <span className="bg-green-900/30 text-green-400 border border-green-700/50 rounded-full px-2.5 py-1 text-xs font-bold backdrop-blur-sm">
-                  ★ выбран
+                  ★ selected
                 </span>
               </div>
             </div>
           ))}
           {video.frames.filter((f) => f.is_selected).length === 0 && (
-            <div className="text-xs text-neutral-700 py-2">нет выбранного фрейма</div>
+            <div className="text-xs text-neutral-700 py-2">no selected frame</div>
           )}
         </div>
       )}
@@ -264,7 +264,7 @@ function VideoCard({
             />
           ))}
           {video.frames.length === 0 && (
-            <div className="text-xs text-neutral-700 py-4 px-2">нет фреймов</div>
+            <div className="text-xs text-neutral-700 py-4 px-2">no frames</div>
           )}
         </div>
       )}
@@ -354,7 +354,7 @@ function ContentPageContent() {
       });
       setData(result);
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Ошибка загрузки", "error");
+      toast(err instanceof Error ? err.message : "Failed to load", "error");
     } finally {
       setLoading(false);
     }
@@ -398,19 +398,19 @@ function ContentPageContent() {
   const handleSelectFrame = async (frameId: number) => {
     try {
       await selectFrame(frameId);
-      toast("Фрейм выбран как лучший");
+      toast("Frame selected as best");
       load();
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Ошибка", "error");
+      toast(err instanceof Error ? err.message : "Error", "error");
     }
   };
 
   // Delete single frame
   const handleDeleteFrame = async (frameId: number) => {
-    if (!confirm("Удалить фрейм?")) return;
+    if (!confirm("Delete this frame?")) return;
     try {
       await deleteFrame(frameId);
-      toast("Фрейм удалён");
+      toast("Frame deleted");
       setCheckedFrames((prev) => {
         const next = new Set(prev);
         next.delete(frameId);
@@ -418,7 +418,7 @@ function ContentPageContent() {
       });
       load();
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Ошибка удаления", "error");
+      toast(err instanceof Error ? err.message : "Delete error", "error");
     }
   };
 
@@ -426,14 +426,14 @@ function ContentPageContent() {
   const handleBulkDelete = async () => {
     const ids = Array.from(checkedFrames);
     if (ids.length === 0) return;
-    if (!confirm(`Удалить ${ids.length} фреймов?`)) return;
+    if (!confirm(`Delete ${ids.length} frames?`)) return;
     try {
       const result = await bulkDeleteFrames(ids);
-      toast(`Удалено ${result.deleted} фреймов`);
+      toast(`Deleted ${result.deleted} frames`);
       setCheckedFrames(new Set());
       load();
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Ошибка удаления", "error");
+      toast(err instanceof Error ? err.message : "Delete error", "error");
     }
   };
 
@@ -443,9 +443,9 @@ function ContentPageContent() {
     <div className="p-6 max-w-screen-2xl">
       {/* Header */}
       <div className="mb-5">
-        <h1 className="text-2xl font-semibold text-white tracking-tight">Контент</h1>
+        <h1 className="text-2xl font-semibold text-white tracking-tight">Content</h1>
         <p className="text-xs text-neutral-600 mt-1">
-          {data ? `${data.total} видео` : "Загрузка..."}
+          {data ? `${data.total} videos` : "Loading..."}
         </p>
       </div>
 
@@ -485,7 +485,7 @@ function ContentPageContent() {
                 resetPage();
               }}
             >
-              ✕ сбросить
+              ✕ clear
             </button>
           </>
         )}
@@ -495,19 +495,19 @@ function ContentPageContent() {
       {checkedFrames.size > 0 && (
         <div className="flex items-center gap-3 mb-4 px-4 py-2.5 bg-[#0d0d1f] border border-indigo-900/40 rounded-lg">
           <span className="text-indigo-400 text-xs font-medium">
-            ✓ {checkedFrames.size} фреймов выбрано
+            ✓ {checkedFrames.size} frames selected
           </span>
           <button
             onClick={handleBulkDelete}
             className="text-xs font-medium px-3 py-1.5 rounded-full bg-red-950/20 text-red-400 border border-red-900/30 hover:bg-red-950/40 transition-colors"
           >
-            🗑 Удалить выбранные
+            🗑 Delete selected
           </button>
           <button
             onClick={() => setCheckedFrames(new Set())}
             className="text-xs text-neutral-600 px-3 py-1.5 border border-[#1e1e1e] rounded-full hover:text-neutral-400 transition-colors"
           >
-            Снять выделение
+            Clear selection
           </button>
         </div>
       )}
@@ -515,7 +515,7 @@ function ContentPageContent() {
       {/* Content */}
       {loading ? (
         <div className="flex items-center justify-center h-64 text-neutral-600 text-sm">
-          Загрузка...
+          Loading...
         </div>
       ) : data && data.videos.length > 0 ? (
         <>
@@ -539,7 +539,7 @@ function ContentPageContent() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between mt-6">
               <span className="text-xs text-neutral-600">
-                Стр. {page} из {totalPages}
+                Page {page} of {totalPages}
               </span>
               <div className="flex gap-2">
                 <button
@@ -547,14 +547,14 @@ function ContentPageContent() {
                   onClick={() => setPage(page - 1)}
                   className="px-3 py-1.5 text-xs rounded bg-[#1e1e1e] text-neutral-500 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
-                  ← Назад
+                  ← Back
                 </button>
                 <button
                   disabled={page >= totalPages}
                   onClick={() => setPage(page + 1)}
                   className="px-3 py-1.5 text-xs rounded bg-[#1e1e1e] text-neutral-500 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
-                  Вперёд →
+                  Next →
                 </button>
               </div>
             </div>
@@ -562,7 +562,7 @@ function ContentPageContent() {
         </>
       ) : (
         <div className="bg-[#141414] rounded-xl border border-[#1e1e1e] p-8 text-center text-neutral-600 text-sm">
-          Ничего не найдено
+          Nothing found
         </div>
       )}
     </div>

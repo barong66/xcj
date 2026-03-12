@@ -2091,7 +2091,7 @@ func (s *AdminStore) ListContentVideos(ctx context.Context, f ContentFilter) (*C
 	// Site filter via subquery
 	siteJoin := ""
 	if f.SiteID > 0 {
-		siteJoin = `JOIN video_sites vs ON vs.video_id = v.id AND vs.site_id = ` + argN(f.SiteID)
+		siteJoin = `JOIN site_videos vs ON vs.video_id = v.id AND vs.site_id = ` + argN(f.SiteID)
 	}
 
 	// Aspect ratio filter
@@ -2178,7 +2178,7 @@ func (s *AdminStore) ListContentVideos(ctx context.Context, f ContentFilter) (*C
 			), '') AS categories,
 			COALESCE((
 				SELECT STRING_AGG(s.domain, ',' ORDER BY s.domain)
-				FROM video_sites vs2
+				FROM site_videos vs2
 				JOIN sites s ON s.id = vs2.site_id
 				WHERE vs2.video_id = v.id
 			), '') AS sites,
