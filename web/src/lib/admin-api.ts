@@ -934,3 +934,74 @@ export async function upsertAccountSourceEventID(
     { method: "PUT", body: JSON.stringify(data) },
   );
 }
+
+// ─── Content (frame management) ──────────────────────────────────────────────
+
+export interface ContentFrame {
+  id: number;
+  frame_index: number;
+  image_url: string;
+  score: number | null;
+  is_selected: boolean;
+  timestamp_ms: number;
+}
+
+export interface ContentVideo {
+  id: number;
+  account_id: number;
+  username: string;
+  platform: string;
+  media_type: string;
+  width: number | null;
+  height: number | null;
+  view_count: number;
+  created_at: string;
+  thumbnail_url: string;
+  categories: string[];
+  sites: string[];
+  frames: ContentFrame[];
+}
+
+export interface ContentList {
+  videos: ContentVideo[];
+  total: number;
+  page: number;
+  per_page: number;
+}
+
+export async function getAdminContent(params?: {
+  source?: string;
+  account_id?: number;
+  category?: string;
+  site_id?: number;
+  aspect_ratio?: string;
+  page?: number;
+  per_page?: number;
+}): Promise<ContentList> {
+  const sp = new URLSearchParams();
+  if (params?.source) sp.set("source", params.source);
+  if (params?.account_id) sp.set("account_id", String(params.account_id));
+  if (params?.category) sp.set("category", params.category);
+  if (params?.site_id) sp.set("site_id", String(params.site_id));
+  if (params?.aspect_ratio) sp.set("aspect_ratio", params.aspect_ratio);
+  if (params?.page) sp.set("page", String(params.page));
+  if (params?.per_page) sp.set("per_page", String(params.per_page));
+  const qs = sp.toString();
+  // Note: admin handlers use writeJSON directly (no {"data":...} wrapper)
+  return adminFetch<ContentList>(`/content${qs ? `?${qs}` : ""}`);
+}
+
+export async function selectFrame(frameId: number): Promise<void> {
+  await adminFetch(`/frames/${frameId}/select`, { method: "POST" });
+}
+
+export async function deleteFrame(frameId: number): Promise<void> {
+  await adminFetch(`/frames/${frameId}`, { method: "DELETE" });
+}
+
+export async function bulkDeleteFrames(ids: number[]): Promise<{ deleted: number }> {
+  return adminFetch<{ deleted: number }>("/frames/bulk", {
+    method: "DELETE",
+    body: JSON.stringify({ ids }),
+  });
+}
