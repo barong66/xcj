@@ -1256,6 +1256,100 @@ func (h *AdminHandler) UpsertAccountConversionPrice(w http.ResponseWriter, r *ht
 	writeJSON(w, http.StatusOK, price)
 }
 
+// ─── Content (frame management) ──────────────────────────────────────────────
+
+func (h *AdminHandler) GetContent(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	filter := store.ContentFilter{
+		Platform:     q.Get("source"),
+		AccountID:    int64Param(r, "account_id", 0),
+		CategorySlug: q.Get("category"),
+		SiteID:       int64Param(r, "site_id", 0),
+		AspectRatio:  q.Get("aspect_ratio"),
+		Page:         intParam(r, "page", 1),
+		PerPage:      intParam(r, "per_page", 20),
+	}
+	result, err := h.admin.ListContentVideos(r.Context(), filter)
+	if err != nil {
+		slog.Error("admin: list content videos", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list content")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *AdminHandler) SelectFrame(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid frame id")
+		return
+	}
+	if err := h.admin.SelectFrame(r.Context(), id); err != nil {
+		if err.Error() == "frame not found" {
+			writeError(w, http.StatusNotFound, "frame not found")
+			return
+		}
+		slog.Error("admin: select frame", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to select frame")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *AdminHandler) DeleteFrame(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid frame id")
+		return
+	}
+	_, err = h.admin.DeleteFrame(r.Context(), id)
+	if err != nil {
+		if err.Error() == "frame not found" {
+			writeError(w, http.StatusNotFound, "frame not found")
+			return
+		}
+		slog.Error("admin: delete frame", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to delete frame")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type bulkDeleteFramesInput struct {
+	IDs []int64 `json:"ids"`
+}
+
+func (h *AdminHandler) BulkDeleteFrames(w http.ResponseWriter, r *http.Request) {
+	var input bulkDeleteFramesInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(input.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "ids required")
+		return
+	}
+	count, err := h.admin.BulkDeleteFrames(r.Context(), input.IDs)
+	if err != nil {
+		slog.Error("admin: bulk delete frames", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete frames")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": count})
+}
+
+func int64Param(r *http.Request, key string, def int64) int64 {
+	s := r.URL.Query().Get(key)
+	if s == "" {
+		return def
+	}
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
 // ─── Account Source Event IDs ─────────────────────────────────────────────────
 
 // GetAccountSourceEventIDs handles GET /api/v1/admin/accounts/{id}/source-event-ids

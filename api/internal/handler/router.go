@@ -152,6 +152,12 @@ func NewRouter(
 		// Traffic Explorer.
 		r.Get("/traffic-stats", adminHandler.GetTrafficStats)
 		r.Get("/traffic-stats/dimensions", adminHandler.GetTrafficDimensions)
+
+		// Content / frame management.
+		r.Get("/content", adminHandler.GetContent)
+		r.Post("/frames/{id}/select", adminHandler.SelectFrame)
+		r.Delete("/frames/bulk", adminHandler.BulkDeleteFrames)
+		r.Delete("/frames/{id}", adminHandler.DeleteFrame)
 	})
 
 	// Public banner serving — no auth, no site detection.

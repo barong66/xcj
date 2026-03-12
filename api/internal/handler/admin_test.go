@@ -272,3 +272,76 @@ func TestRecropBanner_InvalidBody(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectFrame_InvalidID(t *testing.T) {
+	h := &AdminHandler{}
+	tests := []struct {
+		name    string
+		idParam string
+		want    int
+	}{
+		{"non-numeric", "abc", http.StatusBadRequest},
+		{"float", "1.5", http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/admin/frames/"+tt.idParam+"/select", nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", tt.idParam)
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+			rr := httptest.NewRecorder()
+			h.SelectFrame(rr, req)
+			if rr.Code != tt.want {
+				t.Errorf("SelectFrame(%q) status = %d, want %d", tt.idParam, rr.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeleteFrame_InvalidID(t *testing.T) {
+	h := &AdminHandler{}
+	tests := []struct {
+		name    string
+		idParam string
+		want    int
+	}{
+		{"non-numeric", "xyz", http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodDelete, "/admin/frames/"+tt.idParam, nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", tt.idParam)
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+			rr := httptest.NewRecorder()
+			h.DeleteFrame(rr, req)
+			if rr.Code != tt.want {
+				t.Errorf("DeleteFrame(%q) status = %d, want %d", tt.idParam, rr.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestBulkDeleteFrames_InvalidBody(t *testing.T) {
+	h := &AdminHandler{}
+	tests := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"empty body", "", http.StatusBadRequest},
+		{"not json", "not-json", http.StatusBadRequest},
+		{"empty ids", `{"ids":[]}`, http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodDelete, "/admin/frames/bulk",
+				strings.NewReader(tt.body))
+			rr := httptest.NewRecorder()
+			h.BulkDeleteFrames(rr, req)
+			if rr.Code != tt.want {
+				t.Errorf("BulkDeleteFrames(%q) status = %d, want %d", tt.body, rr.Code, tt.want)
+			}
+		})
+	}
+}
