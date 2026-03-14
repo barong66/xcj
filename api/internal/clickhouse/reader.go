@@ -834,3 +834,38 @@ func (r *Reader) GetTrafficDimensions(ctx context.Context, days int) ([]Dimensio
 
 	return result, nil
 }
+
+// ─── Dashboard Site Traffic ───────────────────────────────────────────────────
+
+// SiteTrafficStats holds 7-day traffic summary for a single site.
+type SiteTrafficStats struct {
+	Sessions7d    int64   `json:"sessions_7d"`
+	Conversions7d int64   `json:"conversions_7d"`
+	CTR           float64 `json:"ctr"`
+}
+
+// GetSiteTrafficStats queries ClickHouse for 7-day sessions, conversions, and CTR for a given site.
+func (r *Reader) GetSiteTrafficStats(ctx context.Context, siteID int64) (*SiteTrafficStats, error) {
+	var stats SiteTrafficStats
+	err := r.conn.QueryRow(ctx, `
+		SELECT
+			toInt64(uniqExact(session_id)) AS sessions,
+			toInt64(countIf(event_type IN ('social_click', 'content_click'))) AS conversions,
+			if(
+				countIf(event_type IN ('feed_impression', 'profile_thumb_impression')) > 0,
+				round(
+					toFloat64(countIf(event_type IN ('feed_click', 'click', 'profile_thumb_click'))) * 100.0
+					/ countIf(event_type IN ('feed_impression', 'profile_thumb_impression')),
+					2
+				),
+				0
+			) AS ctr
+		FROM events
+		WHERE site_id = ?
+			AND created_at >= now() - INTERVAL 7 DAY
+	`, siteID).Scan(&stats.Sessions7d, &stats.Conversions7d, &stats.CTR)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse reader: site traffic stats: %w", err)
+	}
+	return &stats, nil
+}

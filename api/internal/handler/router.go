@@ -153,6 +153,9 @@ func NewRouter(
 		r.Get("/traffic-stats", adminHandler.GetTrafficStats)
 		r.Get("/traffic-stats/dimensions", adminHandler.GetTrafficDimensions)
 
+		// Dashboard.
+		r.Get("/dashboard/sites", adminHandler.AdminDashboardSites)
+
 		// Content / frame management.
 		r.Get("/content", adminHandler.GetContent)
 		r.Post("/frames/{id}/select", adminHandler.SelectFrame)
