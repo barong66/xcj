@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   getAdminQueue,
   getQueueSummary,
@@ -38,7 +38,7 @@ function QueueContent() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(1);
-  const [initialized, setInitialized] = useState(false);
+  const initializedRef = useRef(false);
   const { toast } = useToast();
 
   const loadQueue = useCallback(async () => {
@@ -54,8 +54,8 @@ function QueueContent() {
       ]);
       setData(result);
       setSummary(sum);
-      if (!initialized) {
-        setInitialized(true);
+      if (!initializedRef.current) {
+        initializedRef.current = true;
         if (sum.failed > 0) {
           setStatusFilter("failed");
         }
@@ -65,7 +65,7 @@ function QueueContent() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, page, toast, initialized]);
+  }, [statusFilter, page, toast]);
 
   useEffect(() => {
     loadQueue();

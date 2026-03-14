@@ -133,6 +133,8 @@ export default function RevenuePage() {
           <h1 className="text-white text-xl font-semibold">Revenue</h1>
         </div>
 
+        {/* TODO: Site selector - getBannerFunnel/getPostbacks don't yet support site_id filter.
+            Add site_id support to the banner funnel ClickHouse query when needed. */}
         <div className="flex items-center gap-2">
           {PERIODS.map((p) => (
             <button
@@ -244,10 +246,10 @@ export default function RevenuePage() {
                       {fmt(row.conversions)}
                     </td>
                     <td className="px-4 py-3 text-[#a0a0a0]">
-                      {pct(row.ctr)}
+                      {row.ctr.toFixed(2)}%
                     </td>
                     <td className="px-4 py-3 text-[#a0a0a0]">
-                      {pct(row.conv_rate)}
+                      {row.conv_rate.toFixed(2)}%
                     </td>
                   </tr>
                 ))
