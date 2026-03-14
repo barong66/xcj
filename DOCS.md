@@ -1,6 +1,6 @@
 # xxxaccounter — Документация
 
-> Последнее обновление: 2026-03-14 (Template system — pluggable UI kit per site; model page 404 fix)
+> Last updated: 2026-03-14 (Admin panel redesign: grouped sidebar navigation, new analytics/ads routes)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
 ---
@@ -84,18 +84,25 @@
 
 ### 3.1 Template System (UI kit per site)
 
-Each site deployment can use a different visual template — a complete UI kit that replaces all user-facing components (VideoCard, Header, navigation, profile pages).
+Each site can have its own complete visual design (template) — a full UI kit that replaces all user-facing components (VideoCard, Header, navigation, profile pages, footer).
 
 **How to activate a template:**
-- Set `NEXT_PUBLIC_TEMPLATE=<name>` in the site's `.env` before building the web container
-- The template selector is also available in the admin panel under website settings
+- In admin: Websites → select site → Display Settings → Template → choose from dropdown → Save
+- The new template takes effect within **5 minutes** with no container rebuild required
+- Template name is stored in `sites.config.template` (JSONB column)
 
 **Built-in templates:**
 - `default` — the standard TemptGuide dark theme
 
-**Adding a template:** see `web/src/templates/_shared/registry.ts` and `web/src/templates/default/` as reference.
+**Adding a new template:** create a folder under `web/src/templates/<name>/`, implement all required components, register in `registry.ts` and `page-registry.ts`, rebuild the web container once. After that, the template appears in the admin dropdown and can be switched at any time without rebuild.
 
-**Technical details:** `web/src/templates/_shared/` contains the template contract (`types.ts`), registry, and React Context. All visual components delegate to the active template via `useTemplate()` hook.
+**Technical details:**
+- Template name is read from the database at request time via `GET /api/v1/config`
+- `getSiteConfig()` uses React `cache()` for deduplication; TTL is 5 minutes
+- CSS theme variables (colors, fonts) are injected server-side in `<head>` — no flash of unstyled content
+- All visual components delegate to the active template via `useTemplate()` hook
+- See `web/src/templates/_shared/` for the template contract (`types.ts`), registry, and React Context
+- Full technical details: see section 7.6 in TECHNICAL_SPEC.md
 
 ### 4. Аналитика
 
@@ -372,15 +379,31 @@ https://adnetwork.com/postback?click_id={click_id}&event={event}&payout={cpa}&ev
 
 ### 6. Админка (xcj)
 
-Веб-панель для управления платформой:
-- **Dashboard** -- общая статистика (видео, аккаунты, очередь парсинга)
-- **Accounts** -- добавлять/удалять источники контента, запускать парсинг, фильтр по оплате (paid/free), включение/отключение промоушена. Страница аккаунта: табы Stats (по умолчанию), Fan Site Links, Promo. Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (Static JPEG / Bold / Elegant / Minimalist / Card), re-grab, re-crop (ручной кроп через визуальный редактор), **Conversion Prices** — per-event-type CPA цены для S2S постбеков (`{cpa}` плейсхолдер), **Event IDs per Source** — per-source event_id (1-9) для каждого типа события (`{event_id}` плейсхолдер). Удаление аккаунта -- **необратимое** (hard DELETE, каскадно удаляет все видео, баннеры, записи очередей)
-- **Videos** -- просматривать, удалять, пере-категоризировать видео
-- **Content** -- курирование фреймов видео: accordion-список всех видео с извлечёнными фреймами, выбор лучшего фрейма на видео, удаление лишних фреймов (по одному или массово). Фильтры по источнику (Instagram/Twitter) и aspect ratio (9:16, 16:9, 4:5, 1:1). Карточки фреймов 202×360px с NeuroScore
-- **Stats** — аналитика сайта с двумя вкладками: **Traffic Explorer** (по умолчанию) и **Video Stats** (тумбы с показами, кликами, CTR)
-- **Queue** — статус очереди парсинга (pending/running/done/failed)
-- **Promo** — все баннеры по всем paid-аккаунтам, управление размерами баннеров, embed-код для внешних сайтов. Четыре вкладки: Баннеры (список с hovers + source breakdown + embed-код через loader.js `<script>` тег с выбором стиля), Настройки (conversion tracker + **Ad Sources** — управление рекламными сетями: name, postback URL шаблон, active/inactive), Статистика (воронка по источникам), Performance (overview cards, device breakdown, top referrers)
+Веб-панель для управления платформой. Сайдбар разбит на 6 тематических групп:
+
+**Overview**
+- **Dashboard** (`/admin`) — per-site карточки с метриками (видео, аккаунты, просмотры, клики за 7 дней). Alert bar вверху при наличии упавших задач в очереди парсинга
+
+**Analytics**
+- **Traffic** (`/admin/analytics/traffic`) — Traffic Explorer с site selector и 4 вкладками: Overview (гибкая аналитика с group by, 8 метриками, фильтрами), Source, Country, Device. Заменяет старый `/admin/stats`
+- **Revenue** (`/admin/analytics/revenue`) — воронка баннерной конверсии по источникам + постбеки
+
+**Content**
+- **Accounts** — добавлять/удалять источники контента, запускать парсинг, фильтр по оплате (paid/free), включение/отключение промоушена. Страница аккаунта: табы Stats (по умолчанию), Fan Site Links, Promo. Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (Static JPEG / Bold / Elegant / Minimalist / Card), re-grab, re-crop (ручной кроп через визуальный редактор), **Conversion Prices** — per-event-type CPA цены для S2S постбеков, **Event IDs per Source** — per-source event_id (1-9). Удаление аккаунта — **необратимое** (hard DELETE, каскадно удаляет все видео, баннеры, записи очередей)
+- **Videos** — просматривать, удалять, пере-категоризировать видео
+- **Content** — курирование фреймов видео: accordion-список всех видео с извлечёнными фреймами, выбор лучшего фрейма на видео, удаление лишних фреймов (по одному или массово). Фильтры по источнику (Instagram/Twitter) и aspect ratio. Карточки фреймов 202×360px с NeuroScore
 - **Categories** — управление категориями
+
+**Ads**
+- **Promo** (`/admin/ads/promo`) — Banner gallery по всем paid-аккаунтам, embed-коды через loader.js `<script>` тег с выбором стиля. Заменяет старый `/admin/promo`
+- **Sources** (`/admin/ads/sources`) — CRUD рекламных сетей (Ad Sources): name, postback URL шаблон, active/inactive + postback config
+
+**Sites**
+- **Websites** (`/admin/websites`) — список сайтов + колонка Traffic 7d. Страница сайта (`/admin/websites/[id]`): вкладки General + Content + Banners
+
+**System**
+- **Queue** — статус очереди парсинга (pending/running/done/failed). Автоматически открывает вкладку Failed при наличии ошибок
+- **Health** — системный health-check
 
 ## Монетизация
 

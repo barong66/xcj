@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-14 (Template system: pluggable UI kit per site; model page 404 fix; NEXT_PUBLIC_TEMPLATE env var)
+> Last updated: 2026-03-14 (Admin panel redesign: grouped sidebar navigation, new analytics/ads routes, GET /api/v1/admin/dashboard/sites endpoint)
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -496,6 +496,7 @@ if(clicks > 0, round(conversions * 100.0 / clicks, 2), 0) AS conversion_rate
 
 | Метод | Путь | Описание |
 |-------|------|----------|
+| GET | /api/v1/config | Site config for current domain: `{domain, name, config}`. Used by Next.js SSR to load template name and CSS vars. No auth required. |
 | GET | /api/v1/videos | Список видео (sort, page, per_page, category_id, country_id, category, exclude_account_id) |
 | GET | /api/v1/videos/{id} | Детали видео (account включает social_links) |
 | GET | /api/v1/search?q= | Полнотекстовый поиск |
@@ -555,6 +556,7 @@ if(clicks > 0, round(conversions * 100.0 / clicks, 2), 0) AS conversion_rate
 | PUT | /admin/accounts/{id}/source-event-ids | Upsert event_id (body: {ad_source_id, event_type, event_id}) |
 | GET | /admin/traffic-stats | Traffic Explorer: гибкая аналитика с динамическим GROUP BY (group_by, group_by2, days, sort_by, sort_dir, фильтры) |
 | GET | /admin/traffic-stats/dimensions | Distinct значения для фильтров Traffic Explorer (source, country, device_type, etc.) |
+| GET | /admin/dashboard/sites | Per-site dashboard cards: video_count, account_count, views_7d, clicks_7d, ctr_7d per site. Реализован в `api/internal/handler/admin_dashboard.go`, данные из ClickHouse GetSiteTrafficStats |
 | GET | /admin/content | Список видео с фреймами для курирования (фильтры: source, account_id, category, site_id, aspect_ratio, page, per_page) |
 | POST | /admin/frames/{id}/select | Пометить фрейм как выбранный (selected) |
 | DELETE | /admin/frames/{id} | Удалить фрейм |
@@ -925,18 +927,42 @@ After extracting 10 frames and uploading them to R2, the parser scores them via 
 
 ### 7.2 Админ-панель
 
+#### Навигационная структура (6 групп)
+
+| Группа | Пункты навигации |
+|--------|-----------------|
+| Overview | Dashboard |
+| Analytics | Traffic, Revenue |
+| Content | Accounts, Videos, Content, Categories |
+| Ads | Promo, Sources |
+| Sites | Websites |
+| System | Queue, Health |
+
+#### Роуты
+
 | URL | Описание |
 |-----|----------|
 | /admin/login | Авторизация (токен в cookie) |
-| /admin | Dashboard — статистика |
+| /admin | Dashboard — per-site карточки с метриками + alert bar при ошибках в очереди |
 | /admin/accounts | Управление аккаунтами |
-| /admin/queue | Очередь парсинга |
+| /admin/queue | Очередь парсинга (auto-defaults to Failed tab when errors exist) |
 | /admin/videos | Управление видео |
-| /admin/stats | Аналитика: табы Traffic Explorer (default) + Video Stats. Traffic Explorer — гибкая аналитика с group by, фильтрами, 8 метриками |
+| /admin/analytics/traffic | Traffic Explorer: site selector + 4 tabs (Overview/Source/Country/Device). Гибкая аналитика с group by, фильтрами, 8 метриками |
+| /admin/analytics/revenue | Revenue: banner funnel + postbacks воронка по источникам |
+| /admin/ads/promo | Banner gallery + embed codes для внешних сайтов |
+| /admin/ads/sources | Ad sources CRUD + postback config |
 | /admin/content | Курирование фреймов: accordion-список видео с фреймами, выбор лучшего фрейма, bulk-delete. Фильтры: source, aspect ratio |
 | /admin/categories | Категории |
-| /admin/promo | Все баннеры + управление размерами |
+| /admin/websites | Список сайтов + traffic 7d колонка |
+| /admin/websites/[id] | Сайт detail: General + Content + Banners tabs |
 | /admin/accounts/[id] | Профиль аккаунта (табы: Stats (default), Fan Site Links, Promo). Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (iframe), re-grab. Promo tab также содержит: секцию "Conversion Prices" — per-event-type CPA цены для постбеков; секцию "Event IDs per Source" — per-source event_id (1-9) для каждого типа события |
+
+#### Redirects (backward compatibility)
+
+| Старый URL | Редирект на |
+|-----------|------------|
+| /admin/stats | /admin/analytics/traffic |
+| /admin/promo | /admin/ads/promo |
 
 **Авторизация:** cookie `admin_token` → Bearer token к Go API. Cookie `admin_authed=1` для фронтенд-проверки.
 
@@ -956,8 +982,11 @@ After extracting 10 frames and uploading them to R2, the parser scores them via 
 - **SimilarModels** — секция «Similar Models» на странице профиля; 3-колоночная сетка с аватарами; показывается только для free (не paid) аккаунтов; загружает популярные видео из той же категории, исключая текущий аккаунт
 - **OnlyFansContext** (`web/src/contexts/OnlyFansContext.tsx`) — React Context + Provider для передачи OnlyFans URL, displayName и avatarUrl из страниц (model profile, video detail) в глобальный Header. Компонент `OnlyFansHeaderSetter` вызывает `setOnlyFansUrl()`, `setDisplayName()`, `setAvatarUrl()` через useEffect при маунте страницы и очищает при анмаунте
 - **Header (sticky profile mode)** (`web/src/components/Header.tsx`) — на страницах модели (`/model/[slug]`) и видео (`/video/[id]`), Header показывает аватар модели + display name слева (вместо логотипа сайта), и синюю pill-кнопку "Follow me" с иконкой OF справа (если есть OnlyFans ссылка). На остальных страницах (главная, поиск, категории) Header показывает стандартный логотип сайта. Клик по OF-кнопке открывает OnlyFans профиль в новой вкладке и трекает `social_click`
-- **AdminShell** — layout админки (sidebar + header). Пункты сайдбара: Dashboard, Accounts, Videos, Stats, Websites, Categories, Content, Promo, Queue, Health
-- **TemplateProvider / useTemplate()** (`web/src/templates/_shared/TemplateContext.tsx`) — React Context that provides the active template's components. Template is resolved from `NEXT_PUBLIC_TEMPLATE` env var. All user-facing components (VideoCard, Header, BottomNav, ProfileGrid, ProfileHeader, SimilarModels) are provided through this context
+- **AdminShell** (`web/src/app/admin/AdminShell.tsx`) — layout админки (sidebar + header). Сайдбар разбит на 6 групп: Overview (Dashboard), Analytics (Traffic, Revenue), Content (Accounts, Videos, Content, Categories), Ads (Promo, Sources), Sites (Websites), System (Queue, Health). Includes alert bar showing failed queue item count on Dashboard
+- **TemplateProvider / useTemplate()** (`web/src/templates/_shared/TemplateContext.tsx`) — React Context that provides the active template's components. Template name is resolved per-request from `sites.config` JSONB via `GET /api/v1/config` (no rebuild needed — changing template in admin takes effect within 5 min). All user-facing components (VideoCard, Header, BottomNav, ProfileGrid, ProfileHeader, SimilarModels) are provided through this context
+- **getSiteConfig()** (`web/src/lib/site-config.ts`) — server-side helper that fetches `GET /api/v1/config` for the current domain. Uses React `cache()` for deduplication within a single SSR request. Domain included in the fetch URL to ensure unique cache key per site. Revalidation TTL: 300s (5 min)
+- **loadTemplatePage()** (`web/src/templates/_shared/loader.ts`) — resolves the active template name from site config and delegates to `page-registry.ts` to render the correct page component
+- **page-registry.ts** (`web/src/templates/_shared/page-registry.ts`) — server-only module mapping template names to page loader functions. Separated from `registry.ts` to prevent `next/headers` / `next/cache` imports from leaking into the client bundle
 
 ### 7.4 TypeScript типы
 
@@ -1078,6 +1107,82 @@ Sitemap URL: `https://temptguide.com/sitemap.xml`
 - **Image formats:** AVIF/WebP включены в next.config.mjs (`images.formats: ['image/avif', 'image/webp']`)
 - **Accessibility:** aria-labels на BottomNav, ProfileStories, share button; color contrast txt-muted #6b6b6b→#808080 (4.87:1 ratio); убран redundant alt на аватарах; увеличены touch targets на category links
 - **Favicon:** заменён пустой favicon.ico на SVG icon (`web/src/app/icon.svg`)
+
+### 7.6 Per-site Template System
+
+Each site can have its own full UI layout (template) selected at runtime from the database. No container rebuild is needed — changing the template in admin takes effect within 5 minutes.
+
+#### How it works
+
+```
+Browser request → Next.js SSR
+  → getSiteConfig() → GET /api/v1/config (site detected via X-Forwarded-Host)
+  → returns { domain, name, config: { template: "default", ... } }
+  → layout.tsx: injects CSS vars as <style> in <head>, initializes TemplateProvider
+  → loadTemplatePage() → page-registry.ts → renders correct page component
+  → useTemplate() hook in client components → accesses VideoCard, Header, etc.
+```
+
+#### Key files
+
+| File | Role |
+|------|------|
+| `api/internal/handler/config.go` | `GET /api/v1/config` — returns site domain, name, config JSONB |
+| `web/src/lib/site-config.ts` | `getSiteConfig()` — fetches config with React cache() deduplication, 5 min revalidation |
+| `web/src/app/layout.tsx` | `generateMetadata()` from DB; CSS vars injected server-side; `TemplateProvider` init |
+| `web/src/templates/_shared/types.ts` | `SiteTemplate` interface — client-only components only |
+| `web/src/templates/_shared/registry.ts` | Template registry map (client-safe, static imports) |
+| `web/src/templates/_shared/page-registry.ts` | Server-only page loaders (separated to avoid client bundle contamination) |
+| `web/src/templates/_shared/loader.ts` | `loadTemplatePage()` — resolves template from config, delegates to page-registry |
+| `web/src/templates/_shared/TemplateContext.tsx` | React context + `useTemplate()` hook |
+| `web/src/templates/default/` | Built-in default template (dark theme) |
+
+#### SiteTemplate interface (client-only components)
+
+```typescript
+// web/src/templates/_shared/types.ts
+interface SiteTemplate {
+  name: string;
+  VideoCard: React.ComponentType<VideoCardProps>;
+  Header: React.ComponentType<HeaderProps>;
+  BottomNav: React.ComponentType<BottomNavProps>;
+  Footer: React.ComponentType;
+  ProfileGrid: React.ComponentType<ProfileGridProps>;
+  ProfileHeader: React.ComponentType<ProfileHeaderProps>;
+  SimilarModels: React.ComponentType<SimilarModelsProps>;
+}
+```
+
+Note: `ProfileStories` is NOT in the interface — it is a server component that fetches data directly and is rendered outside the template context.
+
+#### Template registry (one line to add a template)
+
+```typescript
+// web/src/templates/_shared/registry.ts
+const registry: Record<string, SiteTemplate> = {
+  default: defaultTemplate,
+  // magazine: magazineTemplate,  // add future templates here
+};
+```
+
+#### How to add a new template
+
+1. Create `web/src/templates/<name>/` directory
+2. Implement all page components: `pages/HomePage.tsx`, `pages/ModelPage.tsx`, `pages/SearchPage.tsx`
+3. Implement all SiteTemplate components: `VideoCard`, `Header`, `BottomNav`, `Footer`, `ProfileGrid`, `ProfileHeader`, `SimilarModels`
+4. Export a `SiteTemplate` object from `index.ts`
+5. Register in `web/src/templates/_shared/registry.ts` (one line)
+6. Register page loaders in `web/src/templates/_shared/page-registry.ts`
+7. Rebuild the web container once to bundle the new template
+8. In admin: Websites → site → Display Settings → Template → select → save
+9. Takes effect within 5 minutes (no further rebuild needed)
+
+#### Architecture decisions
+
+- **Static bundles:** All templates are statically imported at build time (no `import(templateName)` dynamic string). Next.js tree-shakes unused templates correctly.
+- **Client/server boundary:** `page-registry.ts` is server-only (`next/headers`, `next/cache`). `registry.ts` is client-safe. They are separate files.
+- **CSS vars server-side:** Theme colors from `sites.config` are injected as `<style>` in `<head>` during SSR. No FOUC (flash of unstyled content).
+- **React cache():** `getSiteConfig()` deduplicates within a single SSR pass. Domain in fetch URL = unique cache key per site in multi-site SSR.
 
 ---
 
