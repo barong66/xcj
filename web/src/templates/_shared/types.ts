@@ -1,4 +1,4 @@
-import type { Account, Video } from "@/types";
+import type { Account, Video, SortOption } from "@/types";
 
 export interface TemplateTheme {
   cssVars: Record<string, string>;
@@ -26,6 +26,14 @@ export interface SimilarModelsProps {
   videos: Video[];
 }
 
+export interface ProfileStoriesProps {
+  accountId?: number;
+}
+
+export interface SortControlsProps {
+  currentSort: SortOption;
+}
+
 /**
  * SiteTemplate defines the full UI kit for a site design.
  * Each template lives in its own directory under web/src/templates/<name>/.
@@ -44,4 +52,7 @@ export interface SiteTemplate {
   ProfileGrid: React.ComponentType<ProfileGridProps>;
   ProfileHeader: React.ComponentType<ProfileHeaderProps>;
   SimilarModels: React.ComponentType<SimilarModelsProps>;
+  // Optional overridable components
+  ProfileStories?: React.ComponentType<ProfileStoriesProps>;
+  SortControls?: React.ComponentType<SortControlsProps>;
 }
