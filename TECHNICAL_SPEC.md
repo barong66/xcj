@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-12 (Admin Content page for frame management)
+> Last updated: 2026-03-14 (Template system: pluggable UI kit per site; model page 404 fix; NEXT_PUBLIC_TEMPLATE env var)
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -46,6 +46,7 @@ xcj/
 │   ├── src/lib/            # API клиенты
 │   └── src/types/          # TypeScript типы
 ├── scripts/migrations/     # SQL-миграции
+├── .claude/agents/         # Claude Code агенты (PM, backend, frontend, parser, devops, tester, analytics)
 ├── docker-compose.dev.yml  # Локальный Docker
 └── bin/                    # Скомпилированные бинарники
 ```
@@ -227,12 +228,16 @@ xcj/
 | frame_index | SMALLINT | Порядковый номер фрейма (0..N) |
 | timestamp_ms | INT DEFAULT 0 | Таймстемп в миллисекундах (0 для image posts) |
 | image_url | TEXT | URL на R2 |
+| score | REAL NULL | NeuroScore score (0.0–1.0); NULL if not scored |
+| is_selected | BOOLEAN NOT NULL DEFAULT false | True for the best-scoring frame used as thumbnail |
 | created_at | TIMESTAMPTZ | |
 
 **UNIQUE:** (video_id, frame_index)
 **INDEX:** idx_video_frames_video (video_id)
 
-**Использование:** Хранит извлечённые фреймы из видео (4 кадра на равных интервалах) и изображения из Instagram carousel / image posts. Banner worker генерирует баннеры из этих фреймов в дополнение к thumbnail.
+**Migration 016:** Added `score` and `is_selected` columns (`scripts/migrations/016_neuroscore_frames.sql`).
+
+**Использование:** Хранит извлечённые фреймы из видео (10 кадров на равных интервалах, migration 016+) и изображения из Instagram carousel / image posts. NeuroScore API автоматически выбирает лучший кадр (`is_selected=true`), который используется как thumbnail. Banner worker генерирует баннеры из этих фреймов в дополнение к thumbnail.
 
 #### `banner_queue` — Очередь генерации баннеров
 | Поле | Тип | Описание |
@@ -775,12 +780,12 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 2. Вызывает парсер платформы (Twitter через yt-dlp, Instagram через httpx)
 3. Для каждого видео/поста:
    - Определяет `media_type`: "video" или "image" (Instagram photos/carousels, Twitter image tweets)
-   - Скачивает thumbnail, ресайзит до 480x270
    - Генерирует 5-сек превью через ffmpeg (500k bitrate, 480p) — только для video
-   - **Frame extraction** (видео): извлекает 4 кадра на равных интервалах через ffmpeg → `video_frames`
+   - **Frame extraction** (видео): извлекает 10 кадров на равных интервалах через ffmpeg → `video_frames`
    - **Image posts** (Instagram photos/carousels, Twitter images): изображения сохраняются как фреймы в `video_frames`
-   - Загружает в S3: `thumbnails/`, `previews/`, `frames/{platform}/{platform_id}_f{index}.jpg`
-   - Записывает в PostgreSQL (videos + video_frames)
+   - **NeuroScore selection**: submits frame R2 URLs to NeuroScore Score API, selects best-scoring frame, resizes it to SM (480×270) and LG (810×1440) thumbnails. Fallback chain: best frame → first frame → platform thumbnail → NULL
+   - Загружает в S3: `thumbnails/`, `thumbnails_lg/`, `previews/`, `frames/{platform}/{platform_id}_f{index}.jpg`
+   - Записывает в PostgreSQL (videos + video_frames with score + is_selected)
 4. Обновляет статус задачи (done/failed)
 5. При ошибках увеличивает parse_errors; после 5 ошибок — отключает аккаунт
 
@@ -836,11 +841,15 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 | instagram_rate_limit_sec | 5 | Задержка между запросами IG |
 | banner_quality | 90 | JPEG quality баннеров |
 | banner_poll_interval_sec | 10 | Интервал опроса banner_queue |
-| frame_extraction_count | 4 | Кол-во фреймов извлекаемых из видео |
+| frame_extraction_count | 10 | Кол-во фреймов извлекаемых из видео (was 4, increased for NeuroScore scoring) |
 | frame_extraction_quality | 85 | JPEG quality извлечённых фреймов |
+| neuroscore_api_key | — | NeuroScore Score API key (required for thumbnail selection) |
+| neuroscore_api_url | https://api.neuroscore.io | NeuroScore API base URL |
+| neuroscore_poll_interval_sec | 2.0 | Interval between NeuroScore job status polls |
+| neuroscore_max_poll_retries | 30 | Max poll attempts before fallback |
 ### 6.5 Извлечение фреймов (parser/utils/image.py)
 
-**extract_frames(video_path, count=4, quality=85)** — извлекает N кадров из видео на равных интервалах:
+**extract_frames(video_path, count=10, quality=85)** — извлекает N кадров из видео на равных интервалах (count increased from 4 to 10 for better NeuroScore coverage):
 1. Определяет длительность видео через ffprobe
 2. Вычисляет таймстемпы: `[duration * i / (count+1) for i in 1..count]`
 3. Извлекает каждый кадр через ffmpeg `-ss {timestamp} -frames:v 1`
@@ -848,6 +857,32 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 5. Возвращает список `(path, timestamp_ms)`
 
 Для image posts (Instagram photos, carousels, Twitter images) фреймы создаются напрямую из скачанных изображений без ffmpeg.
+
+**resize_thumbnails(src_path) → (sm_path, lg_path)** — shared utility function, resizes a source image to SM (480×270) and LG (810×1440) thumbnail sizes. Used by both instagram.py and twitter.py, and by the NeuroScore selection flow.
+
+### 6.5.1 NeuroScore Thumbnail Selection (parser/services/neuroscore.py)
+
+After extracting 10 frames and uploading them to R2, the parser scores them via the NeuroScore Score API to automatically select the best frame as the video thumbnail.
+
+**NeuroScoreClient:**
+| Method | Description |
+|--------|-------------|
+| `submit(urls)` | Submit list of image URLs to Score API, returns job_id |
+| `poll(job_id)` | Poll job status, returns results dict or None if not ready |
+| `score_urls(urls)` | Full pipeline: submit → poll → return dict[url → score] |
+
+**Parse worker pipeline (`parser/tasks/parse_worker.py` — `_upload_and_save()`):**
+1. Extract 10 frames from video (ffmpeg)
+2. Upload all frames to R2 (`frames/{platform}/{id}_f{index}.jpg`)
+3. Submit R2 frame URLs to NeuroScore Score API
+4. Poll until scored (up to `neuroscore_max_poll_retries` attempts)
+5. Select frame with highest score → mark `is_selected=True` in DB, store `score` value
+6. Resize best frame to SM (480×270) and LG (810×1440) thumbnails → upload to R2
+7. Use best-frame thumbnails as `thumbnail_url` / `thumbnail_lg_url` on the video
+
+**Fallback chain:** best NeuroScore frame → first extracted frame → platform thumbnail → NULL
+
+**Config required:** `NEUROSCORE_API_KEY`
 
 ### 6.6 Генерация баннеров (parser/utils/image.py)
 
@@ -922,6 +957,7 @@ python -m parser find "keyword" --count 5  # Найти аккаунты по к
 - **OnlyFansContext** (`web/src/contexts/OnlyFansContext.tsx`) — React Context + Provider для передачи OnlyFans URL, displayName и avatarUrl из страниц (model profile, video detail) в глобальный Header. Компонент `OnlyFansHeaderSetter` вызывает `setOnlyFansUrl()`, `setDisplayName()`, `setAvatarUrl()` через useEffect при маунте страницы и очищает при анмаунте
 - **Header (sticky profile mode)** (`web/src/components/Header.tsx`) — на страницах модели (`/model/[slug]`) и видео (`/video/[id]`), Header показывает аватар модели + display name слева (вместо логотипа сайта), и синюю pill-кнопку "Follow me" с иконкой OF справа (если есть OnlyFans ссылка). На остальных страницах (главная, поиск, категории) Header показывает стандартный логотип сайта. Клик по OF-кнопке открывает OnlyFans профиль в новой вкладке и трекает `social_click`
 - **AdminShell** — layout админки (sidebar + header)
+- **TemplateProvider / useTemplate()** (`web/src/templates/_shared/TemplateContext.tsx`) — React Context that provides the active template's components. Template is resolved from `NEXT_PUBLIC_TEMPLATE` env var. All user-facing components (VideoCard, Header, BottomNav, ProfileGrid, ProfileHeader, SimilarModels) are provided through this context
 
 ### 7.4 TypeScript типы
 
@@ -1053,9 +1089,11 @@ Admin → POST /admin/accounts (создаёт аккаунт в PG)
      → POST /admin/accounts/{id}/reparse (ставит в очередь)
      → Parser Worker забирает задачу из parse_queue
      → Парсер скачивает видео/изображения с платформы (media_type: video/image)
-     → Генерит тумбы + превью → S3
-     → Извлекает фреймы: 4 кадра из видео (ffmpeg) / изображения из carousel → video_frames
-     → INSERT в videos + video_frames + site_videos
+     → Генерит превью → S3
+     → Извлекает фреймы: 10 кадров из видео (ffmpeg) / изображения из carousel → R2
+     → NeuroScore API: scores all frames → selects best (is_selected=true)
+     → Best frame resized to SM (480×270) + LG (810×1440) thumbnails → S3
+     → INSERT в videos (thumbnail_url from best frame) + video_frames (score, is_selected) + site_videos
      → AI Categorizer → GPT-4o Vision → video_categories
 ```
 
@@ -1268,6 +1306,7 @@ MAX_PARSE_ERRORS=5
 ```env
 API_URL=http://localhost:8080
 NEXT_PUBLIC_API_URL=http://localhost:8080
+NEXT_PUBLIC_TEMPLATE=default   # UI template name (optional; defaults to "default" if not set)
 ```
 
 ---
@@ -1514,7 +1553,125 @@ GROUP BY event_date, source, event_type;
 
 ---
 
-## 12. Известные ограничения
+## 12. Claude Agent System
+
+Проект использует систему Claude Code агентов (`.claude/agents/`) для делегирования задач специализированным ролям.
+
+### 12.1 Агенты
+
+| Агент | Файл | Роль |
+|-------|------|------|
+| project-manager | `.claude/agents/project-manager.md` | Планирование, координация, ClickUp, документация |
+| go-backend | `.claude/agents/go-backend.md` | Go API, БД, кеш, middleware (`api/`) |
+| nextjs-frontend | `.claude/agents/nextjs-frontend.md` | React, admin panel, стили (`web/`) |
+| python-parser | `.claude/agents/python-parser.md` | Парсинг, медиа, AI категоризация (`parser/`) |
+| devops | `.claude/agents/devops.md` | Docker, деплой, мониторинг (`deploy/`) |
+| tester | `.claude/agents/tester.md` | Тесты, регрессии |
+| **analytics** | `.claude/agents/analytics.md` | **BI/аналитика, SQL-запросы к ClickHouse/PostgreSQL** |
+
+### 12.2 Analytics Agent (BI-аналитик)
+
+Специализированный агент для ответов на бизнес-вопросы через SQL-запросы к production БД.
+
+**Доступ к данным:**
+- ClickHouse (аналитика): через SSH + `docker exec traforama-clickhouse clickhouse-client`
+- PostgreSQL (бизнес-сущности): через SSH + `docker exec traforama-postgres psql`
+- Только read-only запросы (SELECT). Никаких INSERT/UPDATE/DELETE
+
+**Возможности:**
+- 12 готовых SQL-шаблонов: трафик, CTR, воронка баннеров, конверсии, устройства, гео, UTM, рефереры, выручка, постбеки, инвентарь, категории
+- Cross-database анализ (ClickHouse events + PostgreSQL entities — join на стороне агента)
+- Знание полной схемы ClickHouse (events, mv_banner_daily, mv_banner_conversions, banner_perf) и PostgreSQL (accounts, videos, banners, ad_sources, conversion_postbacks, account_conversion_prices)
+- Понимание бизнес-модели CPA и воронки конверсий
+
+**Типичные запросы:**
+- "Какой CTR по источникам за последние 30 дней?"
+- "Топ-10 моделей по конверсиям"
+- "Выручка по аккаунтам за месяц"
+- "Разбивка трафика по устройствам и браузерам"
+- "Откуда приходит баннерный трафик (реферреры)?"
+
+---
+
+## 13. Template System (Frontend)
+
+### 13.1 Overview
+
+Pluggable UI template system for the Next.js frontend. Allows different visual designs per deployment/site, activated via a single environment variable. Templates are fully independent UI kits — replacing all user-facing components without touching page logic.
+
+### 13.2 Architecture
+
+```
+web/src/templates/
+├── _shared/
+│   ├── types.ts          — SiteTemplate interface (the component contract)
+│   ├── registry.ts       — map of template name → SiteTemplate object
+│   └── TemplateContext.tsx — TemplateProvider + useTemplate() hook
+└── default/              — built-in default template
+    ├── VideoCard.tsx
+    ├── Header.tsx
+    ├── BottomNav.tsx
+    ├── Footer.tsx
+    ├── ProfileGrid.tsx
+    ├── ProfileHeader.tsx
+    ├── SimilarModels.tsx
+    ├── theme.ts           — color/spacing tokens
+    ├── index.ts           — exports SiteTemplate object
+    └── DESIGN.md          — design system documentation
+```
+
+### 13.3 SiteTemplate Interface (types.ts)
+
+```typescript
+interface SiteTemplate {
+  name: string;
+  VideoCard: React.ComponentType<VideoCardProps>;
+  Header: React.ComponentType<HeaderProps>;
+  BottomNav: React.ComponentType<BottomNavProps>;
+  Footer: React.ComponentType;
+  ProfileGrid: React.ComponentType<ProfileGridProps>;
+  ProfileHeader: React.ComponentType<ProfileHeaderProps>;
+  SimilarModels: React.ComponentType<SimilarModelsProps>;
+}
+```
+
+### 13.4 Template Activation
+
+Set `NEXT_PUBLIC_TEMPLATE=<name>` in the site's `.env`. If the env var is not set or the name is not found in the registry, falls back to the `default` template.
+
+**Important:** `NEXT_PUBLIC_` vars in Next.js are inlined at build time. Changing the template requires a container rebuild.
+
+### 13.5 Integration Points
+
+The template system is wired into the app at these points:
+
+| File | Change |
+|------|--------|
+| `web/src/components/SiteLayout.tsx` | Wraps app in `TemplateProvider`; uses `template.Header` and `template.BottomNav` |
+| `web/src/components/VideoCard.tsx` | Delegates to `useTemplate().VideoCard` |
+| `web/src/app/model/[slug]/ProfileGrid.tsx` | Delegates to `useTemplate().ProfileGrid` |
+| `web/src/app/model/[slug]/ProfileHeader.tsx` | Delegates to `useTemplate().ProfileHeader` |
+| `web/src/app/model/[slug]/SimilarModels.tsx` | Delegates to `useTemplate().SimilarModels` |
+
+### 13.6 Adding a New Template
+
+1. Create `web/src/templates/<name>/index.ts` exporting a `SiteTemplate` object with all required components
+2. Add one line to `web/src/templates/_shared/registry.ts`: `'<name>': () => import('../<name>')`
+3. Activate: set `NEXT_PUBLIC_TEMPLATE=<name>` in `.env` and rebuild
+
+### 13.7 Admin: Template Selector
+
+The website config page in admin (`/admin/websites/[id]`) includes a template selector dropdown. It writes `template` to `sites.config` JSONB. The `SiteConfig` TypeScript type (`web/src/types/index.ts`) and `web/src/lib/admin-api.ts` both include `template?: string`.
+
+### 13.8 Account Slug Fix (related)
+
+`api/internal/store/account_store.go` — `GetBySlug()` query changed from `WHERE slug = $1` to `WHERE COALESCE(slug, username) = $1`.
+
+**Root cause:** Some accounts have NULL `slug`. The frontend already used `account.slug || account.username` for model URLs, so URLs were correct, but the Go API couldn't find the account by username when slug was NULL, causing 404 on model pages.
+
+---
+
+## 14. Известные ограничения
 
 1. Нет retry при сбое batch insert в ClickHouse — события теряются
 2. Admin token без ротации/expire

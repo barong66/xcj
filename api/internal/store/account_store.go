@@ -158,7 +158,7 @@ func (s *AccountStore) GetBySlug(ctx context.Context, slug string, siteID int64,
 		SELECT id, platform, username, COALESCE(slug,''), COALESCE(display_name,''),
 			COALESCE(avatar_url,''), COALESCE(bio,''), COALESCE(social_links, '{}')::text::bytea,
 			is_paid, created_at
-		FROM accounts WHERE slug = $1
+		FROM accounts WHERE COALESCE(slug, username) = $1
 	`, slug).Scan(
 		&a.ID, &a.Platform, &a.Username, &a.Slug, &a.DisplayName,
 		&a.AvatarURL, &a.Bio, &socialLinksJSON,

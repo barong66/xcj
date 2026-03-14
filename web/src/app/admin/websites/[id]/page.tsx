@@ -134,6 +134,26 @@ function SiteSettingsContent() {
           Display Settings
         </h2>
 
+        {/* Template selector */}
+        <div className="mb-4">
+          <label className="block text-sm text-white mb-1">Template</label>
+          <p className="text-xs text-[#6b6b6b] mb-2">
+            UI kit for this site. Add new templates in{" "}
+            <code className="font-mono text-[#aaa]">web/src/templates/</code> and register in{" "}
+            <code className="font-mono text-[#aaa]">_shared/registry.ts</code>.
+            Activate with <code className="font-mono text-[#aaa]">NEXT_PUBLIC_TEMPLATE</code> env var.
+          </p>
+          <select
+            value={config.template || "default"}
+            onChange={(e) =>
+              setConfig((prev) => ({ ...prev, template: e.target.value }))
+            }
+            className="w-full bg-[#1e1e1e] border border-[#2e2e2e] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-accent"
+          >
+            <option value="default">default — Instagram-style dark feed</option>
+          </select>
+        </div>
+
         <label className="flex items-center justify-between cursor-pointer group">
           <div>
             <div className="text-sm text-white group-hover:text-accent transition-colors">

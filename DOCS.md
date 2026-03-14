@@ -1,6 +1,6 @@
 # xxxaccounter — Документация
 
-> Последнее обновление: 2026-03-12 (Admin Content page for frame management)
+> Последнее обновление: 2026-03-14 (Template system — pluggable UI kit per site; model page 404 fix)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
 ---
@@ -19,8 +19,9 @@
 
 Админ добавляет аккаунт социальной сети (например `@SpaceX` на Twitter). Парсер автоматически:
 - Скачивает список видео и изображений с аккаунта (видео, фото-посты, карусели)
-- Генерирует превью-картинку (тумбу) и 5-секундный превью-клип (для видео)
-- Извлекает 4 кадра из видео на равных интервалах (для баннеров)
+- Генерирует 5-секундный превью-клип (для видео)
+- Извлекает 10 кадров из видео на равных интервалах
+- **AI-powered thumbnail selection (NeuroScore):** все 10 кадров оцениваются NeuroScore Score API, лучший кадр автоматически выбирается как превью-картинка (тумба). Fallback: первый кадр → платформенная тумба → NULL
 - Instagram: фото-посты и carousel-изображения тоже парсятся как источники для баннеров
 - Twitter: image tweets парсятся наравне с видео
 - Загружает файлы в облачное хранилище (S3)
@@ -45,7 +46,7 @@
 
 ### 2.1 Профиль модели
 
-Страница `/model/[slug]` — профиль конкретного аккаунта:
+Страница `/model/[slug]` — профиль конкретного аккаунта. URLs используют `slug` аккаунта, или `username` как fallback если `slug` не задан (Go API: `COALESCE(slug, username)`).
 - Шапка: аватар, имя, платформа, кол-во подписчиков
 - Сетка видео-тумб аккаунта. Клик по тумбе открывает оригинальный URL (Instagram/Twitter) **напрямую в новой вкладке** (без промежуточной страницы `/video/{id}`). Каждый клик трекается как `profile_thumb_click` в аналитике
 - **Similar Models** (только для бесплатных аккаунтов) — секция внизу страницы, показывающая модели из той же категории. 3-колоночная сетка с аватарами и ссылками на профили
@@ -77,9 +78,24 @@
 Один бэкенд обслуживает несколько сайтов с разными доменами. Каждый сайт:
 - Имеет свой набор категорий и видео
 - Определяется автоматически по домену
-- Может иметь свою тему оформления
+- Может иметь свою тему оформления (template)
 
 Это позволяет запускать нишевые сайты (спорт, развлечения, технологии) на одной инфраструктуре.
+
+### 3.1 Template System (UI kit per site)
+
+Each site deployment can use a different visual template — a complete UI kit that replaces all user-facing components (VideoCard, Header, navigation, profile pages).
+
+**How to activate a template:**
+- Set `NEXT_PUBLIC_TEMPLATE=<name>` in the site's `.env` before building the web container
+- The template selector is also available in the admin panel under website settings
+
+**Built-in templates:**
+- `default` — the standard TemptGuide dark theme
+
+**Adding a template:** see `web/src/templates/_shared/registry.ts` and `web/src/templates/default/` as reference.
+
+**Technical details:** `web/src/templates/_shared/` contains the template contract (`types.ts`), registry, and React Context. All visual components delegate to the active template via `useTemplate()` hook.
 
 ### 4. Аналитика
 
@@ -141,7 +157,7 @@
 **Как работает:**
 - Админ включает Promotion для аккаунта → система автоматически генерирует баннеры из всех видео во всех настроенных размерах
 - При парсинге новых видео у платного аккаунта → баннеры генерируются автоматически
-- **Multi-frame:** из каждого видео создаётся до 5 вариантов баннера (1 из thumbnail + 4 из извлечённых фреймов). CTR-based selection автоматически выбирает лучший вариант
+- **Multi-frame:** из каждого видео создаётся до 11 вариантов баннера (1 из thumbnail + до 10 из извлечённых фреймов). CTR-based selection автоматически выбирает лучший вариант
 - **Image posts:** Instagram фото-посты, carousel-изображения и Twitter image tweets используются как дополнительные источники для баннеров
 - Готовые баннеры доступны по URL `/b/{id}` (302 redirect на CDN), клик по баннеру `/b/{id}/click` ведёт на профиль модели
 - Аналитика: banner_impression (показ) и banner_click (клик) в ClickHouse; Imprs/Clicks/CTR отображаются в админке
@@ -264,7 +280,7 @@
 При каждой конверсии с привязанным source + click_id бэкенд автоматически отстукивает S2S постбек в рекламную сеть.
 
 **Как настроить рекламную сеть (Ad Source):**
-1. Перейти в админку: /admin/ad-sources (или Promo → Настройки → Ad Sources)
+1. Перейти в админку: Promo → Настройки → Ad Sources (/admin/promo → Settings tab)
 2. Создать новый источник:
    - **Name** — slug рекламной сети (напр. `exoclick`, `trafficstars`)
    - **Postback URL** — шаблон URL с плейсхолдерами: `https://adnetwork.com/postback?click_id={click_id}&event={event}`
@@ -363,8 +379,7 @@ https://adnetwork.com/postback?click_id={click_id}&event={event}&payout={cpa}&ev
 - **Content** -- курирование фреймов видео: accordion-список всех видео с извлечёнными фреймами, выбор лучшего фрейма на видео, удаление лишних фреймов (по одному или массово). Фильтры по источнику (Instagram/Twitter) и aspect ratio (9:16, 16:9, 4:5, 1:1). Карточки фреймов 202×360px с NeuroScore
 - **Stats** — аналитика сайта с двумя вкладками: **Traffic Explorer** (по умолчанию) и **Video Stats** (тумбы с показами, кликами, CTR)
 - **Queue** — статус очереди парсинга (pending/running/done/failed)
-- **Promo** — все баннеры по всем paid-аккаунтам, управление размерами баннеров, embed-код для внешних сайтов. Четыре вкладки: Баннеры (список с hovers + source breakdown + embed-код через loader.js `<script>` тег с выбором стиля), Настройки (conversion tracker + ad sources), Статистика (воронка по источникам), Performance (overview cards, device breakdown, top referrers)
-- **Ad Sources** — управление рекламными сетями (name, postback URL шаблон, active/inactive)
+- **Promo** — все баннеры по всем paid-аккаунтам, управление размерами баннеров, embed-код для внешних сайтов. Четыре вкладки: Баннеры (список с hovers + source breakdown + embed-код через loader.js `<script>` тег с выбором стиля), Настройки (conversion tracker + **Ad Sources** — управление рекламными сетями: name, postback URL шаблон, active/inactive), Статистика (воронка по источникам), Performance (overview cards, device breakdown, top referrers)
 - **Categories** — управление категориями
 
 ## Монетизация
@@ -418,8 +433,9 @@ https://adnetwork.com/postback?click_id={click_id}&event={event}&payout={cpa}&ev
 ### Python Parser
 - Парсит Twitter (через yt-dlp) и Instagram (через API)
 - Поддерживает видео и изображения: Instagram photo posts, carousels, Twitter image tweets (media_type: video/image)
-- Генерирует тумбы (ffmpeg resize) и превью-клипы (5 сек)
-- **Frame extraction:** извлекает 4 кадра из видео (ffmpeg) + сохраняет carousel/photo изображения → `video_frames`
+- Генерирует превью-клипы (5 сек)
+- **Frame extraction:** извлекает 10 кадров из видео (ffmpeg) + сохраняет carousel/photo изображения → `video_frames`
+- **NeuroScore thumbnail selection:** scores all frames via NeuroScore Score API, selects the best-scoring frame as thumbnail (SM 480×270 + LG 810×1440). Fallback chain: best frame → first frame → platform thumbnail → NULL
 - Загружает в S3
 - AI категоризация через OpenAI GPT-4o Vision API (пачками по 50 видео)
 - Работает как фоновый воркер, опрашивая очередь в PostgreSQL
@@ -471,9 +487,11 @@ https://adnetwork.com/postback?click_id={click_id}&event={event}&payout={cpa}&ev
 → Задача в очередь (parse_queue, status=pending)
 → Python Worker подхватывает → Парсит платформу (видео + image posts)
 → Для каждого видео/поста:
-  → тумба + превью → S3
-  → Frame extraction: 4 кадра из видео / изображения из carousel → video_frames → S3
-  → запись в PostgreSQL (videos + video_frames)
+  → превью → S3
+  → Frame extraction: 10 кадров из видео / изображения из carousel → R2
+  → NeuroScore API: scores frames → selects best (is_selected=true)
+  → Best frame → SM + LG thumbnails → S3
+  → запись в PostgreSQL (videos + video_frames with score + is_selected)
 → AI категоризатор → OpenAI GPT-4o → назначает категории
 → Видео появляется на витрине
 ```
@@ -619,6 +637,56 @@ image (thumbnail / frame) → скачать → MediaPipe face-aware smart crop
 
 ### Стоимость
 - Бесплатно (OpenCV — локальная библиотека, внешних API нет)
+
+---
+
+## Система агентов (Claude Code)
+
+Проект использует команду Claude Code агентов для разработки и операций. Каждый агент — специалист со своей областью ответственности.
+
+### Агенты
+
+| Агент | Специализация |
+|-------|---------------|
+| project-manager | Координация, задачи ClickUp, документация |
+| go-backend | Go API, базы данных, кеш, middleware |
+| nextjs-frontend | React, admin panel, публичный сайт |
+| python-parser | Парсинг, медиа-обработка, AI категоризация |
+| devops | Docker, деплой, мониторинг |
+| tester | Тесты и регрессии |
+| **analytics** | BI-аналитика, SQL-запросы, бизнес-отчёты |
+
+### Analytics Agent (BI-аналитик)
+
+Специализированный агент для ответов на бизнес-вопросы. Работает напрямую с production базами данных через SSH (read-only).
+
+**Что умеет:**
+- Анализ трафика и конверсий (daily summary, CTR, воронки)
+- Эффективность баннеров по источникам (impressions → hovers → clicks → conversions)
+- Выручка по моделям (cross-database: ClickHouse events + PostgreSQL CPA prices)
+- Разбивка по устройствам, браузерам, ОС, географии
+- Анализ UTM-кампаний и реферреров
+- Статус постбеков (S2S) по рекламным сетям
+- Инвентарь контента (аккаунты, видео, баннеры)
+- Производительность по категориям
+
+**12 готовых SQL-шаблонов:**
+1. Дневной трафик сайта (events, impressions, clicks, conversions, sessions, CTR)
+2. Топ видео по CTR
+3. Воронка баннеров по источникам
+4. Воронка профиля аккаунта
+5. Разбивка по устройствам (device, OS, browser)
+6. География трафика
+7. Анализ UTM-кампаний
+8. Анализ реферреров
+9. Выручка по аккаунтам (cross-DB)
+10. Статус постбеков
+11. Инвентарь контента
+12. Производительность категорий (cross-DB)
+
+**Как использовать:** вызвать агента `/analytics` и задать вопрос на естественном языке. Агент сам составит SQL-запросы, выполнит их, и представит результат в виде читаемой таблицы с выводами.
+
+**Файл:** `.claude/agents/analytics.md`
 
 ---
 

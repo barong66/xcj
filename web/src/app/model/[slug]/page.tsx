@@ -15,7 +15,7 @@ import { OnlyFansHeaderSetter } from "@/contexts/OnlyFansContext";
 
 interface ModelPageProps {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ page?: string; v?: string; u?: string; src?: string; click_id?: string }>;
+  searchParams: Promise<{ page?: string; v?: string; src?: string; click_id?: string }>;
 }
 
 export async function generateMetadata({

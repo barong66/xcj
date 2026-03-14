@@ -170,6 +170,7 @@ export interface AdminCategory {
 
 export interface SiteConfig {
   show_social_buttons?: boolean;
+  template?: string;
 }
 
 export interface AdminSite {

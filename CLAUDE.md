@@ -66,7 +66,17 @@ Space: XXCJ (ID: 90126473643). After completing a task:
 - Mark task as done + add comment describing changes and modified files
 - Create new tasks for discovered bugs/TODOs
 
-## Workflow: Superpowers + Project Manager
+## CRITICAL: Project Manager Agent (MANDATORY)
+
+**After completing ANY task — ALWAYS run the `project-manager` agent as the FINAL step. NO EXCEPTIONS.**
+
+The PM agent does TWO things (both mandatory):
+1. **ClickUp** — find/create task, mark done, add comment, create follow-ups
+2. **MD files** — update TECHNICAL_SPEC.md, DOCS.md, docs/tasks/*.md
+
+This applies to ALL work: features, bug fixes, config changes, agent creation, documentation updates — everything. Never skip this step.
+
+## Workflow: Superpowers
 
 This project uses the **superpowers** plugin for development workflow. Follow the superpowers skills:
 1. **Brainstorming** → clarify requirements before coding
@@ -75,12 +85,7 @@ This project uses the **superpowers** plugin for development workflow. Follow th
 4. **Subagent-driven development** → dispatch implementer per task with TDD
 5. **Code review** → spec compliance + quality review
 6. **Finishing branch** → verify tests, merge/PR
-
-**After completing any task — ALWAYS run project-manager agent.** PM does TWO things:
-1. **ClickUp** — find/create task, mark done, add comment, create follow-ups
-2. **MD files** — update TECHNICAL_SPEC.md, DOCS.md, docs/tasks/*.md
-
-Both steps are mandatory. PM is the final step after superpowers finishing-a-development-branch.
+7. **Project Manager** → ALWAYS the final step (see above)
 
 ## Common Pitfalls
 

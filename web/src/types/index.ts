@@ -59,6 +59,7 @@ export interface VideosResponse {
 
 export interface SiteConfig {
   show_social_buttons?: boolean;
+  template?: string;
 }
 
 /** The API returns Account directly, with videos, video_count, and site_config embedded. */

@@ -38,7 +38,7 @@ export function ExploreGrid({
       <div className="grid grid-cols-3 gap-px bg-border">
         {items.map((video) => {
           const slug = video.account?.slug || video.account?.username || "";
-          const href = `/model/${slug}?v=${video.id}&u=${encodeURIComponent(video.original_url)}`;
+          const href = `/model/${slug}?v=${video.id}`;
 
           return (
             <Link

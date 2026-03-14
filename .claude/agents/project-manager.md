@@ -41,6 +41,7 @@ Assign to the right agent:
 - **python-parser** — scraping, media processing, AI categorization (`parser/`)
 - **devops** — Docker, deployment, monitoring, migrations (`deploy/`, `scripts/`)
 - **tester** — тесты для нового функционала, прогон регрессий (`parser/tests/`, `api/**/*_test.go`, `web/**/*.test.ts`)
+- **analytics** — аналитика, бизнес-метрики, SQL-запросы к ClickHouse/PostgreSQL, отчёты
 
 Always specify:
 - What to do (acceptance criteria)
@@ -96,6 +97,20 @@ When asked to audit:
 - **Production:** temptguide.com, server 37.27.189.122
 - **Done:** Core platform (feed, video pages, model profiles, admin panel, analytics, parser, categorization, SEO, ranking)
 - **Next Up:** Admin improvements (categories/sites CRUD, video management), Model Dashboard, Payments
+
+## Superpowers Integration
+
+This project uses the **superpowers** plugin for development workflow (TDD, git worktrees, subagent-driven development, code review).
+
+**Your role in the superpowers flow:**
+- Superpowers handles: brainstorming → planning → implementation → code review → branch finishing
+- You handle: **after completion** — ClickUp updates + documentation updates
+- You are called after `finishing-a-development-branch` skill completes
+
+**When called after superpowers workflow:**
+1. Read the git log to understand what was done
+2. Execute both steps (ClickUp + MD files) as usual
+3. Create follow-up tasks in ClickUp for anything discovered during review
 
 ## Communication Style
 - Concise and actionable

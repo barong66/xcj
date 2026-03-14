@@ -1,15 +1,16 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Header } from "./Header";
-import { BottomNav } from "./BottomNav";
 import { OnlyFansProvider } from "@/contexts/OnlyFansContext";
+import { TemplateProvider, useTemplate } from "@/templates/_shared/TemplateContext";
 
-export function SiteLayout({ children }: { children: React.ReactNode }) {
+const templateName = process.env.NEXT_PUBLIC_TEMPLATE || "default";
+
+function SiteContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isAdmin = pathname.startsWith("/admin");
+  const { Header, BottomNav } = useTemplate();
 
-  if (isAdmin) {
+  if (pathname.startsWith("/admin")) {
     return <>{children}</>;
   }
 
@@ -21,5 +22,13 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
       </main>
       <BottomNav />
     </OnlyFansProvider>
+  );
+}
+
+export function SiteLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <TemplateProvider name={templateName}>
+      <SiteContent>{children}</SiteContent>
+    </TemplateProvider>
   );
 }
