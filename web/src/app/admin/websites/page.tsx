@@ -2,9 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getAdminSites, refreshSiteContent } from "@/lib/admin-api";
+import { getAdminSites, getDashboardSites, refreshSiteContent } from "@/lib/admin-api";
 import type { AdminSite } from "@/lib/admin-api";
 import { ToastProvider, useToast } from "../Toast";
+
+function fmtNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
 
 export default function WebsitesPage() {
   return (
@@ -17,6 +23,7 @@ export default function WebsitesPage() {
 function WebsitesContent() {
   const router = useRouter();
   const [sites, setSites] = useState<AdminSite[]>([]);
+  const [trafficMap, setTrafficMap] = useState<Map<number, number>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshingId, setRefreshingId] = useState<number | null>(null);
@@ -25,8 +32,22 @@ function WebsitesContent() {
   useEffect(() => {
     const load = async () => {
       try {
-        const data = await getAdminSites();
-        setSites(data);
+        const [data, dashData] = await Promise.allSettled([
+          getAdminSites(),
+          getDashboardSites(),
+        ]);
+        if (data.status === "fulfilled") {
+          setSites(data.value);
+        } else {
+          throw data.reason;
+        }
+        if (dashData.status === "fulfilled") {
+          const map = new Map<number, number>();
+          for (const ds of dashData.value) {
+            map.set(ds.id, ds.sessions_7d);
+          }
+          setTrafficMap(map);
+        }
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to load websites",
@@ -91,6 +112,9 @@ function WebsitesContent() {
                   <th className="text-right px-4 py-3 text-[#6b6b6b] font-medium">
                     Categories
                   </th>
+                  <th className="text-right px-4 py-3 text-[#6b6b6b] font-medium">
+                    Traffic 7d
+                  </th>
                   <th className="text-center px-4 py-3 text-[#6b6b6b] font-medium">
                     Status
                   </th>
@@ -103,7 +127,7 @@ function WebsitesContent() {
                 {loading ? (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-4 py-8 text-center text-[#6b6b6b]"
                     >
                       Loading...
@@ -131,6 +155,11 @@ function WebsitesContent() {
                       </td>
                       <td className="px-4 py-3 text-right text-white tabular-nums">
                         {site.category_count}
+                      </td>
+                      <td className="px-4 py-3 text-right text-[#a0a0a0] tabular-nums">
+                        {trafficMap.get(site.id) != null
+                          ? fmtNum(trafficMap.get(site.id)!)
+                          : "—"}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span
@@ -193,7 +222,7 @@ function WebsitesContent() {
                 ) : (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-4 py-8 text-center text-[#6b6b6b]"
                     >
                       No websites found
