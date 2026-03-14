@@ -1006,3 +1006,22 @@ export async function bulkDeleteFrames(ids: number[]): Promise<{ deleted: number
     body: JSON.stringify({ ids }),
   });
 }
+
+// ─── Dashboard Sites ──────────────────────────────────────────────────────────
+
+export interface DashboardSite {
+  id: number;
+  domain: string;
+  name: string;
+  is_active: boolean;
+  video_count: number;
+  category_count: number;
+  sessions_7d: number;
+  conversions_7d: number;
+  ctr: number;
+}
+
+export async function getDashboardSites(): Promise<DashboardSite[]> {
+  const result = await adminFetch<{ sites: DashboardSite[] }>("/dashboard/sites");
+  return result.sites;
+}
