@@ -38,6 +38,7 @@ function QueueContent() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [initialized, setInitialized] = useState(false);
   const { toast } = useToast();
 
   const loadQueue = useCallback(async () => {
@@ -53,12 +54,18 @@ function QueueContent() {
       ]);
       setData(result);
       setSummary(sum);
+      if (!initialized) {
+        setInitialized(true);
+        if (sum.failed > 0) {
+          setStatusFilter("failed");
+        }
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to load queue", "error");
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, page, toast]);
+  }, [statusFilter, page, toast, initialized]);
 
   useEffect(() => {
     loadQueue();
