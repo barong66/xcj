@@ -26,10 +26,6 @@ export interface SimilarModelsProps {
   videos: Video[];
 }
 
-export interface ProfileStoriesProps {
-  accountId?: number;
-}
-
 export interface SortControlsProps {
   currentSort: SortOption;
 }
@@ -39,6 +35,10 @@ export interface SortControlsProps {
  * Each template lives in its own directory under web/src/templates/<name>/.
  * Add a new template: create the directory, implement all components,
  * export a `template` object of this type, and register it in registry.ts.
+ *
+ * NOTE: Only client-compatible components belong here (this object is passed
+ * through React Context). Server Components that fetch data (like ProfileStories)
+ * should be imported directly by template pages, not placed in this interface.
  */
 export interface SiteTemplate {
   name: string;
@@ -52,7 +52,6 @@ export interface SiteTemplate {
   ProfileGrid: React.ComponentType<ProfileGridProps>;
   ProfileHeader: React.ComponentType<ProfileHeaderProps>;
   SimilarModels: React.ComponentType<SimilarModelsProps>;
-  // Optional overridable components
-  ProfileStories?: React.ComponentType<ProfileStoriesProps>;
+  // Optional overridable client components
   SortControls?: React.ComponentType<SortControlsProps>;
 }

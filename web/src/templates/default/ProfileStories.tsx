@@ -1,8 +1,3 @@
-"use server";
-
-import { ProfileStories as ProfileStoriesComponent } from "@/components/ProfileStories";
-import type { ProfileStoriesProps } from "@/templates/_shared/types";
-
-export async function ProfileStories(props: ProfileStoriesProps) {
-  return <ProfileStoriesComponent />;
-}
+// Server Component — fetches its own data, not part of SiteTemplate context.
+// Template pages import this directly when needed.
+export { ProfileStories } from "@/components/ProfileStories";

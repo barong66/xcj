@@ -141,7 +141,7 @@ function SiteSettingsContent() {
             UI kit for this site. Add new templates in{" "}
             <code className="font-mono text-[#aaa]">web/src/templates/</code> and register in{" "}
             <code className="font-mono text-[#aaa]">_shared/registry.ts</code>.
-            Activate with <code className="font-mono text-[#aaa]">NEXT_PUBLIC_TEMPLATE</code> env var.
+            Select and save — takes effect within 5 minutes, no rebuild needed.
           </p>
           <select
             value={config.template || "default"}
