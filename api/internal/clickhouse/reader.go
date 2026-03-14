@@ -624,6 +624,7 @@ var allowedFilterColumns = map[string]string{
 	"utm_medium":   "utm_medium",
 	"utm_campaign": "utm_campaign",
 	"referrer":     "domain(referrer)",
+	"site_id":      "site_id",
 }
 
 // TrafficStatsParams holds validated query parameters for the traffic explorer.

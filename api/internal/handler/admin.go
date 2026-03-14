@@ -1005,7 +1005,7 @@ func (h *AdminHandler) GetTrafficStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filterKeys := []string{"source", "country", "device_type", "browser", "os",
-		"event_type", "utm_source", "utm_medium", "utm_campaign", "referrer"}
+		"event_type", "utm_source", "utm_medium", "utm_campaign", "referrer", "site_id"}
 	filters := make(map[string]string)
 	for _, key := range filterKeys {
 		if val := q.Get(key); val != "" {

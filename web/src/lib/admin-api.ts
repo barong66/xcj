@@ -852,6 +852,7 @@ export async function getTrafficStats(params: {
   days?: number;
   sort?: string;
   dir?: string;
+  site_id?: number;
   [key: string]: string | number | undefined;
 }): Promise<TrafficStatsResult> {
   const sp = new URLSearchParams();
