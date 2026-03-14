@@ -71,3 +71,8 @@ func SiteDetection(siteStore *store.SiteStore) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// WithSite injects a site into context. Used in tests.
+func WithSite(ctx context.Context, site *model.Site) context.Context {
+	return context.WithValue(ctx, siteContextKey, site)
+}

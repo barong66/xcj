@@ -179,6 +179,10 @@ func NewRouter(
 		accountHandler := NewAccountHandler(accountStore, c)
 		eventHandler := NewEventHandler(eventBuffer, adminStore)
 
+		// Site config (public — no auth required).
+		configHandler := NewConfigHandler()
+		r.Get("/config", configHandler.GetSiteConfig)
+
 		// Videos.
 		r.Get("/videos", videoHandler.List)
 		r.Get("/videos/{id}", videoHandler.Get)
