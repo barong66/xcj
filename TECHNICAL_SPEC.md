@@ -956,7 +956,7 @@ After extracting 10 frames and uploading them to R2, the parser scores them via 
 - **SimilarModels** — секция «Similar Models» на странице профиля; 3-колоночная сетка с аватарами; показывается только для free (не paid) аккаунтов; загружает популярные видео из той же категории, исключая текущий аккаунт
 - **OnlyFansContext** (`web/src/contexts/OnlyFansContext.tsx`) — React Context + Provider для передачи OnlyFans URL, displayName и avatarUrl из страниц (model profile, video detail) в глобальный Header. Компонент `OnlyFansHeaderSetter` вызывает `setOnlyFansUrl()`, `setDisplayName()`, `setAvatarUrl()` через useEffect при маунте страницы и очищает при анмаунте
 - **Header (sticky profile mode)** (`web/src/components/Header.tsx`) — на страницах модели (`/model/[slug]`) и видео (`/video/[id]`), Header показывает аватар модели + display name слева (вместо логотипа сайта), и синюю pill-кнопку "Follow me" с иконкой OF справа (если есть OnlyFans ссылка). На остальных страницах (главная, поиск, категории) Header показывает стандартный логотип сайта. Клик по OF-кнопке открывает OnlyFans профиль в новой вкладке и трекает `social_click`
-- **AdminShell** — layout админки (sidebar + header)
+- **AdminShell** — layout админки (sidebar + header). Пункты сайдбара: Dashboard, Accounts, Videos, Stats, Websites, Categories, Content, Promo, Queue, Health
 - **TemplateProvider / useTemplate()** (`web/src/templates/_shared/TemplateContext.tsx`) — React Context that provides the active template's components. Template is resolved from `NEXT_PUBLIC_TEMPLATE` env var. All user-facing components (VideoCard, Header, BottomNav, ProfileGrid, ProfileHeader, SimilarModels) are provided through this context
 
 ### 7.4 TypeScript типы
