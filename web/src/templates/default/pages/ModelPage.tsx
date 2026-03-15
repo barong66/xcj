@@ -125,9 +125,6 @@ export default async function ModelPage({
         <ProfileContent
           account={account}
           initialFeed={feedItems}
-          totalPages={totalPages}
-          slug={slug}
-          perPage={perPage}
         />
       </>
     );
