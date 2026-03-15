@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-14 (Admin panel redesign: grouped sidebar navigation, new analytics/ads routes, GET /api/v1/admin/dashboard/sites endpoint)
+> Last updated: 2026-03-15 (Profile Feed Composition System design — section 14: FeedRule Pipeline, ProfileFeedBuilder, SimilarityStrategy, config hierarchy)
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -1776,14 +1776,184 @@ The website config page in admin (`/admin/websites/[id]`) includes a template se
 
 ---
 
-## 14. Известные ограничения
+## 14. Profile Feed Composition System
 
-1. Нет retry при сбое batch insert в ClickHouse — события теряются
-2. Admin token без ротации/expire
-3. Парсеры требуют ручной настройки cookies (yt-dlp для Twitter, session_id для Instagram)
-4. Нет Swagger/OpenAPI документации
-5. view_count/click_count в PostgreSQL — кеш платформы (Twitter), НЕ наша статистика. Наша аналитика — в ClickHouse
-6. sendBeacon не ставит Content-Type: application/json, но Go json.NewDecoder работает с любым Content-Type
-7. Impression tracking: порог 50% видимости тумбы (IntersectionObserver threshold=0.5)
-8. content_click трекается только один раз за сессию через sessionStorage — при очистке sessionStorage (закрытие вкладки) счётчик сбрасывается
-9. Postback retry — максимальное число попыток и backoff стратегия зависят от реализации cron job
+> Status: **Design complete. V1 implementation NOT yet started.** (2026-03-15)
+
+A configurable, extensible **Feed Rule Pipeline** for the model profile page (`/model/[slug]`). Replaces the ad-hoc per-component layout logic with a single declarative config file per template.
+
+### 14.1 Core Types (web/src/lib/feed-types.ts)
+
+```typescript
+type FeedSource =
+  | 'current_model'      // videos from the viewed model's own account
+  | 'similar_category'   // accounts/videos sharing a category (v1: SameCategoryStrategy)
+  | 'same_country'       // models from the same country (future)
+  | 'trending';          // trending content site-wide (future)
+
+type FeedSort =
+  | 'trigger_first'   // paid/promo accounts bubble to top
+  | 'recent'          // newest first (published_at DESC)
+  | 'popular'         // most views
+  | 'ctr'             // highest click-through rate (requires ClickHouse; future)
+  | 'random_popular'; // weighted random sample from top-N by views
+
+interface FeedFilter {
+  account_type?: 'paid' | 'free' | 'any'; // filter by monetization status
+  country?: string;                         // ISO country code
+  category?: string;                        // category slug
+  min_views?: number;                       // minimum view count threshold
+}
+
+interface FeedRule {
+  source: FeedSource;
+  sort: FeedSort;
+  count: number;
+  filters?: FeedFilter;
+}
+```
+
+### 14.2 ProfileFeedBuilder (web/src/lib/profile-feed.ts)
+
+Server-side module. Single place for all feed assembly logic. Used by `ModelPage.tsx`.
+
+```typescript
+class ProfileFeedBuilder {
+  constructor(
+    private rules: FeedRule[],
+    private strategy: SimilarityStrategy,
+    private siteConfig?: SiteFeedOverride,
+  ) {}
+
+  async build(account: Account): Promise<FeedSection[]>
+}
+```
+
+**Build algorithm:**
+1. Merge template defaults with per-site overrides from `site_config` JSONB
+2. For each `FeedRule`: call the appropriate source fetcher (current model, similarity strategy, etc.)
+3. Apply `FeedFilter` if provided
+4. Apply `FeedSort`
+5. Return ordered `FeedSection[]` (title + videos/accounts)
+
+### 14.3 SimilarityStrategy (pluggable interface)
+
+```typescript
+interface SimilarityStrategy {
+  findSimilar(account: Account, count: number): Promise<Account[]>
+}
+```
+
+**V1 — SameCategoryStrategy** (`web/src/lib/similarity/same-category.ts`):
+- Finds the top category of the viewed model
+- Fetches accounts from the same category (excluding the viewed model)
+- Sorted by `trigger_first` (paid accounts first), then by video count
+
+**Future strategies:**
+- `LLMSimilarityStrategy` — uses OpenAI embeddings or GPT-4o to compute semantic similarity
+- `ExternalRecommendationStrategy` — delegates to an external recommendation API
+
+### 14.4 Feed Config (web/src/templates/default/feed-config.ts)
+
+Default rules for the `default` template. Open one file to see exactly what the profile page shows.
+
+```typescript
+// web/src/templates/default/feed-config.ts
+export const DEFAULT_FEED_RULES: FeedRule[] = [
+  {
+    source: 'current_model',
+    sort: 'recent',
+    count: 20,
+  },
+  {
+    source: 'similar_category',
+    sort: 'trigger_first',
+    count: 6,
+  },
+];
+```
+
+Each template defines its own `feed-config.ts`. To change the page layout, edit this file.
+
+### 14.5 Config Hierarchy
+
+```
+Template default rules (feed-config.ts)
+    ↓ merged with
+Per-site overrides (sites.config JSONB)
+    ↓ exposed as
+Admin UI: 3 simple fields
+  - model_count    (number of model's own videos to show)
+  - similar_count  (number of similar models to show)
+  - similar_sort   ('trigger_first' | 'popular' | 'random_popular')
+```
+
+**Admin UI location:** Websites → [site] → Display Settings → Profile Feed section
+
+**DB storage:** `sites.config` JSONB key `feed`:
+```json
+{
+  "feed": {
+    "model_count": 20,
+    "similar_count": 6,
+    "similar_sort": "trigger_first"
+  }
+}
+```
+
+### 14.6 V1 Files
+
+| File | Action | Description |
+|------|--------|-------------|
+| `web/src/lib/feed-types.ts` | Create | FeedRule, FeedSource, FeedSort, FeedFilter types |
+| `web/src/lib/profile-feed.ts` | Create | ProfileFeedBuilder server module |
+| `web/src/lib/similarity/same-category.ts` | Create | SameCategoryStrategy (v1) |
+| `web/src/templates/default/feed-config.ts` | Create | Default FeedRule[] config |
+| `web/src/templates/default/pages/ModelPage.tsx` | Modify | Use ProfileFeedBuilder |
+| `web/src/app/model/[slug]/ProfileContent.tsx` | Modify | Remove ad-hoc reorder logic |
+| `web/src/templates/default/SimilarModels.tsx` | Delete | Merged into feed system |
+| `web/src/app/admin/websites/[id]/page.tsx` | Modify | Add 3 feed override fields |
+
+### 14.7 How to Extend
+
+**Add a new source:**
+1. Add new value to `FeedSource` union type in `feed-types.ts`
+2. Implement a fetcher function in `profile-feed.ts`
+3. Wire it in `ProfileFeedBuilder.build()` switch statement
+4. Add the source to any `FeedRule[]` config
+
+**Add a new sort:**
+1. Add new value to `FeedSort` union type
+2. Implement sort logic in `profile-feed.ts` `applySort()` function
+
+**Add a new filter:**
+1. Add new field to `FeedFilter` interface
+2. Implement filter logic in `profile-feed.ts` `applyFilter()` function
+
+**Add a new similarity strategy:**
+1. Implement the `SimilarityStrategy` interface
+2. Register in `ProfileFeedBuilder` constructor or factory
+3. Select strategy via site config or template default
+
+### 14.8 Future Tasks
+
+- CTR sort: requires ClickHouse aggregation endpoint in Go API
+- `same_country` source: fetch models with same country code
+- `trending` source: weighted by recent click velocity
+- FeedFilter wiring: connect account_type, country, min_views filters
+- LLM / external similarity strategy
+- Home page feed composition (apply same FeedRule pattern to homepage)
+
+---
+
+## 15. Known Limitations
+
+1. No retry on ClickHouse batch insert failure — events may be lost
+2. Admin token has no rotation/expiry
+3. Parsers require manual cookie configuration (yt-dlp for Twitter, session_id for Instagram)
+4. No Swagger/OpenAPI documentation
+5. view_count/click_count in PostgreSQL is the platform's cached counter (Twitter), NOT our analytics. Our analytics are in ClickHouse
+6. sendBeacon does not set Content-Type: application/json, but Go json.NewDecoder works with any Content-Type
+7. Impression tracking: 50% visibility threshold (IntersectionObserver threshold=0.5)
+8. content_click is tracked only once per session via sessionStorage — counter resets when sessionStorage is cleared (tab close)
+9. Postback retry — max attempts and backoff strategy depend on cron job implementation

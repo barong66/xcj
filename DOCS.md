@@ -1,6 +1,6 @@
 # xxxaccounter — Документация
 
-> Last updated: 2026-03-14 (Admin panel redesign: grouped sidebar navigation, new analytics/ads routes)
+> Last updated: 2026-03-15 (Profile Feed Composition System design added — section 2.3)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
 ---
@@ -72,6 +72,21 @@
 - Компонент `OnlyFansHeaderSetter` на страницах модели/видео устанавливает URL, displayName и avatarUrl при маунте и очищает при анмаунте
 - `Header.tsx` — условный рендеринг: при наличии displayName/avatarUrl в контексте показывает аватар+имя, иначе логотип
 - Go API (`video_store.go`) включает `social_links` аккаунта в ответ для видео-эндпоинтов
+
+### 2.3 Profile Feed Composition (coming soon)
+
+The profile page layout (`/model/[slug]`) is configurable per site via a **Feed Rule Pipeline**. Instead of hard-coded sections, the page is described as a declarative list of rules — open one file and see exactly what the page shows.
+
+**What admins can configure:**
+- **Model video count** — how many of the model's own videos to display
+- **Similar count** — how many similar models to show in the "Similar Models" section
+- **Similar sort** — how to order similar models: Promoted first / Most popular / Random popular
+
+**Where to configure:** Admin panel → Websites → [select site] → Display Settings → Profile Feed section
+
+**How similarity works:** In v1, similar models share the same primary category as the viewed model. Paid/promoted accounts are shown first. In the future, similarity can be powered by AI (LLM embeddings) or an external recommendation service.
+
+**Technical note:** The feed is assembled server-side by `ProfileFeedBuilder` in a single place. To add a new content source or change the default layout, developers edit `web/src/templates/default/feed-config.ts`.
 
 ### 3. Мультисайт
 
