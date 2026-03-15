@@ -3,12 +3,13 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Account, Video } from "@/types";
+import type { FeedItem } from "@/lib/feed-types";
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { ProfileGrid } from "./ProfileGrid";
 
 interface ProfileContentProps {
   account: Account;
-  initialVideos: Video[];
+  initialFeed: FeedItem[];
   totalPages: number;
   slug: string;
   perPage: number;
@@ -16,11 +17,12 @@ interface ProfileContentProps {
 
 export function ProfileContent({
   account,
-  initialVideos,
+  initialFeed,
   totalPages,
   slug,
   perPage,
 }: ProfileContentProps) {
+  const initialVideos = initialFeed.map((item) => item.video);
   const searchParams = useSearchParams();
   const clickedVideoId = searchParams.get("v");
 

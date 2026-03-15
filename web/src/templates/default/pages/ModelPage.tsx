@@ -2,11 +2,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { getAccountBySlug, getVideos } from "@/lib/api";
+import { getAccountBySlug } from "@/lib/api";
 import { SITE_NAME, SITE_URL } from "@/lib/constants";
+import { buildProfileFeed, applyFeedOverrides } from "@/lib/profile-feed";
+import { profileFeedRules, similarityStrategy } from "../feed-config";
+import type { FeedItem } from "@/lib/feed-types";
 // Import from THIS template's own components so future templates can override visuals.
 import { ProfileHeader } from "../ProfileHeader";
-import { SimilarModels } from "../SimilarModels";
 // Behavior components — not template-specific yet.
 import { FanSiteButtons } from "@/app/model/[slug]/FanSiteButtons";
 import { ProfileContent } from "@/app/model/[slug]/ProfileContent";
@@ -71,7 +73,6 @@ export default async function ModelPage({
     if (!account || !account.id) notFound();
 
     const totalPages = Math.ceil((account.video_count || 0) / perPage);
-    const videos = account.videos || [];
     const showSocialButtons =
       account.site_config?.show_social_buttons !== false;
 
@@ -82,23 +83,18 @@ export default async function ModelPage({
         : `https://onlyfans.com/${ofRaw}`
       : null;
 
-    let similarVideos: import("@/types").Video[] = [];
-    if (!account.is_paid && videos.length > 0) {
-      const topCategory = videos[0]?.categories?.[0]?.slug;
-      if (topCategory) {
-        try {
-          const related = await getVideos({
-            category: topCategory,
-            exclude_account_id: account.id,
-            per_page: 9,
-            sort: "popular",
-          });
-          similarVideos = related.videos || [];
-        } catch {
-          // Silently fail — similar models section is optional.
-        }
-      }
-    }
+    const triggerVideoId = sp.v ?? null;
+
+    // Apply per-site overrides from site_config (profile_model_count, profile_similar_count, etc.)
+    const siteConfig = (account.site_config as Record<string, unknown>) ?? {};
+    const rules = applyFeedOverrides(profileFeedRules, siteConfig);
+
+    const feedItems = await buildProfileFeed(
+      account,
+      triggerVideoId,
+      rules,
+      similarityStrategy,
+    );
 
     return (
       <>
@@ -128,12 +124,11 @@ export default async function ModelPage({
         )}
         <ProfileContent
           account={account}
-          initialVideos={videos}
+          initialFeed={feedItems}
           totalPages={totalPages}
           slug={slug}
           perPage={perPage}
         />
-        {similarVideos.length > 0 && <SimilarModels videos={similarVideos} />}
       </>
     );
   } catch {
