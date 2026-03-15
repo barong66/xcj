@@ -35,9 +35,6 @@ async function adminFetch<T>(
   });
 
   if (res.status === 401) {
-    if (typeof window !== "undefined") {
-      window.location.href = "/admin/login";
-    }
     throw new Error("Unauthorized");
   }
 
@@ -171,6 +168,9 @@ export interface AdminCategory {
 export interface SiteConfig {
   show_social_buttons?: boolean;
   template?: string;
+  profile_model_count?: number;
+  profile_similar_count?: number;
+  profile_similar_sort?: string;
 }
 
 export interface AdminSite {

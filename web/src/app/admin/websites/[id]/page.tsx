@@ -252,6 +252,73 @@ function SiteSettingsContent() {
             </label>
           </div>
 
+          {/* Profile Feed */}
+          <div className="bg-[#141414] rounded-lg border border-[#1e1e1e] p-4 mb-6">
+            <h2 className="text-sm font-medium text-[#6b6b6b] mb-4">Profile Feed</h2>
+            <div className="space-y-4">
+              {/* Model videos count */}
+              <label className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-[#e0e0e0]">Model videos</p>
+                  <p className="text-xs text-[#6b6b6b]">
+                    How many videos from the current model (default: 5)
+                  </p>
+                </div>
+                <input
+                  type="number"
+                  min={1}
+                  max={24}
+                  className="w-16 bg-[#1a1a1a] border border-[#333] rounded px-2 py-1 text-sm text-white text-center"
+                  value={config.profile_model_count ?? 5}
+                  onChange={(e) =>
+                    setConfig({ ...config, profile_model_count: Number(e.target.value) || 5 })
+                  }
+                />
+              </label>
+
+              {/* Similar models count */}
+              <label className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-[#e0e0e0]">Similar models</p>
+                  <p className="text-xs text-[#6b6b6b]">
+                    How many videos from similar models (default: 9)
+                  </p>
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  max={24}
+                  className="w-16 bg-[#1a1a1a] border border-[#333] rounded px-2 py-1 text-sm text-white text-center"
+                  value={config.profile_similar_count ?? 9}
+                  onChange={(e) =>
+                    setConfig({ ...config, profile_similar_count: Number(e.target.value) })
+                  }
+                />
+              </label>
+
+              {/* Similar models sort */}
+              <label className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-[#e0e0e0]">Similar sort</p>
+                  <p className="text-xs text-[#6b6b6b]">
+                    How similar models are sorted (default: popular)
+                  </p>
+                </div>
+                <select
+                  className="bg-[#1a1a1a] border border-[#333] rounded px-2 py-1 text-sm text-white"
+                  value={config.profile_similar_sort ?? "popular"}
+                  onChange={(e) =>
+                    setConfig({ ...config, profile_similar_sort: e.target.value })
+                  }
+                >
+                  <option value="popular">Popular</option>
+                  <option value="recent">Recent</option>
+                  <option value="random_popular">Random Popular</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
           {/* Save */}
           <button
             onClick={handleSave}
