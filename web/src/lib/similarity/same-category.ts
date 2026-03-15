@@ -5,7 +5,7 @@ import type { FeedSort, FeedFilter, SimilarityStrategy } from "@/lib/feed-types"
 // Finds videos from other models that share the same top category
 // as the first video of the current account.
 // - Deduplicates by account: shows at most 1 video per other model.
-// - For "random_popular": fetches 3x count from API, shuffles, slices.
+// - For "random_popular": fetches 4x count from API, shuffles, slices.
 export class SameCategoryStrategy implements SimilarityStrategy {
   async fetch(
     account: Account,
