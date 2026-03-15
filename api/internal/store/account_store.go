@@ -65,9 +65,9 @@ func (s *AccountStore) GetByID(ctx context.Context, id int64, siteID int64, page
 	offset := (page - 1) * perPage
 	rows, err := s.pool.Query(ctx, `
 		SELECT v.id, v.account_id, v.platform, v.platform_id, v.original_url,
-			COALESCE(v.title,''), COALESCE(v.description,''), v.duration_sec, COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(v.preview_url,''),
-			v.width, v.height, v.country_id, v.view_count, v.click_count,
-			v.is_active, v.is_promoted, v.promoted_until, v.promotion_weight,
+			COALESCE(v.title,''), COALESCE(v.description,''), COALESCE(v.duration_sec,0), COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(v.preview_url,''),
+			COALESCE(v.width,0), COALESCE(v.height,0), v.country_id, COALESCE(v.view_count,0), COALESCE(v.click_count,0),
+			v.is_active, v.is_promoted, v.promoted_until, COALESCE(v.promotion_weight,0),
 			v.published_at, v.created_at
 		FROM videos v
 		JOIN site_videos sv ON sv.video_id = v.id
@@ -189,9 +189,9 @@ func (s *AccountStore) GetBySlug(ctx context.Context, slug string, siteID int64,
 	offset := (page - 1) * perPage
 	rows, err := s.pool.Query(ctx, `
 		SELECT v.id, v.account_id, v.platform, v.platform_id, v.original_url,
-			COALESCE(v.title,''), COALESCE(v.description,''), v.duration_sec, COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(v.preview_url,''),
-			v.width, v.height, v.country_id, v.view_count, v.click_count,
-			v.is_active, v.is_promoted, v.promoted_until, v.promotion_weight,
+			COALESCE(v.title,''), COALESCE(v.description,''), COALESCE(v.duration_sec,0), COALESCE(v.thumbnail_lg_url, v.thumbnail_url, ''), COALESCE(v.preview_url,''),
+			COALESCE(v.width,0), COALESCE(v.height,0), v.country_id, COALESCE(v.view_count,0), COALESCE(v.click_count,0),
+			v.is_active, v.is_promoted, v.promoted_until, COALESCE(v.promotion_weight,0),
 			v.published_at, v.created_at
 		FROM videos v
 		JOIN site_videos sv ON sv.video_id = v.id
