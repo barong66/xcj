@@ -1,6 +1,6 @@
 # Profile Feed Composition System
 
-> Status: **Design complete. V1 implementation NOT started.** (2026-03-15)
+> Status: **Implemented and deployed.** (2026-03-15)
 > ClickUp: https://app.clickup.com/t/869cg0gug
 
 ## Summary
@@ -20,20 +20,24 @@ A configurable, extensible **Feed Rule Pipeline** for the model profile page (`/
   ModelPage.tsx (server component)
         |
         v
-  ProfileFeedBuilder.build(account)
+  buildProfileFeed(account, rules, strategy, siteConfig)
+     |
+     |-- applyFeedOverrides(rules, siteConfig)
+     |       merges per-site overrides into template defaults
      |
      |-- rule: current_model -----> fetch account's own videos
-     |                                  apply sort (recent / popular / ...)
+     |                                  apply sort (recent / trigger_first / ...)
      |                                  apply filters
      |
-     |-- rule: similar_category --> SimilarityStrategy.findSimilar(account)
+     |-- rule: similar_category --> strategy.fetch(account, count, sort, filters)
      |                                  v1: SameCategoryStrategy
      |                                  future: LLMStrategy, ExternalAPIStrategy
-     |                                  apply sort (trigger_first / ...)
-     |                                  apply filters
      |
      v
-  FeedSection[]  (title + items)
+  FeedItem[]  (flat list, ordered by rule sequence)
+        |
+        v
+  ProfileContent.tsx  (pure presenter — renders FeedItem[])
         |
         v
   Rendered profile page
@@ -44,14 +48,14 @@ A configurable, extensible **Feed Rule Pipeline** for the model profile page (`/
 ```
 feed-config.ts (template defaults)
        |
-       v (merged with)
-sites.config JSONB key "feed"
+       v (merged with via applyFeedOverrides)
+sites.config JSONB (flat keys at root level)
        |
        v (exposed as)
-Admin UI: 3 fields on Websites → [site] → Display Settings
-  - model_count
-  - similar_count
-  - similar_sort
+Admin UI: 3 fields on Websites → [site] → Display Settings → Profile Feed
+  - profile_model_count
+  - profile_similar_count
+  - profile_similar_sort
 ```
 
 ---
@@ -74,18 +78,17 @@ type FeedSort =
   | 'ctr'             // highest CTR from ClickHouse (future)
   | 'random_popular'; // weighted random from top-N
 
-interface FeedFilter {
-  account_type?: 'paid' | 'free' | 'any';
-  country?: string;    // ISO code
-  category?: string;   // category slug
-  min_views?: number;
-}
+// Discriminated union — each filter is one specific constraint
+type FeedFilter =
+  | { type: 'account_type'; value: 'free' | 'paid' }
+  | { type: 'country';      value: string[] }
+  | { type: 'category';     value: string[] };
 
 interface FeedRule {
   source: FeedSource;
   sort: FeedSort;
   count: number;
-  filters?: FeedFilter;
+  filters?: FeedFilter[];  // array of constraints
 }
 ```
 
@@ -93,84 +96,92 @@ interface FeedRule {
 
 ## Key Modules
 
-### ProfileFeedBuilder (`web/src/lib/profile-feed.ts`)
+### buildProfileFeed / applyFeedOverrides (`web/src/lib/profile-feed.ts`)
 
-Server-side class. All feed assembly logic lives here.
+Server-side module. All feed assembly logic lives here.
 
 ```typescript
-class ProfileFeedBuilder {
-  constructor(
-    private rules: FeedRule[],
-    private strategy: SimilarityStrategy,
-    private siteConfig?: SiteFeedOverride,
-  ) {}
+async function buildProfileFeed(
+  account: Account,
+  rules: FeedRule[],
+  strategy: SimilarityStrategy,
+  siteConfig?: SiteFeedOverride
+): Promise<FeedItem[]>
 
-  async build(account: Account): Promise<FeedSection[]>
-}
+function applyFeedOverrides(
+  rules: FeedRule[],
+  overrides: SiteFeedOverride
+): FeedRule[]
 ```
 
 Algorithm:
-1. Merge template `FeedRule[]` defaults with `siteConfig` overrides
-2. For each rule: call source fetcher, apply filters, apply sort
-3. Return ordered `FeedSection[]`
+1. Call `applyFeedOverrides()` to merge template `FeedRule[]` defaults with `siteConfig` overrides
+2. For each rule: call source fetcher (current model or similarity strategy), apply filters, apply sort
+3. Return flat `FeedItem[]` in rule sequence order
 
 ### SimilarityStrategy (pluggable interface)
 
 ```typescript
 interface SimilarityStrategy {
-  findSimilar(account: Account, count: number): Promise<Account[]>
+  fetch(
+    account: Account,
+    count: number,
+    sort: FeedSort,
+    filters: FeedFilter[]
+  ): Promise<Video[]>;
 }
 ```
 
 **V1 — SameCategoryStrategy** (`web/src/lib/similarity/same-category.ts`):
 - Finds the model's top category
-- Fetches accounts from the same category (excluding viewed model)
-- Orders by `trigger_first` (paid first), then by video count
+- Fetches videos from accounts in the same category (excluding viewed model)
+- Respects the `sort` param passed by the calling `FeedRule`
 
 ### Default Config (`web/src/templates/default/feed-config.ts`)
 
 ```typescript
-export const DEFAULT_FEED_RULES: FeedRule[] = [
-  {
-    source: 'current_model',
-    sort: 'recent',
-    count: 20,
-  },
-  {
-    source: 'similar_category',
-    sort: 'trigger_first',
-    count: 6,
-  },
+export const profileFeedRules: FeedRule[] = [
+  { source: "current_model",    sort: "trigger_first", count: 1 },
+  { source: "current_model",    sort: "recent",        count: 5 },
+  { source: "similar_category", sort: "popular",       count: 9 },
 ];
+
+export const similarityStrategy = new SameCategoryStrategy();
 ```
+
+Rule order: one trigger/promoted video first, five recent from the same model, nine popular from similar models.
 
 ---
 
-## V1 Files
+## Implemented Files
 
 | File | Action | Notes |
 |------|--------|-------|
-| `web/src/lib/feed-types.ts` | Create | All types |
-| `web/src/lib/profile-feed.ts` | Create | ProfileFeedBuilder |
-| `web/src/lib/similarity/same-category.ts` | Create | V1 strategy |
-| `web/src/templates/default/feed-config.ts` | Create | Default rules |
-| `web/src/templates/default/pages/ModelPage.tsx` | Modify | Use builder |
-| `web/src/app/model/[slug]/ProfileContent.tsx` | Modify | Remove reorder logic |
-| `web/src/templates/default/SimilarModels.tsx` | Delete | Merged into feed |
-| `web/src/app/admin/websites/[id]/page.tsx` | Modify | Add 3 override fields |
+| `web/src/lib/feed-types.ts` | Created | FeedRule, FeedItem, FeedSource, FeedSort, FeedFilter, SimilarityStrategy |
+| `web/src/lib/profile-feed.ts` | Created | buildProfileFeed() + applyFeedOverrides() |
+| `web/src/lib/similarity/same-category.ts` | Created | SameCategoryStrategy (v1) |
+| `web/src/templates/default/feed-config.ts` | Created | profileFeedRules + similarityStrategy instance |
+| `web/src/templates/default/pages/ModelPage.tsx` | Modified | Uses buildProfileFeed(); removed SimilarModels usage |
+| `web/src/app/model/[slug]/ProfileContent.tsx` | Modified | Pure presenter; removed reorder logic + infinite scroll |
+| `web/src/lib/admin-api.ts` | Modified | Added profile_model_count, profile_similar_count, profile_similar_sort to SiteConfig |
+| `web/src/app/admin/websites/[id]/page.tsx` | Modified | Added Profile Feed section with 3 editable fields |
+| `web/src/templates/_shared/types.ts` | Modified | Removed SimilarModels from SiteTemplate |
+| `web/src/templates/default/index.ts` | Modified | Removed SimilarModels export |
+| `web/src/templates/default/SimilarModels.tsx` | Deleted | Replaced by feed pipeline |
+| `web/src/app/model/[slug]/SimilarModels.tsx` | Deleted | Replaced by feed pipeline |
 
 ---
 
-## Future Tasks (ClickUp subtasks)
+## ClickUp Subtasks
 
-| Task | Priority | ClickUp |
-|------|----------|---------|
-| V1 implementation (ProfileFeedBuilder + SameCategoryStrategy + feed-config) | HIGH | https://app.clickup.com/t/869cg0gvj |
-| Admin UI: 3 feed override fields (model_count, similar_count, similar_sort) | NORMAL | https://app.clickup.com/t/869cg0h03 |
-| CTR sort (ClickHouse aggregation endpoint in Go API) | NORMAL | https://app.clickup.com/t/869cg0h33 |
-| same_country and trending sources | LOW | https://app.clickup.com/t/869cg0h4k |
-| FeedFilter wiring (account_type, country, min_views) | LOW | https://app.clickup.com/t/869cg0h5u |
-| Home page feed composition (same FeedRule pattern) | LOW | https://app.clickup.com/t/869cg0h6f |
+| Task | Priority | Status | ClickUp |
+|------|----------|--------|---------|
+| V1 implementation (buildProfileFeed + SameCategoryStrategy + feed-config) | HIGH | DONE | https://app.clickup.com/t/869cg0gvj |
+| Admin UI: 3 feed override fields (model_count, similar_count, similar_sort) | NORMAL | DONE | https://app.clickup.com/t/869cg0h03 |
+| CTR sort (ClickHouse aggregation endpoint in Go API) | NORMAL | TODO | https://app.clickup.com/t/869cg0h33 |
+| same_country and trending sources | LOW | TODO | https://app.clickup.com/t/869cg0h4k |
+| FeedFilter wiring (account_type, country, min_views) | LOW | TODO | https://app.clickup.com/t/869cg0h5u |
+| Home page feed composition (same FeedRule pattern) | LOW | TODO | https://app.clickup.com/t/869cg0h6f |
 
 ---
 

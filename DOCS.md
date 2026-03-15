@@ -1,6 +1,6 @@
 # xxxaccounter — Документация
 
-> Last updated: 2026-03-15 (Profile Feed Composition System design added — section 2.3)
+> Last updated: 2026-03-15 (Profile Feed Composition System implemented — section 2.3)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
 ---
@@ -73,20 +73,23 @@
 - `Header.tsx` — условный рендеринг: при наличии displayName/avatarUrl в контексте показывает аватар+имя, иначе логотип
 - Go API (`video_store.go`) включает `social_links` аккаунта в ответ для видео-эндпоинтов
 
-### 2.3 Profile Feed Composition (coming soon)
+### 2.3 Profile Feed Composition
 
-The profile page layout (`/model/[slug]`) is configurable per site via a **Feed Rule Pipeline**. Instead of hard-coded sections, the page is described as a declarative list of rules — open one file and see exactly what the page shows.
+The profile page layout (`/model/[slug]`) is configurable per site via a **Feed Rule Pipeline**. Instead of hard-coded sections, the page is described as a declarative list of `FeedRule[]` — open one file (`web/src/templates/default/feed-config.ts`) to see exactly what the page shows.
 
-**What admins can configure:**
-- **Model video count** — how many of the model's own videos to display
-- **Similar count** — how many similar models to show in the "Similar Models" section
-- **Similar sort** — how to order similar models: Promoted first / Most popular / Random popular
+**Default page layout (default template):**
+1. One "trigger" video from the model (paid/promoted account's video comes first)
+2. Five recent videos from the same model
+3. Nine popular videos from similar models (same primary category)
 
-**Where to configure:** Admin panel → Websites → [select site] → Display Settings → Profile Feed section
+**What admins can configure** (Admin panel → Websites → [site] → Display Settings → Profile Feed):
+- **Model video count** (`profile_model_count`) — total count of the model's own videos
+- **Similar count** (`profile_similar_count`) — how many similar-model videos to show
+- **Similar sort** (`profile_similar_sort`) — ordering: `trigger_first` / `popular` / `random_popular`
 
-**How similarity works:** In v1, similar models share the same primary category as the viewed model. Paid/promoted accounts are shown first. In the future, similarity can be powered by AI (LLM embeddings) or an external recommendation service.
+**How similarity works:** V1 uses `SameCategoryStrategy` — similar models share the same primary category as the viewed model. Paid/promoted accounts are surfaced first. Future: LLM embeddings or external recommendation API.
 
-**Technical note:** The feed is assembled server-side by `ProfileFeedBuilder` in a single place. To add a new content source or change the default layout, developers edit `web/src/templates/default/feed-config.ts`.
+**Technical note:** The feed is assembled server-side by `buildProfileFeed()` in `web/src/lib/profile-feed.ts`. `ProfileContent.tsx` is a pure presenter that only renders the resulting `FeedItem[]`. To change the default layout, edit `web/src/templates/default/feed-config.ts`. Per-site overrides are stored in `sites.config` JSONB and applied via `applyFeedOverrides()`.
 
 ### 3. Мультисайт
 
