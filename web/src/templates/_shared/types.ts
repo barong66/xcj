@@ -22,10 +22,6 @@ export interface ProfileHeaderProps {
   account: Account;
 }
 
-export interface SimilarModelsProps {
-  videos: Video[];
-}
-
 export interface SortControlsProps {
   currentSort: SortOption;
 }
@@ -51,7 +47,6 @@ export interface SiteTemplate {
   VideoCard: React.ComponentType<VideoCardProps>;
   ProfileGrid: React.ComponentType<ProfileGridProps>;
   ProfileHeader: React.ComponentType<ProfileHeaderProps>;
-  SimilarModels: React.ComponentType<SimilarModelsProps>;
   // Optional overridable client components
   SortControls?: React.ComponentType<SortControlsProps>;
 }

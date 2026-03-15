@@ -6,7 +6,6 @@ import { Footer } from "./Footer";
 import { VideoCard } from "./VideoCard";
 import { ProfileGrid } from "./ProfileGrid";
 import { ProfileHeader } from "./ProfileHeader";
-import { SimilarModels } from "./SimilarModels";
 import { SortControls } from "./SortControls";
 
 export const template: SiteTemplate = {
@@ -18,6 +17,5 @@ export const template: SiteTemplate = {
   VideoCard,
   ProfileGrid,
   ProfileHeader,
-  SimilarModels,
   SortControls,
 };
