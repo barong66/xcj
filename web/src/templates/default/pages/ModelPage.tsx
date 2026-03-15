@@ -72,7 +72,6 @@ export default async function ModelPage({
     const account = await getAccountBySlug(slug, 1, perPage);
     if (!account || !account.id) notFound();
 
-    const totalPages = Math.ceil((account.video_count || 0) / perPage);
     const showSocialButtons =
       account.site_config?.show_social_buttons !== false;
 
