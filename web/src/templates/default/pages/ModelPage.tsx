@@ -69,7 +69,7 @@ export default async function ModelPage({
   const perPage = 24;
 
   try {
-    const account = await getAccountBySlug(slug, 1, perPage);
+    const account = await getAccountBySlug(slug, 1, perPage, { top_categories: 3 });
     if (!account || !account.id) notFound();
 
     const showSocialButtons =
