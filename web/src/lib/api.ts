@@ -86,10 +86,14 @@ export async function getAccountBySlug(
   slug: string,
   page: number = 1,
   per_page: number = 24,
+  options?: { top_categories?: number },
 ): Promise<AccountResponse> {
   const searchParams = new URLSearchParams();
   searchParams.set("page", String(page));
   searchParams.set("per_page", String(per_page));
+  if (options?.top_categories) {
+    searchParams.set("top_categories", String(options.top_categories));
+  }
 
   return fetchAPI<AccountResponse>(
     `/api/v1/accounts/slug/${encodeURIComponent(slug)}?${searchParams.toString()}`,
