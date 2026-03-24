@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-15 (Profile Feed Composition System implemented — section 14: FeedRule Pipeline, buildProfileFeed, SimilarityStrategy, admin overrides)
+> Last updated: 2026-03-24 (Account Top Categories designed — section 14: added Account Top Categories subsection; ClickUp: https://app.clickup.com/t/869cm8qvx)
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -1953,6 +1953,22 @@ Admin UI: 3 simple fields
 - FeedFilter wiring: connect account_type, country filters in SameCategoryStrategy (ClickUp: https://app.clickup.com/t/869cg0h5u)
 - LLM / external similarity strategy
 - Home page feed composition: apply same FeedRule pattern to homepage (ClickUp: https://app.clickup.com/t/869cg0h6f)
+
+### Account Top Categories
+
+**Endpoint:** `GET /api/v1/accounts/{slug}?top_categories=N`
+
+Returns `top_categories` array on the Account object — categories ranked by total view_count of the account's videos on the current site.
+
+**Model:**
+- `CategorySummary` — `{ id, slug, name, total_views }`
+- `Account.TopCategories []CategorySummary` (omitempty)
+
+**Store:** `AccountStore.GetTopCategoriesByViews(ctx, accountID, siteID, limit)` — one SQL query, batched GROUP BY.
+
+**Frontend:** `getAccountBySlug(slug, page, per_page, { top_categories: 3 })` — adds query param. `SameCategoryStrategy` reads `account.top_categories[0].slug` directly (no extra HTTP call).
+
+**Status:** Designed, pending implementation. Design doc: `docs/superpowers/specs/2026-03-24-account-top-categories-design.md`
 
 ---
 

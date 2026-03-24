@@ -1,6 +1,6 @@
 # xxxaccounter — Документация
 
-> Last updated: 2026-03-15 (Profile Feed Composition System implemented — section 2.3)
+> Last updated: 2026-03-24 (Account Top Categories coming soon note added — section 2.3)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
 ---
@@ -90,6 +90,8 @@ The profile page layout (`/model/[slug]`) is configurable per site via a **Feed 
 **How similarity works:** V1 uses `SameCategoryStrategy` — similar models share the same primary category as the viewed model. Paid/promoted accounts are surfaced first. Future: LLM embeddings or external recommendation API.
 
 **Technical note:** The feed is assembled server-side by `buildProfileFeed()` in `web/src/lib/profile-feed.ts`. `ProfileContent.tsx` is a pure presenter that only renders the resulting `FeedItem[]`. To change the default layout, edit `web/src/templates/default/feed-config.ts`. Per-site overrides are stored in `sites.config` JSONB and applied via `applyFeedOverrides()`.
+
+**Coming soon:** Similar models matching will use account top-categories (ranked by view count) instead of the current single-video fallback. Configured via `?top_categories=3` on the account endpoint.
 
 ### 3. Мультисайт
 
