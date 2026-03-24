@@ -15,6 +15,15 @@ type Account struct {
 	CreatedAt   time.Time         `json:"created_at" db:"created_at"`
 
 	// Joined fields
-	Videos     []Video `json:"videos,omitempty"`
-	VideoCount int64   `json:"video_count,omitempty"`
+	Videos         []Video            `json:"videos,omitempty"`
+	VideoCount     int64              `json:"video_count,omitempty"`
+	TopCategories  []CategorySummary  `json:"top_categories,omitempty"`
+}
+
+// CategorySummary is a category with its total view count for an account.
+type CategorySummary struct {
+	ID         int64  `json:"id"`
+	Slug       string `json:"slug"`
+	Name       string `json:"name"`
+	TotalViews int64  `json:"total_views"`
 }
