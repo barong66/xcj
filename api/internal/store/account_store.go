@@ -223,3 +223,47 @@ func (s *AccountStore) GetBySlug(ctx context.Context, slug string, siteID int64,
 
 	return &a, nil
 }
+
+// GetTopCategoriesByViews returns the top N categories for an account,
+// ranked by total view count of the account's active videos on the given site.
+func (s *AccountStore) GetTopCategoriesByViews(
+	ctx context.Context,
+	accountID, siteID int64,
+	limit int,
+) ([]model.CategorySummary, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.id, c.slug, c.name, COALESCE(SUM(v.view_count), 0) AS total_views
+		FROM categories c
+		JOIN video_categories vc ON vc.category_id = c.id
+		JOIN videos v ON v.id = vc.video_id
+		JOIN site_videos sv ON sv.video_id = v.id
+		WHERE v.account_id = $1
+		  AND sv.site_id   = $2
+		  AND v.is_active  = true
+		GROUP BY c.id, c.slug, c.name
+		ORDER BY total_views DESC
+		LIMIT $3
+	`, accountID, siteID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("account_store: get top categories: %w", err)
+	}
+	defer rows.Close()
+
+	var cats []model.CategorySummary
+	for rows.Next() {
+		var c model.CategorySummary
+		if err := rows.Scan(&c.ID, &c.Slug, &c.Name, &c.TotalViews); err != nil {
+			return nil, fmt.Errorf("account_store: scan category: %w", err)
+		}
+		cats = append(cats, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("account_store: top categories rows: %w", err)
+	}
+
+	return cats, nil
+}
