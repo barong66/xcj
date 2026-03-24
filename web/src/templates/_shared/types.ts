@@ -26,6 +26,10 @@ export interface SortControlsProps {
   currentSort: SortOption;
 }
 
+export interface SimilarModelsProps {
+  videos: Video[];
+}
+
 /**
  * SiteTemplate defines the full UI kit for a site design.
  * Each template lives in its own directory under web/src/templates/<name>/.
@@ -49,4 +53,5 @@ export interface SiteTemplate {
   ProfileHeader: React.ComponentType<ProfileHeaderProps>;
   // Optional overridable client components
   SortControls?: React.ComponentType<SortControlsProps>;
+  SimilarModels?: React.ComponentType<SimilarModelsProps>;
 }

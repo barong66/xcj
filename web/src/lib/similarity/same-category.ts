@@ -1,4 +1,4 @@
-import { getVideos, getVideo } from "@/lib/api";
+import { getVideos } from "@/lib/api";
 import type { Account, Video } from "@/types";
 import type { FeedSort, FeedFilter, SimilarityStrategy } from "@/lib/feed-types";
 
@@ -13,19 +13,7 @@ export class SameCategoryStrategy implements SimilarityStrategy {
     sort: FeedSort,
     _filters: FeedFilter[]
   ): Promise<Video[]> {
-    // account.videos from getAccountBySlug don't include categories (no JOIN in account store).
-    // Fall back to fetching the first video individually — video store loads categories.
-    let topCategory = account.videos?.[0]?.categories?.[0]?.slug;
-    if (!topCategory) {
-      const firstId = account.videos?.[0]?.id;
-      if (!firstId) return [];
-      try {
-        const firstVideo = await getVideo(String(firstId));
-        topCategory = firstVideo?.categories?.[0]?.slug;
-      } catch {
-        return [];
-      }
-    }
+    const topCategory = account.top_categories?.[0]?.slug;
     if (!topCategory) return [];
 
     // "ctr" and "random_popular" are not direct API params — map to "popular".
