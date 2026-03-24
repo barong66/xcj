@@ -147,9 +147,10 @@ func (h *AccountHandler) GetBySlug(w http.ResponseWriter, r *http.Request) {
 
 	page := intParam(r, "page", 1)
 	perPage := intParam(r, "per_page", 24)
+	topCatLimit := intParam(r, "top_categories", 0)
 
-	// Try cache (only first page).
-	if page == 1 {
+	// Try cache (only first page, only when top_categories not requested).
+	if page == 1 && topCatLimit == 0 {
 		cacheKey := cache.AccountSlugKey(slug, perPage)
 		var cached accountResponse
 		if h.cache.GetJSON(r.Context(), cacheKey, &cached) {
@@ -170,9 +171,18 @@ func (h *AccountHandler) GetBySlug(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if topCatLimit > 0 {
+		cats, err := h.accounts.GetTopCategoriesByViews(r.Context(), account.ID, site.ID, topCatLimit)
+		if err != nil {
+			slog.Warn("handler: get top categories", "error", err, "account_id", account.ID)
+		} else {
+			account.TopCategories = cats
+		}
+	}
+
 	resp := buildAccountResponse(account, page, perPage, site)
 
-	if page == 1 {
+	if page == 1 && topCatLimit == 0 {
 		cacheKey := cache.AccountSlugKey(slug, perPage)
 		h.cache.SetDetail(r.Context(), cacheKey, resp)
 	}
