@@ -9,6 +9,7 @@ export interface Account {
   platform: "twitter" | "instagram";
   is_paid: boolean;
   video_count?: number;
+  top_categories?: AccountCategory[];
   videos?: Video[];
 }
 
@@ -18,6 +19,13 @@ export interface AccountSummary {
   slug: string;
   display_name: string;
   avatar_url: string;
+}
+
+export interface AccountCategory {
+  id: number;
+  slug: string;
+  name: string;
+  total_views: number;
 }
 
 export interface Category {
