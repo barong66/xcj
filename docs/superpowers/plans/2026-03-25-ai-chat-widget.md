@@ -1044,29 +1044,13 @@ In `web/src/types/index.ts`:
   chat_enabled?: boolean;
 ```
 
-2. Add chat event types to the `AnalyticsEventType` union (after `"content_click"`):
+2. Add chat event types to the `AnalyticsEventType` union. In `web/src/types/index.ts`, find the last line of the union (currently `| "content_click"`) and add three lines after it:
 ```typescript
-export type AnalyticsEventType =
-  | "view"
-  | "click"
-  | "hover"
-  | "impression"
-  | "feed_impression"
-  | "feed_click"
-  | "profile_view"
-  | "profile_thumb_impression"
-  | "profile_thumb_click"
-  | "social_click"
-  | "share_click"
-  | "ad_landing"
-  | "banner_impression"
-  | "banner_click"
-  | "banner_hover"
-  | "content_click"
   | "chat_open"
   | "chat_message"
   | "chat_cta_click";
 ```
+Do not replace the entire union — only append these three lines.
 
 - [ ] **Step 2: Add chat analytics helpers to analytics.ts**
 
