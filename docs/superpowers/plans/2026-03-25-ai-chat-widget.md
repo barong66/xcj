@@ -238,11 +238,14 @@ func (s *ChatStore) GetChatConfig(ctx context.Context, siteID int64, slug string
             a.chat_prompt,
             a.chat_ad_text
         FROM accounts a
-        JOIN account_sites ast ON ast.account_id = a.id
         WHERE (a.slug = $1 OR a.username = $1)
-          AND ast.site_id = $2
           AND a.is_active = true
           AND a.chat_enabled = true
+          AND EXISTS (
+              SELECT 1 FROM videos v
+              JOIN site_videos sv ON sv.video_id = v.id
+              WHERE v.account_id = a.id AND sv.site_id = $2
+          )
     `, slug, siteID).Scan(
         &cfg.AccountID,
         &cfg.Name,
@@ -836,7 +839,7 @@ r.Post("/chat/message", chatHandler.Message)
 Also:
 1. Add `xaiAPIKey string` parameter to `NewRouter()` signature in `router.go`
 2. Update `api/cmd/server/main.go` to pass `cfg.XAIAPIKey` to `NewRouter()`
-3. **WriteTimeout fix:** Check `main.go` for `WriteTimeout` on the `http.Server`. If it's set to 30s or similar, SSE streams longer than that will be cut off. Either remove the write timeout or set it to 0 for the chat route. The simplest fix: set `WriteTimeout: 0` on the server (the existing 30s timeout predates SSE). Alternatively, wrap the SSE response writer to suppress the timeout per-request. Ask the project owner if unsure.
+3. **WriteTimeout fix:** In `api/cmd/server/main.go`, the `http.Server` has `WriteTimeout: 30 * time.Second`. This will cut off SSE streams after 30 seconds. Change it to `WriteTimeout: 0` (disabled) to support long-lived SSE connections. The read and idle timeouts provide sufficient protection against slow clients.
 
 - [ ] **Step 2: Build to verify**
 
@@ -975,7 +978,7 @@ cd api && go build ./internal/store/...
 
 Expected: no errors
 
-- [ ] **Step 7: Run tests to verify they pass**
+- [ ] **Step 6: Run tests to verify they pass**
 
 ```bash
 cd api && go test ./internal/store/... -v -run TestUpdateAccountInput_ChatFields
@@ -984,7 +987,7 @@ cd api && go test ./... 2>&1 | tail -5
 
 Expected: PASS, no compilation errors
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add api/internal/store/admin_store.go
