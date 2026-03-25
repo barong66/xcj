@@ -24,6 +24,18 @@ The AI agent is powered by **Grok (xAI API)**, proxied through the Go API with S
 
 ---
 
+## Grok API Configuration
+
+- **Endpoint:** `https://api.x.ai/v1/chat/completions` (OpenAI-compatible format)
+- **Model:** `grok-3`
+- **API key:** `XAI_API_KEY` environment variable
+- **Timeout:** 10 seconds
+- **Max tokens per response:** 300 (keep responses short)
+- **Context window:** last 20 messages from history (client trims before sending)
+- **Greeting generation:** single Grok call on `GET /chat/config`; result cached in Redis for 24h per slug. Fallback if Grok fails: `"Hey! 😊 What's up?"`
+
+---
+
 ## Architecture
 
 ```
@@ -102,7 +114,19 @@ data: {"delta": "!"}
 data: {"done": true, "cta": {"text": "Check my OF 💜", "url": "https://onlyfans.com/..."}}
 ```
 
-The final `done` event optionally includes a `cta` object when the agent decides to insert a promotional link. The agent signals this via a structured tag in its response that the API strips before streaming.
+The final `done` event optionally includes a `cta` object when the agent decides to insert a promotional link. The agent signals this via a structured JSON tag in its response that the API detects and strips before streaming:
+
+**Grok response format (raw):** Grok is instructed to append a CTA tag on a new line when promoting a link:
+```
+Tell me about yourself 😊 [CTA:{"text":"Check my OnlyFans 💜","url":"https://onlyfans.com/sophia"}]
+```
+
+The Go API scans the response stream, extracts any `[CTA:{...}]` tag, parses the JSON, strips the tag from the streamed text, and includes the parsed CTA in the final `done` SSE event.
+
+**Error handling:**
+- Grok unavailable / timeout (10s) → `data: {"error": "unavailable"}` — frontend shows "Sophia is unavailable right now, try again later"
+- Malformed CTA tag → skip CTA silently, still stream the text
+- Stream interrupted mid-response → frontend shows partial message + retry button
 
 ### System Prompt Construction
 
@@ -173,7 +197,15 @@ Add "Chat" section to model edit page in admin:
 - **Custom prompt** — textarea (placeholder: "Leave empty to auto-generate from model data")
 - **Ad message** — textarea (placeholder: "Leave empty — agent will use model's social links")
 
-**API change:** extend `PATCH /api/admin/accounts/{id}` to accept and save the 3 new fields.
+**API change:** extend `PATCH /api/admin/accounts/{id}` to accept and save the 3 new fields:
+```json
+{
+  "chat_enabled": true,
+  "chat_prompt": "You are Sophia, a fun and flirty...",
+  "chat_ad_text": "Check out my exclusive content 💜"
+}
+```
+Validation: `chat_prompt` max 2000 chars, `chat_ad_text` max 500 chars.
 
 ---
 
