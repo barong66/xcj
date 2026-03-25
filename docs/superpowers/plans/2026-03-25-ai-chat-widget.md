@@ -1028,46 +1028,81 @@ git commit -m "feat(analytics): add chat_open, chat_message, chat_cta_click even
 
 ## Chunk 2: Frontend — Chat UI Components
 
-### Task 8: Add chat_enabled to Account type and API fetch
+### Task 8: Add chat_enabled to Account type + analytics event types and helpers
 
 **Files:**
 - Modify: `web/src/types/index.ts`
+- Modify: `web/src/lib/analytics.ts`
 
-- [ ] **Step 1: Add chat_enabled to Account interface**
+- [ ] **Step 1: Add chat_enabled to Account interface and chat events to AnalyticsEventType**
 
-In `web/src/types/index.ts`, add to the `Account` interface:
+In `web/src/types/index.ts`:
+
+1. Add `chat_enabled?: boolean` to the `Account` interface (after `videos?`):
+```typescript
+  videos?: Video[];
+  chat_enabled?: boolean;
+```
+
+2. Add chat event types to the `AnalyticsEventType` union (after `"content_click"`):
+```typescript
+export type AnalyticsEventType =
+  | "view"
+  | "click"
+  | "hover"
+  | "impression"
+  | "feed_impression"
+  | "feed_click"
+  | "profile_view"
+  | "profile_thumb_impression"
+  | "profile_thumb_click"
+  | "social_click"
+  | "share_click"
+  | "ad_landing"
+  | "banner_impression"
+  | "banner_click"
+  | "banner_hover"
+  | "content_click"
+  | "chat_open"
+  | "chat_message"
+  | "chat_cta_click";
+```
+
+- [ ] **Step 2: Add chat analytics helpers to analytics.ts**
+
+In `web/src/lib/analytics.ts`, add at the end of the file:
 
 ```typescript
-export interface Account {
-  id: number;
-  username: string;
-  slug: string;
-  display_name: string;
-  avatar_url: string;
-  bio?: string;
-  social_links?: Record<string, string>;
-  platform: "twitter" | "instagram";
-  is_paid: boolean;
-  video_count?: number;
-  top_categories?: AccountCategory[];
-  videos?: Video[];
-  chat_enabled?: boolean;  // add this line
+export function trackChatOpen(slug: string): void {
+  pushEvent({ type: "chat_open", source_page: `chat:${slug}` });
+}
+
+export function trackChatMessage(slug: string): void {
+  pushEvent({ type: "chat_message", source_page: `chat:${slug}` });
+}
+
+export function trackChatCTAClick(slug: string, targetUrl: string): void {
+  pushEvent({
+    type: "chat_cta_click",
+    target_url: targetUrl,
+    source_page: `chat:${slug}`,
+  });
 }
 ```
 
-- [ ] **Step 2: Verify TypeScript compilation**
+- [ ] **Step 3: Verify TypeScript compilation**
 
 ```bash
 cd web && npx tsc --noEmit 2>&1 | head -20
 ```
 
-Expected: no new errors related to chat_enabled
+Expected: no errors
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add web/src/types/index.ts
-git commit -m "feat(types): add chat_enabled to Account interface"
+git add web/src/types/index.ts web/src/lib/analytics.ts
+git commit -m "feat(types): add chat_enabled to Account; add chat analytics event types and helpers"
 ```
 
 ---
@@ -1182,7 +1217,7 @@ Create `web/src/templates/default/ChatScreen.tsx`:
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useChatHistory, type ChatDisplayMessage, type CTAData } from "./useChatHistory";
-import { trackEvent } from "@/lib/analytics";
+import { trackChatOpen, trackChatMessage, trackChatCTAClick } from "@/lib/analytics";
 
 interface ChatScreenProps {
   slug: string;
@@ -1211,7 +1246,7 @@ export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenPr
       // Fetch greeting
       fetchGreeting();
     }
-    trackEvent("chat_open", { model_slug: slug });
+    trackChatOpen(slug);
     inputRef.current?.focus();
   }, [slug]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1255,7 +1290,7 @@ export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenPr
     addMessage(userMsg);
 
     // Track message sent
-    trackEvent("chat_message", { model_slug: slug });
+    trackChatMessage(slug);
 
     setStreaming(true);
     const assistantId = crypto.randomUUID();
@@ -1345,7 +1380,7 @@ export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenPr
   }
 
   function handleCTAClick(cta: CTAData) {
-    trackEvent("chat_cta_click", { model_slug: slug, url: cta.url });
+    trackChatCTAClick(slug, cta.url);
     window.open(cta.url, "_blank", "noopener,noreferrer");
   }
 
@@ -1448,8 +1483,6 @@ export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenPr
   );
 }
 ```
-
-Note: `trackEvent` — check existing `web/src/lib/analytics.ts` for the correct import/usage. Use the same pattern as `trackSocialClick` etc. If `trackEvent` doesn't exist as a generic function, add it or use the closest matching helper.
 
 - [ ] **Step 2: Verify TypeScript**
 
