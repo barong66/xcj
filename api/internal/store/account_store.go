@@ -33,12 +33,12 @@ func (s *AccountStore) GetByID(ctx context.Context, id int64, siteID int64, page
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, platform, username, COALESCE(slug,''), COALESCE(display_name,''),
 			COALESCE(avatar_url,''), COALESCE(bio,''), COALESCE(social_links, '{}')::text::bytea,
-			is_paid, created_at
+			is_paid, chat_enabled, created_at
 		FROM accounts WHERE id = $1
 	`, id).Scan(
 		&a.ID, &a.Platform, &a.Username, &a.Slug, &a.DisplayName,
 		&a.AvatarURL, &a.Bio, &socialLinksJSON,
-		&a.IsPaid, &a.CreatedAt,
+		&a.IsPaid, &a.ChatEnabled, &a.CreatedAt,
 	)
 	if err == nil && len(socialLinksJSON) > 0 {
 		_ = json.Unmarshal(socialLinksJSON, &a.SocialLinks)
