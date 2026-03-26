@@ -107,6 +107,7 @@ export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: C
       let cta: CTAData | undefined;
 
       let streamDone = false;
+      let hasError = false;
       while (!streamDone) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -124,6 +125,7 @@ export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: C
               setError(`${modelName} is unavailable right now, try again later.`);
               reader.cancel();
               streamDone = true;
+              hasError = true;
               break;
             }
             if (parsed.done) {
@@ -145,17 +147,22 @@ export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: C
         }
       }
 
-      // Finalize assistant message with CTA if present
-      const finalMsg: ChatDisplayMessage = {
-        id: assistantId,
-        role: "assistant",
-        content: fullContent,
-        cta,
-      };
-      setMessages((prev) =>
-        prev.map((m) => (m.id === assistantId ? finalMsg : m))
-      );
-      addMessage(finalMsg);
+      if (hasError) {
+        // Remove empty assistant placeholder on SSE error
+        setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+      } else {
+        // Finalize assistant message with CTA if present
+        const finalMsg: ChatDisplayMessage = {
+          id: assistantId,
+          role: "assistant",
+          content: fullContent,
+          cta,
+        };
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? finalMsg : m))
+        );
+        addMessage(finalMsg);
+      }
     } catch {
       setError("Something went wrong. Please try again.");
       setMessages((prev) => prev.filter((m) => m.id !== assistantId));
