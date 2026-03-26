@@ -3,6 +3,7 @@
 import Image from "next/image";
 import type { Account } from "@/types";
 import { trackSocialClick } from "@/lib/analytics";
+import { ChatButton } from "./ChatButton";
 
 interface ProfileHeaderProps {
   account: Account;
@@ -87,9 +88,12 @@ export function ProfileHeader({ account }: ProfileHeaderProps) {
         </div>
 
         <div className="flex-1 min-w-0">
-          <p className="text-[16px] font-bold text-txt truncate">
-            {displayName}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-[16px] font-bold text-txt truncate">
+              {displayName}
+            </p>
+            <ChatButton account={account} />
+          </div>
           <p className="text-[13px] text-txt-muted">@{account.username}</p>
           <p className="text-[13px] text-txt-secondary mt-1">
             <span className="font-semibold text-txt">
