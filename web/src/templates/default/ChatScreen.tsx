@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createChatHistory, type ChatDisplayMessage, type CTAData } from "./chatHistory";
 import { trackChatOpen, trackChatMessage, trackChatCTAClick } from "@/lib/analytics";
 
@@ -21,7 +21,10 @@ export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: C
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const { getHistory, addMessage, getContextMessages } = createChatHistory(slug);
+  const { getHistory, addMessage, getContextMessages } = useMemo(
+    () => createChatHistory(slug),
+    [slug]
+  );
 
   // Load history + greeting on mount
   useEffect(() => {
@@ -30,29 +33,27 @@ export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: C
       setMessages(history);
     } else {
       // Fetch greeting
-      fetchGreeting();
+      (async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/v1/chat/config?slug=${encodeURIComponent(slug)}`);
+          const json = await res.json();
+          if (json.data?.greeting) {
+            const greetMsg: ChatDisplayMessage = {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: json.data.greeting,
+            };
+            setMessages([greetMsg]);
+            addMessage(greetMsg);
+          }
+        } catch {
+          // No greeting — start with empty chat
+        }
+      })();
     }
     trackChatOpen(slug, accountId);
     inputRef.current?.focus();
-  }, [slug]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function fetchGreeting() {
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/chat/config?slug=${encodeURIComponent(slug)}`);
-      const json = await res.json();
-      if (json.data?.greeting) {
-        const greetMsg: ChatDisplayMessage = {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: json.data.greeting,
-        };
-        setMessages([greetMsg]);
-        addMessage(greetMsg);
-      }
-    } catch {
-      // No greeting — start with empty chat
-    }
-  }
+  }, [slug, accountId, getHistory, addMessage]); // all deps explicit now
 
   // Scroll to bottom when messages change
   useEffect(() => {
