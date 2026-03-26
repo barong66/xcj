@@ -18,7 +18,7 @@
 - `api/internal/store/chat_store.go` — load chat config for a model slug
 - `web/src/templates/default/ChatButton.tsx` — "💬 Chat" button (client component)
 - `web/src/templates/default/ChatScreen.tsx` — full-screen chat UI (client component)
-- `web/src/templates/default/useChatHistory.ts` — localStorage hook
+- `web/src/templates/default/chatHistory.ts` — localStorage utility
 
 **Modified files:**
 - `api/internal/config/config.go` — add XAI_API_KEY
@@ -175,7 +175,26 @@ func TestChatStore_GetChatConfig_NotFound(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Write the chat store**
+- [ ] **Step 2: Create shared helpers file (if not exists)**
+
+Check if `api/internal/store/helpers.go` exists. If not, create it:
+
+```go
+package store
+
+import "encoding/json"
+
+// unmarshalJSON is a generic helper for deserializing JSONB columns.
+// Defined here (not in individual store files) to avoid redeclaration conflicts.
+func unmarshalJSON[T any](data []byte, v *T) error {
+    if len(data) == 0 {
+        return nil
+    }
+    return json.Unmarshal(data, v)
+}
+```
+
+- [ ] **Step 3: Write the chat store**
 
 Create `api/internal/store/chat_store.go`:
 
@@ -184,7 +203,6 @@ package store
 
 import (
     "context"
-    "encoding/json"
     "errors"
 
     "github.com/jackc/pgx/v5"
@@ -228,10 +246,11 @@ func (s *ChatStore) GetChatConfig(ctx context.Context, siteID int64, slug string
             COALESCE(a.country, ''),
             COALESCE(a.social_links, '{}'),
             COALESCE(
-                (SELECT jsonb_agg(c.name)
-                 FROM account_categories ac
-                 JOIN categories c ON c.id = ac.category_id
-                 WHERE ac.account_id = a.id
+                (SELECT jsonb_agg(DISTINCT c.name)
+                 FROM video_categories vc
+                 JOIN categories c ON c.id = vc.category_id
+                 JOIN videos v ON v.id = vc.video_id
+                 WHERE v.account_id = a.id
                  LIMIT 5),
                 '[]'
             ),
@@ -263,7 +282,7 @@ func (s *ChatStore) GetChatConfig(ctx context.Context, siteID int64, slug string
         return nil, err
     }
 
-    // Unmarshal JSON fields
+    // Unmarshal JSON fields (unmarshalJSON is defined in helpers.go)
     if err := unmarshalJSON(socialLinksJSON, &cfg.SocialLinks); err != nil {
         cfg.SocialLinks = map[string]string{}
     }
@@ -272,16 +291,6 @@ func (s *ChatStore) GetChatConfig(ctx context.Context, siteID int64, slug string
     }
 
     return &cfg, nil
-}
-
-// unmarshalJSON is a generic helper for deserializing JSONB columns.
-// Add this function only if it doesn't already exist in the store package.
-// Search for "func unmarshalJSON" in api/internal/store/ first.
-func unmarshalJSON[T any](data []byte, v *T) error {
-    if len(data) == 0 {
-        return nil
-    }
-    return json.Unmarshal(data, v)
 }
 ```
 
@@ -296,8 +305,8 @@ Expected: no errors
 - [ ] **Step 4: Commit**
 
 ```bash
-git add api/internal/store/chat_store.go api/internal/store/chat_store_test.go
-git commit -m "feat(store): add ChatStore for loading model chat config"
+git add api/internal/store/helpers.go api/internal/store/chat_store.go api/internal/store/chat_store_test.go
+git commit -m "feat(store): add ChatStore and helpers for loading model chat config"
 ```
 
 ---
@@ -342,7 +351,7 @@ func withMockSite(r *http.Request) *http.Request {
 }
 
 func TestChatHandler_Config_DisabledAccount(t *testing.T) {
-    h := NewChatHandler(&mockChatStore{config: nil}, "test-key")
+    h := NewChatHandler(&mockChatStore{config: nil}, nil, "test-key")
     req := httptest.NewRequest("GET", "/api/v1/chat/config?slug=unknown", nil)
     req = withMockSite(req)
     w := httptest.NewRecorder()
@@ -363,7 +372,7 @@ func TestChatHandler_Config_DisabledAccount(t *testing.T) {
 }
 
 func TestChatHandler_Message_MissingSlug(t *testing.T) {
-    h := NewChatHandler(&mockChatStore{config: nil}, "test-key")
+    h := NewChatHandler(&mockChatStore{config: nil}, nil, "test-key")
     body := `{"model_slug":"","message":"hi","history":[]}`
     req := httptest.NewRequest("POST", "/api/v1/chat/message", strings.NewReader(body))
     req = withMockSite(req)
@@ -406,6 +415,7 @@ import (
     "strings"
     "time"
 
+    "github.com/xcj/videosite-api/internal/cache"
     "github.com/xcj/videosite-api/internal/middleware"
     "github.com/xcj/videosite-api/internal/store"
 )
@@ -429,15 +439,17 @@ type ChatConfigProvider interface {
 // ChatHandler handles AI chat requests.
 type ChatHandler struct {
     store         ChatConfigProvider
+    cache         *cache.Cache
     apiKey        string
     greetClient   *http.Client // short timeout — for greeting generation
     streamClient  *http.Client // no client-level timeout — streaming uses request context
 }
 
 // NewChatHandler creates a ChatHandler.
-func NewChatHandler(store ChatConfigProvider, apiKey string) *ChatHandler {
+func NewChatHandler(store ChatConfigProvider, c *cache.Cache, apiKey string) *ChatHandler {
     return &ChatHandler{
         store:        store,
+        cache:        c,
         apiKey:       apiKey,
         greetClient:  &http.Client{Timeout: grokTimeout},
         streamClient: &http.Client{}, // timeout managed via request context
@@ -597,6 +609,7 @@ func (h *ChatHandler) streamGrokResponse(ctx context.Context, messages []chatMes
     }
 
     var fullText strings.Builder
+    inCTATag := false // true once we see "[CTA:" start accumulating in fullText
     scanner := bufio.NewScanner(resp.Body)
 
     for scanner.Scan() {
@@ -629,8 +642,11 @@ func (h *ChatHandler) streamGrokResponse(ctx context.Context, messages []chatMes
         }
         fullText.WriteString(delta)
 
-        // Stream delta to client (skip CTA tag characters — strip at end)
-        if !strings.Contains(delta, "[CTA:") {
+        // Suppress streaming once CTA tag begins (may span multiple tokens)
+        if !inCTATag && strings.Contains(fullText.String(), "[CTA:") {
+            inCTATag = true
+        }
+        if !inCTATag {
             event, _ := json.Marshal(map[string]string{"delta": delta})
             fmt.Fprintf(w, "data: %s\n\n", event)
             flusher.Flush()
@@ -734,10 +750,18 @@ Only include this tag if you are actually promoting a link. Do not include it in
     return strings.TrimSpace(prompt)
 }
 
-// generateGreeting calls Grok once to generate an opening message.
-// Falls back to a static greeting on error.
+// generateGreeting returns a greeting for the model, using Redis cache (24h TTL).
+// Falls back to a static greeting on Grok error.
 func (h *ChatHandler) generateGreeting(ctx context.Context, cfg *store.ChatConfig) string {
-    fallback := fmt.Sprintf("Hey! 😊 So glad you stopped by...")
+    fallback := "Hey! 😊 So glad you stopped by..."
+
+    // Check Redis cache first (key: chat:greeting:{slug})
+    if h.cache != nil {
+        var cached string
+        if h.cache.GetJSON(ctx, "chat:greeting:"+cfg.Username, &cached) && cached != "" {
+            return cached
+        }
+    }
 
     if h.apiKey == "" {
         return fallback
@@ -790,6 +814,11 @@ func (h *ChatHandler) generateGreeting(ctx context.Context, cfg *store.ChatConfi
     if greeting == "" {
         return fallback
     }
+
+    // Cache in Redis for 24h to avoid repeated Grok calls on page loads
+    if h.cache != nil {
+        h.cache.SetJSON(ctx, "chat:greeting:"+cfg.Username, greeting, 24*time.Hour)
+    }
     return greeting
 }
 ```
@@ -831,14 +860,25 @@ In `NewRouter()` in `api/internal/handler/router.go`, add after the existing pub
 ```go
 // Chat routes (public, requires site detection)
 chatStore := store.NewChatStore(pool)
-chatHandler := NewChatHandler(chatStore, xaiAPIKey)
+chatHandler := NewChatHandler(chatStore, c, xaiAPIKey)
 r.Get("/chat/config", chatHandler.Config)
 r.Post("/chat/message", chatHandler.Message)
 ```
 
+Note: `c *cache.Cache` is already a parameter of `NewRouter()` — pass it directly to `NewChatHandler`. No new router parameter needed for cache.
+
 Also:
-1. Add `xaiAPIKey string` parameter to `NewRouter()` signature in `router.go`
-2. Update `api/cmd/server/main.go` to pass `cfg.XAIAPIKey` to `NewRouter()`
+1. Add `xaiAPIKey string` as the **last parameter** of `NewRouter()`, after `corsOrigins []string`:
+```go
+func NewRouter(
+    pool *pgxpool.Pool,
+    // ... existing params ...
+    adminToken string,
+    corsOrigins []string,
+    xaiAPIKey string,   // ← add here
+) http.Handler {
+```
+2. Update `api/cmd/server/main.go` to pass `cfg.XAIAPIKey` as the last argument to `NewRouter()`
 3. **WriteTimeout fix:** In `api/cmd/server/main.go`, the `http.Server` has `WriteTimeout: 30 * time.Second`. This will cut off SSE streams after 30 seconds. Change it to `WriteTimeout: 0` (disabled) to support long-lived SSE connections. The read and idle timeouts provide sufficient protection against slow clients.
 
 - [ ] **Step 2: Build to verify**
@@ -870,6 +910,59 @@ Expected:
 ```bash
 git add api/internal/handler/router.go api/cmd/server/main.go
 git commit -m "feat(api): register chat routes /api/v1/chat/config and /api/v1/chat/message"
+```
+
+---
+
+### Task 5b: Add chat_enabled to model.Account + GetBySlug query
+
+**Files:**
+- Modify: `api/internal/model/account.go`
+- Modify: `api/internal/store/account_store.go`
+
+This step is required so that the public `GET /api/v1/accounts/slug/{slug}` endpoint returns `chat_enabled`, which the Next.js SSR page uses to decide whether to render `ChatButton`.
+
+- [ ] **Step 1: Add field to model.Account**
+
+In `api/internal/model/account.go`, add to `Account` struct after `IsPaid`:
+
+```go
+ChatEnabled bool `json:"chat_enabled" db:"chat_enabled"`
+```
+
+- [ ] **Step 2: Update GetBySlug SELECT query**
+
+In `api/internal/store/account_store.go`, in the `GetBySlug` function, extend the SQL query:
+
+```go
+// Before:
+SELECT id, platform, username, COALESCE(slug,''), COALESCE(display_name,''),
+    COALESCE(avatar_url,''), COALESCE(bio,''), COALESCE(social_links, '{}')::text::bytea,
+    is_paid, created_at
+FROM accounts WHERE COALESCE(slug, username) = $1
+
+// After:
+SELECT id, platform, username, COALESCE(slug,''), COALESCE(display_name,''),
+    COALESCE(avatar_url,''), COALESCE(bio,''), COALESCE(social_links, '{}')::text::bytea,
+    is_paid, chat_enabled, created_at
+FROM accounts WHERE COALESCE(slug, username) = $1
+```
+
+And extend the `.Scan()` call to include `&a.ChatEnabled` between `&a.IsPaid` and `&a.CreatedAt`.
+
+- [ ] **Step 3: Build to verify**
+
+```bash
+cd api && go build ./...
+```
+
+Expected: no errors
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add api/internal/model/account.go api/internal/store/account_store.go
+git commit -m "feat(model): add chat_enabled to Account model and GetBySlug query"
 ```
 
 ---
@@ -1057,17 +1150,21 @@ Do not replace the entire union — only append these three lines.
 In `web/src/lib/analytics.ts`, add at the end of the file:
 
 ```typescript
-export function trackChatOpen(slug: string): void {
-  pushEvent({ type: "chat_open", source_page: `chat:${slug}` });
+// Note: account_id is required by the Go event handler (event.go line 69).
+// All three helpers must include it, otherwise the API returns 400 and events are silently lost.
+
+export function trackChatOpen(slug: string, accountId: number): void {
+  pushEvent({ type: "chat_open", account_id: accountId, source_page: `chat:${slug}` });
 }
 
-export function trackChatMessage(slug: string): void {
-  pushEvent({ type: "chat_message", source_page: `chat:${slug}` });
+export function trackChatMessage(slug: string, accountId: number): void {
+  pushEvent({ type: "chat_message", account_id: accountId, source_page: `chat:${slug}` });
 }
 
-export function trackChatCTAClick(slug: string, targetUrl: string): void {
+export function trackChatCTAClick(slug: string, accountId: number, targetUrl: string): void {
   pushEvent({
     type: "chat_cta_click",
+    account_id: accountId,
     target_url: targetUrl,
     source_page: `chat:${slug}`,
   });
@@ -1091,14 +1188,14 @@ git commit -m "feat(types): add chat_enabled to Account; add chat analytics even
 
 ---
 
-### Task 9: useChatHistory hook
+### Task 9: chatHistory utility
 
 **Files:**
-- Create: `web/src/templates/default/useChatHistory.ts`
+- Create: `web/src/templates/default/chatHistory.ts`
 
-- [ ] **Step 1: Write the hook**
+- [ ] **Step 1: Write the utility**
 
-Create `web/src/templates/default/useChatHistory.ts`:
+Create `web/src/templates/default/chatHistory.ts`:
 
 ```typescript
 "use client";
@@ -1126,7 +1223,7 @@ function storageKey(slug: string): string {
   return KEY_PREFIX + slug;
 }
 
-export function useChatHistory(slug: string) {
+export function createChatHistory(slug: string) {
   function getHistory(): ChatDisplayMessage[] {
     if (typeof window === "undefined") return [];
     try {
@@ -1146,7 +1243,7 @@ export function useChatHistory(slug: string) {
     try {
       localStorage.setItem(storageKey(slug), JSON.stringify(trimmed));
     } catch {
-      // localStorage full — clear and try again
+      // localStorage full — clear history and drop this message
       localStorage.removeItem(storageKey(slug));
     }
   }
@@ -1181,8 +1278,8 @@ Expected: no errors
 - [ ] **Step 3: Commit**
 
 ```bash
-git add web/src/templates/default/useChatHistory.ts
-git commit -m "feat(chat): add useChatHistory hook for localStorage persistence"
+git add web/src/templates/default/chatHistory.ts
+git commit -m "feat(chat): add chatHistory utility for localStorage persistence"
 ```
 
 ---
@@ -1200,11 +1297,12 @@ Create `web/src/templates/default/ChatScreen.tsx`:
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useChatHistory, type ChatDisplayMessage, type CTAData } from "./useChatHistory";
+import { createChatHistory, type ChatDisplayMessage, type CTAData } from "./chatHistory";
 import { trackChatOpen, trackChatMessage, trackChatCTAClick } from "@/lib/analytics";
 
 interface ChatScreenProps {
   slug: string;
+  accountId: number;
   modelName: string;
   avatarUrl?: string;
   onClose: () => void;
@@ -1212,14 +1310,14 @@ interface ChatScreenProps {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
-export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenProps) {
+export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: ChatScreenProps) {
   const [messages, setMessages] = useState<ChatDisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const { getHistory, addMessage, getContextMessages } = useChatHistory(slug);
+  const { getHistory, addMessage, getContextMessages } = createChatHistory(slug);
 
   // Load history + greeting on mount
   useEffect(() => {
@@ -1230,7 +1328,7 @@ export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenPr
       // Fetch greeting
       fetchGreeting();
     }
-    trackChatOpen(slug);
+    trackChatOpen(slug, accountId);
     inputRef.current?.focus();
   }, [slug]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1264,6 +1362,9 @@ export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenPr
     setInput("");
     setError(null);
 
+    // Capture context BEFORE adding user message to history (avoid duplicate in Grok context)
+    const contextHistory = getContextMessages();
+
     const userMsg: ChatDisplayMessage = {
       id: crypto.randomUUID(),
       role: "user",
@@ -1274,7 +1375,7 @@ export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenPr
     addMessage(userMsg);
 
     // Track message sent
-    trackChatMessage(slug);
+    trackChatMessage(slug, accountId);
 
     setStreaming(true);
     const assistantId = crypto.randomUUID();
@@ -1288,7 +1389,7 @@ export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenPr
         body: JSON.stringify({
           model_slug: slug,
           message: text,
-          history: getContextMessages(),
+          history: contextHistory,
         }),
       });
 
@@ -1301,7 +1402,8 @@ export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenPr
       let fullContent = "";
       let cta: CTAData | undefined;
 
-      while (true) {
+      let streamDone = false;
+      while (!streamDone) {
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -1315,11 +1417,14 @@ export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenPr
           try {
             const parsed = JSON.parse(data);
             if (parsed.error) {
-              setError("Sophia is unavailable right now, try again later.");
+              setError(`${modelName} is unavailable right now, try again later.`);
+              reader.cancel();
+              streamDone = true;
               break;
             }
             if (parsed.done) {
               if (parsed.cta) cta = parsed.cta as CTAData;
+              streamDone = true;
               break;
             }
             if (parsed.delta) {
@@ -1354,7 +1459,7 @@ export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenPr
       setStreaming(false);
       inputRef.current?.focus();
     }
-  }, [input, streaming, messages, slug, getContextMessages, addMessage]);
+  }, [input, streaming, messages, slug, accountId, getContextMessages, addMessage]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1364,7 +1469,7 @@ export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenPr
   }
 
   function handleCTAClick(cta: CTAData) {
-    trackChatCTAClick(slug, cta.url);
+    trackChatCTAClick(slug, accountId, cta.url);
     window.open(cta.url, "_blank", "noopener,noreferrer");
   }
 
@@ -1448,6 +1553,7 @@ export function ChatScreen({ slug, modelName, avatarUrl, onClose }: ChatScreenPr
             placeholder={`Message ${modelName}...`}
             rows={1}
             disabled={streaming}
+            maxLength={1000}
             className="flex-1 bg-bg-card text-txt text-[13px] placeholder:text-txt-muted rounded-2xl px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-accent border border-border disabled:opacity-50"
             style={{ maxHeight: 80 }}
           />
@@ -1499,6 +1605,7 @@ Create `web/src/templates/default/ChatButton.tsx`:
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { ChatScreen } from "./ChatScreen";
 import type { Account } from "@/types";
 
@@ -1525,13 +1632,15 @@ export function ChatButton({ account }: ChatButtonProps) {
         Chat
       </button>
 
-      {open && (
+      {open && typeof document !== "undefined" && createPortal(
         <ChatScreen
           slug={slug}
+          accountId={account.id}
           modelName={account.display_name || account.username}
           avatarUrl={account.avatar_url}
           onClose={() => setOpen(false)}
-        />
+        />,
+        document.body
       )}
     </>
   );
@@ -1664,9 +1773,10 @@ const [chatSaving, setChatSaving] = useState(false);
 
 3. In `loadAccount`, after loading account data, initialize chat state:
 ```typescript
-setChatEnabled(account.chat_enabled ?? false);
-setChatPrompt(account.chat_prompt ?? "");
-setChatAdText(account.chat_ad_text ?? "");
+// Use `data` (local variable), NOT `account` (state — not yet updated at this point)
+setChatEnabled(data.chat_enabled ?? false);
+setChatPrompt(data.chat_prompt ?? "");
+setChatAdText(data.chat_ad_text ?? "");
 ```
 
 4. Add save handler:
