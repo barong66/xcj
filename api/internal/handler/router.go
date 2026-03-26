@@ -34,6 +34,7 @@ func NewRouter(
 	s3 *s3client.Client,
 	adminToken string,
 	corsOrigins []string,
+	xaiAPIKey string,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -205,6 +206,12 @@ func NewRouter(
 		// Events.
 		r.Post("/events", eventHandler.Create)
 		r.Post("/events/batch", eventHandler.CreateBatch)
+
+		// Chat routes (public, requires site detection)
+		chatStore := store.NewChatStore(pool)
+		chatHandler := NewChatHandler(chatStore, c, xaiAPIKey)
+		r.Get("/chat/config", chatHandler.Config)
+		r.Post("/chat/message", chatHandler.Message)
 	})
 
 	return r
