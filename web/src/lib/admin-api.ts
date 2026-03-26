@@ -87,6 +87,9 @@ export interface AdminAccount {
   parse_errors: number;
   video_count: number;
   created_at: string;
+  chat_enabled: boolean;
+  chat_prompt: string | null;
+  chat_ad_text: string | null;
 }
 
 export interface AdminAccountList {
@@ -225,7 +228,7 @@ export async function createAdminAccount(data: {
 
 export async function updateAdminAccount(
   id: number,
-  data: { is_active?: boolean; is_paid?: boolean; social_links?: Record<string, string> }
+  data: { is_active?: boolean; is_paid?: boolean; social_links?: Record<string, string>; chat_enabled?: boolean; chat_prompt?: string; chat_ad_text?: string }
 ): Promise<AdminAccount> {
   return adminFetch<AdminAccount>(`/accounts/${id}`, {
     method: "PUT",

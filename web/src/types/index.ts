@@ -11,6 +11,7 @@ export interface Account {
   video_count?: number;
   top_categories?: AccountCategory[];
   videos?: Video[];
+  chat_enabled?: boolean;
 }
 
 export interface AccountSummary {
@@ -110,7 +111,10 @@ export type AnalyticsEventType =
   | "share_click"
   | "ad_landing"
   | "banner_hover"
-  | "content_click";
+  | "content_click"
+  | "chat_open"
+  | "chat_message"
+  | "chat_cta_click";
 
 export interface AnalyticsEvent {
   type: AnalyticsEventType;
