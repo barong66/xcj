@@ -42,7 +42,7 @@ func (s *ChatStore) GetChatConfig(ctx context.Context, siteID int64, slug string
 			a.id,
 			COALESCE(a.display_name, a.username),
 			a.username,
-			COALESCE(a.country, ''),
+			COALESCE(co.name, ''),
 			COALESCE(a.social_links, '{}'),
 			COALESCE(
 				(SELECT jsonb_agg(DISTINCT c.name)
@@ -56,6 +56,7 @@ func (s *ChatStore) GetChatConfig(ctx context.Context, siteID int64, slug string
 			a.chat_prompt,
 			a.chat_ad_text
 		FROM accounts a
+		LEFT JOIN countries co ON co.id = a.country_id
 		WHERE (a.slug = $1 OR a.username = $1)
 		  AND a.is_active = true
 		  AND a.chat_enabled = true
