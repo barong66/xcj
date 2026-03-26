@@ -44,6 +44,9 @@ var validEventTypes = map[string]bool{
 	"banner_click":             true,
 	"banner_hover":             true,
 	"content_click":            true,
+	"chat_open":                true,
+	"chat_message":             true,
+	"chat_cta_click":           true,
 }
 
 // conversionEventTypes are events that trigger ad network postbacks.
