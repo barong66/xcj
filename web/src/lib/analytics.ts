@@ -184,3 +184,23 @@ export function trackContentClick(
     source_page: "profile",
   });
 }
+
+// Note: account_id is required by the Go event handler (event.go line 69).
+// All three helpers must include it, otherwise the API returns 400 and events are silently lost.
+
+export function trackChatOpen(slug: string, accountId: number): void {
+  pushEvent({ type: "chat_open", account_id: accountId, source_page: `chat:${slug}` });
+}
+
+export function trackChatMessage(slug: string, accountId: number): void {
+  pushEvent({ type: "chat_message", account_id: accountId, source_page: `chat:${slug}` });
+}
+
+export function trackChatCTAClick(slug: string, accountId: number, targetUrl: string): void {
+  pushEvent({
+    type: "chat_cta_click",
+    account_id: accountId,
+    target_url: targetUrl,
+    source_page: `chat:${slug}`,
+  });
+}
