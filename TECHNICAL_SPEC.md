@@ -1,6 +1,6 @@
 # xxxaccounter — Full Technical Specification
 
-> Last updated: 2026-03-24 (Account Top Categories designed — section 14: added Account Top Categories subsection; ClickUp: https://app.clickup.com/t/869cm8qvx)
+> Last updated: 2026-03-26 (AI Chat Widget Phase 2 — Frontend Chat UI, ChatScreen SSE, ChatButton, chatHistory, admin Chat Settings tab, analytics; PR: https://github.com/barong66/xcj/pull/2; ClickUp: https://app.clickup.com/t/869cmbugc)
 > Status: Production-ready (local dev environment)
 > Админка: **xcj** | Публичный сайт: **xxxaccounter**
 
@@ -85,6 +85,9 @@ xcj/
 | parse_errors | INTEGER DEFAULT 0 | Счётчик ошибок парсинга |
 | last_parsed_at | TIMESTAMPTZ NULL | Последний парсинг |
 | max_parse_errors | INTEGER DEFAULT 5 | Порог отключения |
+| chat_enabled | BOOLEAN NOT NULL DEFAULT false | AI chat widget enabled (migration 017) |
+| chat_prompt | TEXT NULL | Custom system prompt for chat AI; auto-generated if NULL (migration 017) |
+| chat_ad_text | TEXT NULL | Ad text injected by AI as CTA at end of chat response (migration 017) |
 | created_at | TIMESTAMPTZ | |
 | updated_at | TIMESTAMPTZ | |
 
@@ -506,6 +509,15 @@ if(clicks > 0, round(conversions * 100.0 / clicks, 2), 0) AS conversion_rate
 | GET | /api/v1/accounts/{id} | Аккаунт с видео |
 | POST | /api/v1/events | Одно аналитическое событие |
 | POST | /api/v1/events/batch | Пакет событий (до 100) |
+| GET | /api/v1/chat/config?slug={slug} | AI chat config for account: `{enabled, model_name, greeting}`. Returns `enabled:false` if account not found or `chat_enabled=false`. Greeting is a short Grok-generated message cached in Redis (TTL 1h). |
+| POST | /api/v1/chat/message | Stream AI chat response via SSE. Body: `{slug, message}`. Streams `data: {"delta":"..."}` events, ends with `data: {"done":true,"cta":{...}}`. Requires site context via X-Forwarded-Host. |
+
+**AI Chat SSE format:**
+```
+data: {"delta": "Hey there!"}
+data: {"delta": " How can I help?"}
+data: {"done": true, "cta": {"text": "Check my OF", "url": "https://onlyfans.com/..."}}
+```
 
 **Сортировка видео:** recent (по дате), popular (по просмотрам), random, promoted (по весу промо)
 
@@ -955,7 +967,7 @@ After extracting 10 frames and uploading them to R2, the parser scores them via 
 | /admin/categories | Категории |
 | /admin/websites | Список сайтов + traffic 7d колонка |
 | /admin/websites/[id] | Сайт detail: General + Content + Banners tabs |
-| /admin/accounts/[id] | Профиль аккаунта (табы: Stats (default), Fan Site Links, Promo). Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (iframe), re-grab. Promo tab также содержит: секцию "Conversion Prices" — per-event-type CPA цены для постбеков; секцию "Event IDs per Source" — per-source event_id (1-9) для каждого типа события |
+| /admin/accounts/[id] | Профиль аккаунта (табы: Stats (default), Fan Site Links, Promo, Chat Settings). Promo tab: все баннеры без пагинации, mass selection с Select All, batch deactivate/regenerate, style preview (iframe), re-grab. Promo tab также содержит: секцию "Conversion Prices" — per-event-type CPA цены для постбеков; секцию "Event IDs per Source" — per-source event_id (1-9) для каждого типа события. Chat Settings tab: toggle chat_enabled, custom chat_prompt, chat_ad_text (CTA) |
 
 #### Redirects (backward compatibility)
 
@@ -1391,6 +1403,7 @@ S3_ACCESS_KEY=...                        # R2 access key
 S3_SECRET_KEY=...                        # R2 secret key
 S3_REGION=auto                           # R2 region
 S3_PUBLIC_URL=https://media.temptguide.com  # Public CDN URL prefix
+XAI_API_KEY=...                          # xAI Grok API key (required for AI chat widget)
 ```
 
 ### Python Parser
@@ -1656,6 +1669,29 @@ GROUP BY event_date, source, event_type;
 - **Ad Sources management** (`web/src/app/admin/ad-sources/page.tsx`) — CRUD для рекламных сетей
 - **Content page** (`web/src/app/admin/content/page.tsx`) — курирование фреймов видео: accordion-список видео с извлечёнными фреймами, выбор лучшего фрейма, bulk-delete. Фильтры по source и aspect ratio. Карточки фреймов 202×360px с NeuroScore badge. Навигационный пункт "Контент" добавлен в AdminShell
 
+### 11.9 AI Chat Widget — Frontend (Phase 2)
+
+> PR: https://github.com/barong66/xcj/pull/2 | ClickUp: https://app.clickup.com/t/869cmbugc
+
+**New components (template: default):**
+
+- **ChatButton** (`web/src/templates/default/ChatButton.tsx`) — floating chat button rendered on model profile pages via `createPortal` to document.body. Opens full-screen ChatScreen overlay. Only shown when `account.chat_enabled === true`
+- **ChatScreen** (`web/src/templates/default/ChatScreen.tsx`) — full-screen chat UI with SSE streaming from `POST /api/v1/chat/{accountId}`. Features: message bubbles, typing indicator, auto-scroll, ad text CTA rendering, error handling with retry
+- **chatHistory** (`web/src/templates/default/chatHistory.ts`) — localStorage persistence utility. Stores up to 50 messages per account, returns last 20 as context for API calls. Key format: `chat_history_{accountId}`
+- **ProfileHeader integration** (`web/src/templates/default/ProfileHeader.tsx`) — ChatButton mounted inside ProfileHeader when chat is enabled for the account
+
+**Admin Chat Settings:**
+
+- **Chat Settings tab** (`web/src/app/admin/accounts/[id]/page.tsx`) — new tab on account detail page with: toggle for `chat_enabled`, textarea for custom `chat_prompt`, textarea for `chat_ad_text` (CTA injected by AI)
+- **AdminAccount type** (`web/src/lib/admin-api.ts`) — extended with `chat_enabled`, `chat_prompt`, `chat_ad_text` fields
+
+**Analytics:**
+
+- **Event types** (`web/src/types/index.ts`) — added to `AnalyticsEventType` union: `chat_open`, `chat_message`, `chat_cta_click`
+- **Helpers** (`web/src/lib/analytics.ts`) — `trackChatOpen(accountId)`, `trackChatMessage(accountId)`, `trackChatCTAClick(accountId)` — convenience wrappers that fire analytics events with account context
+
+**Dependencies:** Requires Phase 1 backend (PR #1, migration 017) for chat API endpoints and account chat columns.
+
 ---
 
 ## 12. Claude Agent System
@@ -1718,8 +1754,11 @@ web/src/templates/
     ├── BottomNav.tsx
     ├── Footer.tsx
     ├── ProfileGrid.tsx
-    ├── ProfileHeader.tsx
+    ├── ProfileHeader.tsx   — includes ChatButton when chat_enabled
     ├── SimilarModels.tsx
+    ├── ChatButton.tsx      — floating chat button (createPortal overlay)
+    ├── ChatScreen.tsx      — full-screen chat UI with SSE streaming
+    ├── chatHistory.ts      — localStorage chat persistence (50 msg max)
     ├── theme.ts           — color/spacing tokens
     ├── index.ts           — exports SiteTemplate object
     └── DESIGN.md          — design system documentation
