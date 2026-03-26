@@ -36,6 +36,9 @@ type Config struct {
 	S3SecretKey string
 	S3Region    string
 	S3PublicURL string
+
+	// xAI / Grok
+	XAIAPIKey string
 }
 
 func Load() *Config {
@@ -66,6 +69,8 @@ func Load() *Config {
 		S3SecretKey: envOrDefault("S3_SECRET_KEY", ""),
 		S3Region:    envOrDefault("S3_REGION", "auto"),
 		S3PublicURL: envOrDefault("S3_PUBLIC_URL", ""),
+
+		XAIAPIKey: envOrDefault("XAI_API_KEY", ""),
 	}
 }
 

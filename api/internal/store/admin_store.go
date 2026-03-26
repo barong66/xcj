@@ -155,6 +155,9 @@ type AdminAccount struct {
 	ParseErrors   int               `json:"parse_errors"`
 	VideoCount    int64             `json:"video_count"`
 	CreatedAt     time.Time         `json:"created_at"`
+	ChatEnabled   bool              `json:"chat_enabled"`
+	ChatPrompt    *string           `json:"chat_prompt"`
+	ChatAdText    *string           `json:"chat_ad_text"`
 }
 
 type AdminAccountList struct {
@@ -352,13 +355,15 @@ func (s *AdminStore) getAccountByID(ctx context.Context, id int64) (*AdminAccoun
 			COALESCE(a.bio,''), COALESCE(a.social_links, '{}'),
 			a.is_active, a.is_paid, a.paid_until, COALESCE(a.follower_count, 0),
 			a.last_parsed_at, a.parse_errors, a.created_at,
-			(SELECT COUNT(*) FROM videos v WHERE v.account_id = a.id AND v.is_active = true) AS video_count
+			(SELECT COUNT(*) FROM videos v WHERE v.account_id = a.id AND v.is_active = true) AS video_count,
+			COALESCE(a.chat_enabled, false), a.chat_prompt, a.chat_ad_text
 		FROM accounts a WHERE a.id = $1
 	`, id).Scan(
 		&a.ID, &a.Platform, &a.Username, &a.Slug, &a.DisplayName, &a.AvatarURL,
 		&a.Bio, &socialLinksRaw,
 		&a.IsActive, &a.IsPaid, &a.PaidUntil, &a.FollowerCount,
 		&a.LastParsedAt, &a.ParseErrors, &a.CreatedAt, &a.VideoCount,
+		&a.ChatEnabled, &a.ChatPrompt, &a.ChatAdText,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -380,6 +385,9 @@ type UpdateAccountInput struct {
 	IsActive    *bool              `json:"is_active,omitempty"`
 	IsPaid      *bool              `json:"is_paid,omitempty"`
 	SocialLinks *map[string]string `json:"social_links,omitempty"`
+	ChatEnabled *bool              `json:"chat_enabled,omitempty"`
+	ChatPrompt  *string            `json:"chat_prompt,omitempty"`
+	ChatAdText  *string            `json:"chat_ad_text,omitempty"`
 }
 
 func (s *AdminStore) UpdateAccount(ctx context.Context, id int64, input UpdateAccountInput) (*AdminAccount, error) {
@@ -421,6 +429,33 @@ func (s *AdminStore) UpdateAccount(ctx context.Context, id int64, input UpdateAc
 		)
 		if err != nil {
 			return nil, fmt.Errorf("admin_store: update social_links: %w", err)
+		}
+	}
+	if input.ChatEnabled != nil {
+		_, err := s.pool.Exec(ctx,
+			`UPDATE accounts SET chat_enabled = $2, updated_at = NOW() WHERE id = $1`,
+			id, *input.ChatEnabled,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("admin_store: update chat_enabled: %w", err)
+		}
+	}
+	if input.ChatPrompt != nil {
+		_, err := s.pool.Exec(ctx,
+			`UPDATE accounts SET chat_prompt = NULLIF($2, ''), updated_at = NOW() WHERE id = $1`,
+			id, *input.ChatPrompt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("admin_store: update chat_prompt: %w", err)
+		}
+	}
+	if input.ChatAdText != nil {
+		_, err := s.pool.Exec(ctx,
+			`UPDATE accounts SET chat_ad_text = NULLIF($2, ''), updated_at = NOW() WHERE id = $1`,
+			id, *input.ChatAdText,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("admin_store: update chat_ad_text: %w", err)
 		}
 	}
 	return s.getAccountByID(ctx, id)

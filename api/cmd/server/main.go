@@ -127,6 +127,7 @@ func main() {
 		s3,
 		cfg.AdminToken,
 		cfg.CORSOrigins,
+		cfg.XAIAPIKey,
 	)
 
 	// Create HTTP server.
@@ -134,7 +135,7 @@ func main() {
 		Addr:         ":" + cfg.Port,
 		Handler:      router,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 0,
 		IdleTimeout:  60 * time.Second,
 	}
 

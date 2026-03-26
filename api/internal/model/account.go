@@ -12,6 +12,7 @@ type Account struct {
 	Bio         string            `json:"bio,omitempty" db:"bio"`
 	SocialLinks map[string]string `json:"social_links,omitempty" db:"social_links"`
 	IsPaid      bool              `json:"is_paid" db:"is_paid"`
+	ChatEnabled bool              `json:"chat_enabled" db:"chat_enabled"`
 	CreatedAt   time.Time         `json:"created_at" db:"created_at"`
 
 	// Joined fields
