@@ -47,7 +47,7 @@ const FAN_SITES = [
   { key: "stripchat", label: "Stripchat", placeholder: "username or full URL", color: "#C23B6E" },
 ] as const;
 
-type Tab = "stats" | "links" | "promo";
+type Tab = "stats" | "links" | "promo" | "chat";
 
 function AccountProfileContent() {
   const params = useParams();
@@ -95,12 +95,21 @@ function AccountProfileContent() {
   const [statsDays, setStatsDays] = useState(30);
   const [statsLoading, setStatsLoading] = useState(false);
 
+  // Chat state
+  const [chatEnabled, setChatEnabled] = useState(false);
+  const [chatPrompt, setChatPrompt] = useState("");
+  const [chatAdText, setChatAdText] = useState("");
+  const [chatSaving, setChatSaving] = useState(false);
+
   const loadAccount = useCallback(async () => {
     try {
       setLoading(true);
       const data = await getAdminAccount(id);
       setAccount(data);
       setLinks(data.social_links || {});
+      setChatEnabled(data.chat_enabled ?? false);
+      setChatPrompt(data.chat_prompt ?? "");
+      setChatAdText(data.chat_ad_text ?? "");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to load account", "error");
     } finally {
@@ -378,6 +387,23 @@ function AccountProfileContent() {
     }
   };
 
+  const saveChatSettings = useCallback(async () => {
+    if (!account) return;
+    setChatSaving(true);
+    try {
+      await updateAdminAccount(id, {
+        chat_enabled: chatEnabled,
+        chat_prompt: chatPrompt,
+        chat_ad_text: chatAdText,
+      });
+      toast("Chat settings saved", "success");
+    } catch {
+      toast("Failed to save chat settings", "error");
+    } finally {
+      setChatSaving(false);
+    }
+  }, [id, account, chatEnabled, chatPrompt, chatAdText, toast]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -534,6 +560,16 @@ function AccountProfileContent() {
           }`}
         >
           Promo
+        </button>
+        <button
+          onClick={() => setActiveTab("chat")}
+          className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+            activeTab === "chat"
+              ? "border-accent text-white"
+              : "border-transparent text-[#6b6b6b] hover:text-[#a0a0a0]"
+          }`}
+        >
+          Chat
         </button>
       </div>
 
@@ -1005,6 +1041,66 @@ function AccountProfileContent() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === "chat" && (
+        <div className="space-y-4 p-4">
+          <h3 className="text-sm font-semibold text-txt uppercase tracking-wide">Chat Settings</h3>
+
+          {/* Toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-txt">Chat enabled</p>
+              <p className="text-xs text-txt-muted">Show &quot;Chat&quot; button on profile page</p>
+            </div>
+            <button
+              onClick={() => setChatEnabled(!chatEnabled)}
+              className={`w-10 h-6 rounded-full transition-colors ${chatEnabled ? "bg-accent" : "bg-bg-card border border-border"}`}
+            >
+              <span className={`block w-4 h-4 rounded-full bg-white shadow transition-transform mx-1 ${chatEnabled ? "translate-x-4" : "translate-x-0"}`} />
+            </button>
+          </div>
+
+          {/* Custom prompt */}
+          <div>
+            <label className="block text-xs font-medium text-txt-muted mb-1">
+              Custom prompt (optional)
+            </label>
+            <textarea
+              value={chatPrompt}
+              onChange={(e) => setChatPrompt(e.target.value)}
+              maxLength={2000}
+              rows={6}
+              placeholder="Leave empty to auto-generate from model data"
+              className="w-full bg-bg-card border border-border rounded-lg px-3 py-2 text-sm text-txt placeholder:text-txt-muted focus:outline-none focus:ring-1 focus:ring-accent resize-y"
+            />
+            <p className="text-xs text-txt-muted mt-1">{chatPrompt.length}/2000</p>
+          </div>
+
+          {/* Ad message */}
+          <div>
+            <label className="block text-xs font-medium text-txt-muted mb-1">
+              Ad message (optional)
+            </label>
+            <textarea
+              value={chatAdText}
+              onChange={(e) => setChatAdText(e.target.value)}
+              maxLength={500}
+              rows={2}
+              placeholder="Leave empty — agent will use model's social links"
+              className="w-full bg-bg-card border border-border rounded-lg px-3 py-2 text-sm text-txt placeholder:text-txt-muted focus:outline-none focus:ring-1 focus:ring-accent resize-y"
+            />
+            <p className="text-xs text-txt-muted mt-1">{chatAdText.length}/500</p>
+          </div>
+
+          <button
+            onClick={saveChatSettings}
+            disabled={chatSaving}
+            className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-lg disabled:opacity-50 hover:bg-accent/90 transition-colors"
+          >
+            {chatSaving ? "Saving..." : "Save Chat Settings"}
+          </button>
         </div>
       )}
 
