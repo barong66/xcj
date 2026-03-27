@@ -10,17 +10,31 @@ interface ChatScreenProps {
   modelName: string;
   avatarUrl?: string;
   onClose: () => void;
+  visible: boolean;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
-export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: ChatScreenProps) {
+/** Format timestamp for display between message groups */
+function formatTime(date: Date): string {
+  const now = new Date();
+  const hours = date.getHours().toString().padStart(2, "0");
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  const isToday = date.toDateString() === now.toDateString();
+  return isToday ? `Today ${hours}:${minutes}` : `${hours}:${minutes}`;
+}
+
+export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose, visible }: ChatScreenProps) {
   const [messages, setMessages] = useState<ChatDisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [messageCount, setMessageCount] = useState(0); // tracks count for fade-in
+  const mountTime = useRef(new Date());
   const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const { getHistory, addMessage, getContextMessages } = useMemo(
     () => createChatHistory(slug),
     [slug]
@@ -31,8 +45,8 @@ export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: C
     const history = getHistory();
     if (history.length > 0) {
       setMessages(history);
+      setMessageCount(history.length);
     } else {
-      // Fetch greeting
       (async () => {
         try {
           const res = await fetch(`${API_BASE}/api/v1/chat/config?slug=${encodeURIComponent(slug)}`);
@@ -44,6 +58,7 @@ export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: C
               content: json.data.greeting,
             };
             setMessages([greetMsg]);
+            setMessageCount(1);
             addMessage(greetMsg);
           }
         } catch {
@@ -53,12 +68,57 @@ export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: C
     }
     trackChatOpen(slug, accountId);
     inputRef.current?.focus();
-  }, [slug, accountId, getHistory, addMessage]); // all deps explicit now
+  }, [slug, accountId, getHistory, addMessage]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Track message count for fade-in animation
+  useEffect(() => {
+    if (messages.length > messageCount) {
+      setMessageCount(messages.length);
+    }
+  }, [messages.length, messageCount]);
+
+  // Swipe down to close (only from header/drag-handle area)
+  useEffect(() => {
+    const header = headerRef.current;
+    const panel = panelRef.current;
+    if (!header || !panel) return;
+    let startY = 0;
+    let currentY = 0;
+
+    function onTouchStart(e: TouchEvent) {
+      startY = e.touches[0].clientY;
+      currentY = startY;
+    }
+    function onTouchMove(e: TouchEvent) {
+      currentY = e.touches[0].clientY;
+      const delta = currentY - startY;
+      if (delta > 0 && panel) {
+        panel.style.transform = `translateY(${delta}px)`;
+      }
+    }
+    function onTouchEnd() {
+      const delta = currentY - startY;
+      if (delta > 100) {
+        onClose();
+      } else if (panel) {
+        panel.style.transform = "";
+      }
+    }
+
+    header.addEventListener("touchstart", onTouchStart, { passive: true });
+    header.addEventListener("touchmove", onTouchMove, { passive: true });
+    header.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      header.removeEventListener("touchstart", onTouchStart);
+      header.removeEventListener("touchmove", onTouchMove);
+      header.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [onClose]);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -67,7 +127,6 @@ export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: C
     setInput("");
     setError(null);
 
-    // Capture context BEFORE adding user message to history (avoid duplicate in Grok context)
     const contextHistory = getContextMessages();
 
     const userMsg: ChatDisplayMessage = {
@@ -79,7 +138,6 @@ export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: C
     setMessages(updatedMessages);
     addMessage(userMsg);
 
-    // Track message sent
     trackChatMessage(slug, accountId);
 
     setStreaming(true);
@@ -149,10 +207,8 @@ export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: C
       }
 
       if (hasError) {
-        // Remove empty assistant placeholder on SSE error
         setMessages((prev) => prev.filter((m) => m.id !== assistantId));
       } else {
-        // Finalize assistant message with CTA if present
         const finalMsg: ChatDisplayMessage = {
           id: assistantId,
           role: "assistant",
@@ -186,99 +242,225 @@ export function ChatScreen({ slug, accountId, modelName, avatarUrl, onClose }: C
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-bg" style={{ maxWidth: 430, margin: "0 auto" }}>
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-bg-elevated border-b border-border shrink-0">
-        <div className="relative shrink-0">
-          <div className="w-9 h-9 rounded-full overflow-hidden bg-bg-card">
-            {avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={avatarUrl} alt={modelName} className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-accent font-bold text-sm">
-                {modelName.charAt(0).toUpperCase()}
-              </div>
-            )}
-          </div>
-          <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border border-bg-elevated" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-[14px] font-semibold text-txt truncate">{modelName}</p>
-          <p className="text-[11px] text-green-500">● online now</p>
-        </div>
-        <button
-          onClick={onClose}
-          className="w-8 h-8 flex items-center justify-center text-txt-muted hover:text-txt rounded-full hover:bg-bg-card transition-colors"
-          aria-label="Close chat"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
+    <div className="fixed inset-0 z-50 flex items-end justify-center">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 transition-opacity duration-300"
+        style={{
+          backgroundColor: "rgba(0,0,0,0.5)",
+          opacity: visible ? 1 : 0,
+        }}
+        onClick={onClose}
+      />
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {messages.map((msg) => (
-          <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div className="max-w-[80%] space-y-2">
-              <div
-                className={`px-3 py-2 rounded-2xl text-[13px] leading-[1.5] ${
-                  msg.role === "user"
-                    ? "bg-accent text-white rounded-br-sm"
-                    : "bg-bg-elevated text-txt rounded-bl-sm border border-border"
-                }`}
-              >
-                {msg.content || (streaming && msg.role === "assistant" && messages[messages.length - 1]?.id === msg.id ? (
-                  <span className="inline-flex gap-1">
-                    <span className="w-1.5 h-1.5 bg-txt-muted rounded-full animate-bounce [animation-delay:0ms]" />
-                    <span className="w-1.5 h-1.5 bg-txt-muted rounded-full animate-bounce [animation-delay:150ms]" />
-                    <span className="w-1.5 h-1.5 bg-txt-muted rounded-full animate-bounce [animation-delay:300ms]" />
-                  </span>
-                ) : null)}
-              </div>
-              {msg.cta && (
-                <button
-                  onClick={() => handleCTAClick(msg.cta!)}
-                  className="block w-full px-3 py-2 text-[12px] font-semibold text-accent border border-accent rounded-xl hover:bg-accent hover:text-white transition-colors text-left"
-                >
-                  {msg.cta.text} →
-                </button>
+      {/* Scoped styles for placeholder and fade-in animation */}
+      <style>{`
+        .ig-chat-input::placeholder { color: #8E8E8E; opacity: 1; }
+        @keyframes igFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes igDotBounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+        .ig-msg-new { animation: igFadeIn 150ms ease-out forwards; }
+      `}</style>
+
+      {/* Bottom Sheet Panel */}
+      <div
+        ref={panelRef}
+        className="relative w-full flex flex-col"
+        style={{
+          maxWidth: 430,
+          height: "85vh",
+          backgroundColor: "#000",
+          borderRadius: "16px 16px 0 0",
+          transform: visible ? "translateY(0)" : "translateY(100%)",
+          transitionProperty: "transform",
+          transitionTimingFunction: visible ? "cubic-bezier(0.32,0.72,0,1)" : "ease-in",
+          transitionDuration: visible ? "300ms" : "200ms",
+        }}
+      >
+        {/* Drag handle + Header (swipe target) */}
+        <div ref={headerRef} className="shrink-0">
+          <div className="flex justify-center pt-2 pb-0">
+            <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: "#3a3a3a" }} />
+          </div>
+          <div
+            className="flex items-center gap-3 px-4"
+            style={{ height: 52, borderBottom: "1px solid #262626" }}
+          >
+          {/* Close button */}
+          <button
+            onClick={onClose}
+            className="shrink-0 flex items-center justify-center"
+            style={{ width: 32, height: 32 }}
+            aria-label="Close chat"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round">
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+
+          {/* Avatar */}
+          <div className="relative shrink-0">
+            <div className="overflow-hidden rounded-full" style={{ width: 32, height: 32, backgroundColor: "#262626" }}>
+              {avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={avatarUrl} alt={modelName} className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-white font-bold text-sm">
+                  {modelName.charAt(0).toUpperCase()}
+                </div>
               )}
             </div>
+            <span
+              className="absolute rounded-full"
+              style={{
+                width: 10,
+                height: 10,
+                backgroundColor: "#00D26A",
+                border: "2px solid #000",
+                bottom: -1,
+                right: -1,
+              }}
+            />
           </div>
-        ))}
-        {error && (
-          <p className="text-center text-[12px] text-red-400 py-2">{error}</p>
-        )}
-        <div ref={bottomRef} />
-      </div>
 
-      {/* Input */}
-      <div className="px-3 py-3 bg-bg-elevated border-t border-border shrink-0">
-        <div className="flex gap-2 items-end">
-          <textarea
+          {/* Name + status */}
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-white truncate" style={{ fontSize: 15 }}>{modelName}</p>
+            <p style={{ fontSize: 12, color: "#8E8E8E" }}>Active now</p>
+          </div>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-4 py-4" style={{ backgroundColor: "#000" }}>
+          <div className="flex flex-col gap-2">
+            {/* Timestamp at start of conversation */}
+            {messages.length > 0 && (
+              <p className="text-center py-2" style={{ fontSize: 11, color: "#8E8E8E" }}>
+                {formatTime(mountTime.current)}
+              </p>
+            )}
+
+            {messages.map((msg, idx) => {
+              const isUser = msg.role === "user";
+              const isEmpty = !msg.content;
+              const isLastMsg = idx === messages.length - 1;
+              const isStreamingThis = streaming && isLastMsg && msg.role === "assistant";
+              // Apply fade-in animation only to newly added messages
+              const isNew = idx >= messageCount - 1 && messageCount > 1;
+
+              return (
+                <div
+                  key={msg.id}
+                  className={`flex ${isUser ? "justify-end" : "justify-start"} items-end gap-2 ${isNew ? "ig-msg-new" : ""}`}
+                >
+                  {/* Model avatar */}
+                  {!isUser && (
+                    <div className="shrink-0 overflow-hidden rounded-full" style={{ width: 28, height: 28, backgroundColor: "#262626" }}>
+                      {avatarUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={avatarUrl} alt={modelName} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-white font-bold" style={{ fontSize: 11 }}>
+                          {modelName.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div style={{ maxWidth: "75%" }} className="space-y-2">
+                    <div
+                      className="text-white"
+                      style={{
+                        padding: "8px 12px",
+                        fontSize: 14,
+                        lineHeight: 1.45,
+                        borderRadius: isUser ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+                        ...(isUser
+                          ? { background: "linear-gradient(to right, #6C5CE7, #0095F6)" }
+                          : { backgroundColor: "#262626" }
+                        ),
+                      }}
+                    >
+                      {isEmpty && isStreamingThis ? (
+                        <span className="inline-flex gap-1 items-center" style={{ height: 20 }}>
+                          <span className="rounded-full" style={{ width: 6, height: 6, backgroundColor: "#8E8E8E", animation: "igDotBounce 0.6s infinite ease-in-out" }} />
+                          <span className="rounded-full" style={{ width: 6, height: 6, backgroundColor: "#8E8E8E", animation: "igDotBounce 0.6s infinite ease-in-out 0.15s" }} />
+                          <span className="rounded-full" style={{ width: 6, height: 6, backgroundColor: "#8E8E8E", animation: "igDotBounce 0.6s infinite ease-in-out 0.3s" }} />
+                        </span>
+                      ) : (
+                        msg.content
+                      )}
+                    </div>
+
+                    {/* CTA Button */}
+                    {msg.cta && (
+                      <button
+                        onClick={() => handleCTAClick(msg.cta!)}
+                        className="w-full text-left text-white font-semibold hover:opacity-80 transition-opacity"
+                        style={{
+                          padding: "8px 12px",
+                          fontSize: 13,
+                          backgroundColor: "#262626",
+                          border: "1px solid #363636",
+                          borderRadius: 9999,
+                        }}
+                      >
+                        {msg.cta.text} →
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {error && (
+              <p className="text-center py-2" style={{ fontSize: 12, color: "#FF4444" }}>{error}</p>
+            )}
+            <div ref={bottomRef} />
+          </div>
+        </div>
+
+        {/* Input Area */}
+        <div
+          className="shrink-0 px-3 flex items-center gap-2"
+          style={{
+            borderTop: "1px solid #262626",
+            backgroundColor: "#000",
+            paddingTop: 8,
+            paddingBottom: "max(8px, env(safe-area-inset-bottom))",
+          }}
+        >
+          <input
             ref={inputRef}
+            type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={`Message ${modelName}...`}
-            rows={1}
+            placeholder="Message..."
             disabled={streaming}
             maxLength={1000}
-            className="flex-1 bg-bg-card text-txt text-[13px] placeholder:text-txt-muted rounded-2xl px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-accent border border-border disabled:opacity-50"
-            style={{ maxHeight: 80 }}
+            className="ig-chat-input flex-1 text-white focus:outline-none disabled:opacity-50"
+            style={{
+              backgroundColor: "#262626",
+              borderRadius: 9999,
+              padding: "10px 16px",
+              fontSize: 14,
+              border: "none",
+            }}
           />
-          <button
-            onClick={sendMessage}
-            disabled={!input.trim() || streaming}
-            className="w-9 h-9 shrink-0 flex items-center justify-center bg-accent text-white rounded-full disabled:opacity-40 hover:bg-accent/90 transition-colors"
-            aria-label="Send message"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-            </svg>
-          </button>
+          {input.trim() && (
+            <button
+              onClick={sendMessage}
+              disabled={streaming}
+              className="shrink-0 flex items-center justify-center disabled:opacity-40"
+              style={{ width: 36, height: 36 }}
+              aria-label="Send message"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" fill="#0095F6" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     </div>
